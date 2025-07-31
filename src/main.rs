@@ -41,6 +41,12 @@ pub fn test_ssa(program: &str) {
     compiler_experiments::into_ssa::into_ssa(&mut cfg);
     println!("cfg (ssa): \n{}", cfg);
 
+    let mut simplifier = compiler_experiments::simplify_ssa::Simplifier::new(&cfg);
+    simplifier.run(&mut cfg);
+
+    println!("cfg (ssa): \n{}", cfg);
+
+
     let mut gvn = compiler_experiments::gvn::Gvn::new();
     gvn.run_analyse(&cfg);
 

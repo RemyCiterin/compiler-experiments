@@ -13,3 +13,4 @@ pub mod into_ssa;
 pub mod builder;
 pub mod dominance;
 pub mod gvn;
+pub mod simplify_ssa;
