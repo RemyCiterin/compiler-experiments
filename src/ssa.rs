@@ -17,10 +17,10 @@ pub enum Instr {
     Move(Var, Var),
 
     /// Load a value from a pointer
-    Load{dest: Var, addr: Var, volatile: bool, size: u8},
+    Load{dest: Var, addr: Var, volatile: bool},
 
     /// Store a value from a pointer
-    Store{val: Var, addr: Var, volatile: bool, size: u8},
+    Store{val: Var, addr: Var, volatile: bool},
 
     /// Call a function with a given number of arguments
     Call(Var, String, Vec<Var>),
@@ -42,6 +42,16 @@ pub enum Instr {
 }
 
 impl Instr {
+    pub fn exit_block(&self) -> bool {
+        match self {
+            Self::Jump(..)
+                | Self::Branch(..)
+                | Self::Return(..)
+                => true,
+            _ => false,
+        }
+    }
+
     pub fn destination(&self) -> Option<Var> {
         match self {
             Self::Binop(ret, ..)
@@ -188,9 +198,9 @@ pub struct Cfg {
     ssa: bool,
 
     /// A set of variables representing stack locations with a size and alignment constraint
-    pub stack: Vec<(Var, usize, u8)>,
+    pub stack: Vec<Var>,
 
-    /// Represent arguments of the function
+    /// Arguments of the function
     pub args: Vec<Var>,
 }
 
@@ -277,9 +287,9 @@ impl Cfg {
         self.vars.insert(VarKind::Undef)
     }
 
-    pub fn fresh_stack_var(&mut self, size: usize, align: u8) -> Var {
+    pub fn fresh_stack_var(&mut self) -> Var {
         let var = self.vars.insert(VarKind::Stack);
-        self.stack.push((var, size, align));
+        self.stack.push(var);
         var
     }
 
@@ -287,6 +297,10 @@ impl Cfg {
         let var = self.vars.insert(VarKind::Arg);
         self.args.push(var);
         var
+    }
+
+    pub fn end_ssa(&mut self) {
+        self.ssa = false;
     }
 
     pub fn start_ssa(&mut self) {
@@ -311,7 +325,7 @@ impl Cfg {
             vars[x] = VarKind::Arg;
         }
 
-        for (x, _, _) in self.stack.iter() {
+        for x in self.stack.iter() {
             assert!(vars[*x] == VarKind::Undef);
             vars[*x] = VarKind::Stack;
         }
@@ -376,6 +390,12 @@ impl Cfg {
             self.vars = vars;
         }
 
+        // A non-empty block must exit at (and only at) it's last instruction
+        for (i, instr) in stmt.iter().enumerate() {
+            let last: bool = i == stmt.len() - 1;
+            assert!(last == instr.exit_block());
+        }
+
         for succ in self[block].succs() {
             self.preds[succ].remove(&block);
         }
@@ -424,10 +444,10 @@ impl std::fmt::Display for Instr {
                 write!(f, "{} := {} {} {}", dest, src1, op, src2),
             Instr::Unop(dest, op, src1) =>
                 write!(f, "{} := {} {}", dest, op, src1),
-            Instr::Load{dest, addr, volatile: true, size} =>
-                write!(f, "{} := [volatile {}] as u{}", dest, addr, (8 as usize) << size),
-            Instr::Load{dest, addr, volatile: false, size} =>
-                write!(f, "{} := [{}] as u{}", dest, addr, (8 as usize) << size),
+            Instr::Load{dest, addr, volatile: true} =>
+                write!(f, "{} := [volatile {}]", dest, addr),
+            Instr::Load{dest, addr, volatile: false} =>
+                write!(f, "{} := [{}]", dest, addr),
             Instr::Store{addr, val, ..} =>
                 write!(f, "[{}] := {}", addr, val),
             Instr::Move(dest, src1) =>

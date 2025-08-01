@@ -1,7 +1,7 @@
 use crate::ssa::*;
 use slotmap::*;
 
-use std::collections::HashMap;
+use std::collections::*;
 
 use crate::ast::{Binop, Unop};
 
@@ -26,10 +26,78 @@ impl std::fmt::Display for Id {
 pub enum Expr {
     Binop(Binop, Id, Id),
     Unop(Unop, Id),
-    Phi(Vec<(Id, Label)>),
+    Move(Id),
+    Phi(Vec<(Var, Label)>),
     La(String),
     Li(isize),
+    Var(Var),
 }
+
+pub type Leader = SecondaryMap<Label, SparseSecondaryMap<Id, Var>>;
+pub type AntiLeader = SecondaryMap<Label, SparseSecondaryMap<Id, Expr>>;
+pub type PhiGen = SecondaryMap<Label, SparseSecondaryMap<Id, Expr>>;
+
+impl Expr {
+    pub fn operands(&self) -> Vec<Id> {
+        match self {
+            Self::Binop(_, x, y) => vec![*x, *y],
+            Self::Unop(_, x) => vec![*x],
+            Self::Move(x) => vec![*x],
+            _ => vec![]
+        }
+    }
+
+    pub fn to_instruction(&self, leader: &HashMap<Id, Var>, dest: Var) -> Instr {
+        match self {
+            Self::Binop(binop, x, y) =>
+                Instr::Binop(dest, *binop, leader[x], leader[y]),
+            Self::Unop(unop, x) =>
+                Instr::Unop(dest, *unop, leader[x]),
+            Self::Move(x) =>
+                Instr::Move(dest, leader[x]),
+            Self::La(s) =>
+                Instr::La(dest, s.clone()),
+            Self::Li(i) =>
+                Instr::Li(dest, *i),
+            _ => panic!()
+        }
+    }
+}
+
+//pub struct ValueTable {
+//    expr2id: HashMap<Expr, Id>,
+//    blackbox: HashSet<Var>,
+//    alloc: SlotMap<Id, ()>,
+//}
+//
+//impl ValueTable {
+//    pub fn new() -> Self {
+//        Self {
+//            expr2id: HashMap::new(),
+//            blackbox: HashSet::new(),
+//            alloc: SlotMap::with_key(),
+//        }
+//    }
+//
+//    fn maybe_insert(&mut self, expr: Expr) -> Id {
+//        if !self.expr2id.contains_key(&expr) {
+//            self.expr2id.insert(expr.clone(), self.alloc.insert(()));
+//        }
+//
+//        self.expr2id[&expr]
+//    }
+//
+//    fn insert_with(&mut self, expr: Expr, id: Id) {
+//        let x = self.expr2id.insert(expr, id);
+//        assert!(x.is_none() || x.unwrap() == id);
+//    }
+//
+//    //fn maybe_insert_instr(&mut self, instr: &Instr, id2expr: HashMap<Id, Expr>) {
+//    //    match instr {
+//    //
+//    //    }
+//    //}
+//}
 
 /// Global Value Numbering
 pub struct Gvn {
@@ -58,14 +126,14 @@ impl Gvn {
                 let i2 = self.encode_var(*v2)?;
                 Some(Expr::Binop(*binop, i1, i2))
             }
-            Instr::Phi(_, vars) => {
-                let mut ret = vec![];
-                for (var, label) in vars.iter() {
-                    let i = self.encode_var(*var)?;
-                    ret.push((i, *label));
-                }
-                Some(Expr::Phi(ret))
-            }
+            //Instr::Phi(_, vars) => {
+            //    let mut ret = vec![];
+            //    for (var, label) in vars.iter() {
+            //        let i = self.encode_var(*var)?;
+            //        ret.push((i, *label));
+            //    }
+            //    Some(Expr::Phi(ret))
+            //}
             Instr::Unop(_, unop, v) => {
                 let i = self.encode_var(*v)?;
                 Some(Expr::Unop(*unop, i))

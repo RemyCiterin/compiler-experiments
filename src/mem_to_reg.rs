@@ -1,3 +1,7 @@
+//! This module introduce a pass that search for stack slots that are safe to replace by a register
+//! and introduce the necessary phi expressions and renaming to replace those stack slots by
+//! registers.
+
 use std::collections::HashSet;
 
 use slotmap::*;
@@ -5,9 +9,17 @@ use crate::dominance::*;
 use crate::ssa::*;
 
 pub struct MemToReg {
+    /// The set of stack slots to remove
     removed: HashSet<Var>,
+
+    /// Necessary phi instruction per label/variable
     phis: SecondaryMap<Label, SparseSecondaryMap<Var, Instr>>,
+
+    /// Current environment of variables in removed, as a mapping from stack slots to fresh
+    /// variables
     env: SecondaryMap<Var, Var>,
+
+    /// Dominance tree/dominance frontier
     dom: Dominance,
 }
 
@@ -34,6 +46,8 @@ impl MemToReg {
         Self { removed, dom, env, phis }
     }
 
+    /// Search for stack variables that are safe to remove: a stack variable is safe to remove iff
+    /// we only use it to load/store from/to it in a non-volatile mode
     pub fn search(&mut self, cfg: &Cfg) {
         for (_, block) in cfg.iter_blocks() {
             for instr in block.stmt.iter() {
@@ -56,6 +70,9 @@ impl MemToReg {
         } println!();
     }
 
+    /// Introduce the necessary phi expressions, note that some of those expressions are not
+    /// necessary because the introduce a phi in a block for a variable that is introduced in this
+    /// same block, so it's necessary to detect them later
     pub fn insert_phis(&mut self, cfg: &Cfg) {
         // Insert phis each times we store into a removed stack variable
 
@@ -114,6 +131,8 @@ impl MemToReg {
 
         let mut stmt = cfg[block].stmt.clone();
 
+        // Introduce a new variable (and store it into `env) each times we store into a removed
+        // stack slot. And replace each load from a removed stack slot by a move
         for instr in stmt.iter_mut() {
             if let Instr::Load{addr, dest, ..} = instr
                 && self.removed.contains(addr) {
@@ -130,6 +149,7 @@ impl MemToReg {
 
         cfg.set_block_stmt(block, stmt);
 
+        // Rename the arguments of the new phi expressions that refer to this block
         for succ in cfg[block].succs() {
             for (_, phi) in self.phis[succ].iter_mut() {
                 if let Instr::Phi(_, vars) = phi {
@@ -147,6 +167,7 @@ impl MemToReg {
 
         let env_save = std::mem::replace(&mut self.env, env);
 
+        // Recursive call on the dominator tree
         let blocks: Vec<Label> = self.dom.childrens(block).iter().cloned().collect();
 
         for b in blocks {

@@ -48,31 +48,40 @@ pub fn test_ssa(program: &str) {
 
     println!("cfg (ssa): \n{}", cfg);
 
-    // let mut simplifier = simplify_ssa::Simplifier::new(&cfg);
-    // simplifier.run(&mut cfg);
+    let mut simplifier = simplify_ssa::Simplifier::new(&cfg);
+    simplifier.run(&mut cfg);
 
-    // println!("cfg (ssa): \n{}", cfg);
+    println!("cfg (ssa): \n{}", cfg);
 
 
-    // let mut gvn = gvn::Gvn::new();
-    // gvn.run_analyse(&cfg);
+    let mut gvn = gvn::Gvn::new();
+    gvn.run_analyse(&cfg);
 
-    // gvn.show();
+    gvn.show();
 
-    // cfg.gc();
+    cfg.gc();
 
-    // let mut liveness = liveness::Liveness::new(&cfg);
-    // liveness.run(&cfg);
+    let mut liveness = liveness::Liveness::new(&cfg);
+    liveness.run(&cfg);
 
-    // let mut matrix = interference::InterferenceGraph::new(&cfg);
-    // matrix.run(&cfg, &liveness);
+    let mut matrix = interference::InterferenceGraph::new(&cfg);
+    matrix.run(&cfg, &liveness);
 
-    // for (var, _) in cfg.iter_vars() {
-    //     print!("interference({}) := [", var);
-    //     for x in matrix[var].iter() {
-    //         print!(" {}", x);
-    //     } println!(" ]");
-    // }
+    for (var, _) in cfg.iter_vars() {
+        print!("interference({}) := [", var);
+        for x in matrix[var].iter() {
+            print!(" {}", x);
+        } println!(" ]");
+    }
+
+    let mut conv = out_of_ssa::Conventionalize::new(&cfg);
+    conv.run(&mut cfg);
+
+    println!("cfg (ssa): \n{}", cfg);
+
+    conv.out_of_ssa(&mut cfg);
+
+    println!("cfg (ssa): \n{}", cfg);
 }
 
 fn main() {

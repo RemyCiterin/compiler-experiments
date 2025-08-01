@@ -90,7 +90,7 @@ impl IntoSsaTransform {
         let mut dom = Dominance::new(cfg);
         dom.run(cfg);
 
-        for (var, _, _) in cfg.stack.iter() {
+        for var in cfg.stack.iter() {
             env.insert(*var, *var);
         }
 

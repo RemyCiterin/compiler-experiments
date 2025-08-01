@@ -65,6 +65,13 @@ pub enum Stmt {
     Continue,
 }
 
+#[derive(Clone, PartialEq, PartialOrd, Eq, Ord, Hash, Debug)]
+pub enum Decl{
+    Variable(String, Expr),
+    Function(String, Vec<String>, Stmt),
+    Seq(Box<Decl>, Box<Decl>),
+}
+
 peg::parser!(pub grammar customlang() for str {
     pub rule expr() -> Expr = precedence!{
         x:(@) _ "==" _ y:@ { Expr::Binop(Binop::Equal, Box::new(x), Box::new(y)) }
@@ -107,10 +114,25 @@ peg::parser!(pub grammar customlang() for str {
     pub rule stmt() -> Stmt =
         _ s:stmt_core() _ { s }
 
+    pub rule decl_core() -> Decl = precedence!{
+        d1:(@) _ d2:@
+            { Decl::Seq(Box::new(d1), Box::new(d2)) }
+        "def" _ s:variable() _ "(" args:(_variable_() ** ",") ")" _ "{" body:stmt() "}"
+            { Decl::Function(s, args, body) }
+        "var" _ s:variable() _ ":=" e:expr() ";"
+            { Decl::Variable(s, e) }
+    }
+
+    pub rule decl() -> Decl = precedence!{
+        _ d:decl_core() _ { d }
+    }
+
     rule number() -> isize
         = n:$(['0'..='9']+) {? n.parse().or(Err("isize")) }
 
     rule variable() -> String
         = s:$(['a'..='z' | 'A'..='Z' | '_']['a'..='z' | 'A'..='Z' | '0'..='9' | '_']*) { s.into() }
 
+    rule _variable_() -> String
+        = _ s:variable() _  { s }
 });

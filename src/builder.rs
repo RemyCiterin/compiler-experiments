@@ -163,10 +163,6 @@ impl Builder {
     }
 }
 
-pub const VAR_SIZE: usize = 32;
-pub const VAR_LOG_SIZE: u8 = 2;
-pub const VAR_ALIGN: u8 = 2;
-
 pub struct Builder2 {
     cfg: Cfg,
     stmt: Vec<Instr>,
@@ -208,12 +204,12 @@ impl Builder2 {
             }
             Expr::Variable(s) => {
                 if !self.map.contains_key(&s) {
-                    let id: Var = self.cfg.fresh_stack_var(VAR_SIZE, VAR_ALIGN);
+                    let id: Var = self.cfg.fresh_stack_var();
                     self.map.insert(s.clone(), id);
                 }
 
                 let x = self.cfg.fresh_var();
-                self.stmt.push(Instr::Load{dest: x, addr: self.map[&s], volatile: false, size: VAR_LOG_SIZE});
+                self.stmt.push(Instr::Load{dest: x, addr: self.map[&s], volatile: false});
                 x
             }
             Expr::Binop(binop, lhs, rhs) => {
@@ -303,11 +299,11 @@ impl Builder2 {
                 let id = self.gen_expr(e);
 
                 if !self.map.contains_key(&s) {
-                    let id = self.cfg.fresh_stack_var(VAR_SIZE, VAR_ALIGN);
+                    let id = self.cfg.fresh_stack_var();
                     self.map.insert(s.clone(), id);
                 }
 
-                self.stmt.push(Instr::Store{addr: self.map[&s], val: id, volatile: false, size: VAR_LOG_SIZE});
+                self.stmt.push(Instr::Store{addr: self.map[&s], val: id, volatile: false});
             }
             Stmt::Break => {
                 if self.current_exit.is_none() {
