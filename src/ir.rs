@@ -414,6 +414,7 @@ impl Builder {
 
                 self.stmt.push(Instr::Move(self.map[&s], id));
             }
+            _ => panic!("unexpected")
         }
     }
 }

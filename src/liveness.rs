@@ -78,7 +78,7 @@ impl Liveness {
             let progress = self.step(cfg, block);
 
             if progress {
-                for &pred in cfg.callers(block).iter() {
+                for &pred in cfg.preds(block).iter() {
                     dirty.push(pred);
                 }
             }

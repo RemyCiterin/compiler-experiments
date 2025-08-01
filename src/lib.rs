@@ -14,3 +14,5 @@ pub mod builder;
 pub mod dominance;
 pub mod gvn;
 pub mod simplify_ssa;
+pub mod interference;
+pub mod mem_to_reg;

@@ -4,6 +4,7 @@ use crate::union_find::*;
 
 pub struct Simplifier {
     uf: UnionFind<Var>,
+    removed: Vec<Var>,
 }
 
 impl Simplifier {
@@ -16,7 +17,7 @@ impl Simplifier {
             uf.insert(var);
         }
 
-        Self { uf }
+        Self { uf, removed: Vec::new() }
     }
 
     fn keep_var(&self, v: Var) -> bool {
@@ -42,6 +43,7 @@ impl Simplifier {
                     if args.len() == 1 {
                         let new_root = *args.first().unwrap();
                         self.uf.merge(new_root, *x);
+                        self.removed.push(*x);
                         progress = true;
                     }
                 }
@@ -78,6 +80,10 @@ impl Simplifier {
             }
 
             cfg.set_block_stmt(block, stmt);
+        }
+
+        for &var in self.removed.iter() {
+            cfg.remove_var(var);
         }
     }
 }

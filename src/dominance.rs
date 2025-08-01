@@ -9,8 +9,11 @@ pub struct Dominance {
     /// reverse postorder of the blocks
     preorder: Vec<Label>,
 
-    /// dominance relation
+    /// dominance relation, as a map frmo node to parent
     dom: SecondaryMap<Label, Option<Label>>,
+
+    /// dominance relation as a map from parent to childrens
+    childrens: SecondaryMap<Label, HashSet<Label>>,
 
     frontier: SecondaryMap<Label, HashSet<Label>>,
 }
@@ -22,9 +25,11 @@ impl Dominance {
         let mut index: SecondaryMap<Label, usize> = SecondaryMap::new();
         let mut dom: SecondaryMap<Label, Option<Label>> = SecondaryMap::new();
         let mut frontier: SecondaryMap<Label, HashSet<Label>> = SecondaryMap::new();
+        let mut childrens: SecondaryMap<Label, HashSet<Label>> = SecondaryMap::new();
 
         for i in 0..order.len() {
             frontier.insert(order[i], HashSet::new());
+            childrens.insert(order[i], HashSet::new());
             index.insert(order[i], i);
             dom.insert(order[i], None);
         }
@@ -34,6 +39,7 @@ impl Dominance {
         Self {
             index,
             frontier,
+            childrens,
             preorder: order,
             dom,
         }
@@ -49,7 +55,7 @@ impl Dominance {
                 let mut new_idom: Option<Label> = None;
 
                 // assign the intersection of the processed predecessors
-                for &pred in cfg.callers(block).iter() {
+                for &pred in cfg.preds(block).iter() {
                     if self.dom[pred].is_none() { continue; }
 
                     if let Some(old) = new_idom {
@@ -67,6 +73,12 @@ impl Dominance {
 
             if !progress { break; }
         }
+
+        for &block in self.preorder.iter() {
+            if self.dom[block].is_some() && self.dom[block] != Some(block) {
+                self.childrens[self.dom[block].unwrap()].insert(block);
+            }
+        }
     }
 
     pub fn run_frontier(&mut self, cfg: &Cfg) {
@@ -74,8 +86,8 @@ impl Dominance {
 
         for block in blocks {
             if !self.reachable(block) { continue; }
-            if cfg.callers(block).len() > 1 {
-                for &pred in cfg.callers(block).iter() {
+            if cfg.preds(block).len() > 1 {
+                for &pred in cfg.preds(block).iter() {
                     let mut runner = pred;
 
                     while runner != self.idom(block) {
@@ -116,6 +128,10 @@ impl Dominance {
     /// return the immediate dominator of a block
     pub fn idom(&self, block: Label) -> Label {
         self.dom[block].unwrap()
+    }
+
+    pub fn childrens(&self, block: Label) -> &HashSet<Label> {
+        &self.childrens[block]
     }
 
     /// Return the dominance frontier of a block

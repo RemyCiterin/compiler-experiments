@@ -10,9 +10,6 @@ pub enum Instr {
     /// Unary operations
     Unop(Var, Unop, Var),
 
-    /// Allocate a stack slot and return a pointer to it
-    Alloca(Var),
-
     /// Return a value from a function call
     Return(Var),
 
@@ -20,10 +17,10 @@ pub enum Instr {
     Move(Var, Var),
 
     /// Load a value from a pointer
-    Load(Var, Var),
+    Load{dest: Var, addr: Var, volatile: bool, size: u8},
 
     /// Store a value from a pointer
-    Store(Var, Var),
+    Store{val: Var, addr: Var, volatile: bool, size: u8},
 
     /// Call a function with a given number of arguments
     Call(Var, String, Vec<Var>),
@@ -49,9 +46,8 @@ impl Instr {
         match self {
             Self::Binop(ret, ..)
                 | Self::Unop(ret, ..)
-                | Self::Alloca(ret)
                 | Self::Move(ret, ..)
-                | Self::Load(ret, ..)
+                | Self::Load{dest:ret, ..}
                 | Self::Call(ret, ..)
                 | Self::La(ret, ..)
                 | Self::Li(ret, ..)
@@ -65,9 +61,8 @@ impl Instr {
         match self {
             Self::Binop(ret, ..)
                 | Self::Unop(ret, ..)
-                | Self::Alloca(ret)
                 | Self::Move(ret, ..)
-                | Self::Load(ret, ..)
+                | Self::Load{dest: ret, ..}
                 | Self::Call(ret, ..)
                 | Self::La(ret, ..)
                 | Self::Li(ret, ..)
@@ -84,14 +79,13 @@ impl Instr {
             Self::Binop(_, _, x, y) => vec![*x,*y],
             Self::Unop(_, _, x)=> vec![*x],
             Self::Move(_, x) => vec![*x],
-            Self::Load(_, y) => vec![*y],
-            Self::Store(x, y) => vec![*x,*y],
+            Self::Load{addr: y, ..} => vec![*y],
+            Self::Store{addr: x, val: y, ..} => vec![*x,*y],
             Self::Branch(x, _, _) => vec![*x],
             Self::Return(x) => vec![*x],
             Self::Jump(_) => vec![],
             Self::Li(_, _) => vec![],
             Self::La(_, _) => vec![],
-            Self::Alloca(_) => vec![],
             Self::Call(_, _, args) => args.clone(),
             Self::Phi(_, vars) => vars.iter().map(|(v, _)| *v).collect()
         }
@@ -104,14 +98,13 @@ impl Instr {
             Self::Binop(_, _, x, y) => vec![x,y],
             Self::Unop(_, _, x)=> vec![x],
             Self::Move(_, x) => vec![x],
-            Self::Load(_, y) => vec![y],
-            Self::Store(x, y) => vec![x,y],
+            Self::Load{addr: y, ..} => vec![y],
+            Self::Store{addr: x, val: y, ..} => vec![x,y],
             Self::Branch(x, _, _) => vec![x],
             Self::Return(x) => vec![x],
             Self::Jump(_) => vec![],
             Self::Li(_, _) => vec![],
             Self::La(_, _) => vec![],
-            Self::Alloca(_) => vec![],
             Self::Call(_, _, args) => args.iter_mut().collect(),
             Self::Phi(_, vars) =>
                 vars.iter_mut().map(|(v,_)| v).collect()
@@ -150,7 +143,7 @@ pub struct Block {
 }
 
 impl Block {
-    pub fn callees(&self) -> Vec<Label> {
+    pub fn succs(&self) -> Vec<Label> {
         for instr in self.stmt.iter() {
             if instr.labels().is_empty() { continue; }
             return instr.labels();
@@ -158,6 +151,21 @@ impl Block {
 
         vec![]
     }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum VarKind {
+    /// A local variable defined in a block
+    Local(Label),
+
+    /// A stack variable defined at the function entry point
+    Stack,
+
+    /// A function argument
+    Arg,
+
+    /// This variable is not defined in the current cfg
+    Undef,
 }
 
 /// A control flow graph, each control flow graph is specific to one function or procedure,
@@ -171,13 +179,19 @@ pub struct Cfg {
     entry: Label,
 
     /// Associate a type to each variable
-    vars: SlotMap<Var, Option<Label>>,
+    vars: SlotMap<Var, VarKind>,
 
-    /// Callers of each block
-    callers: SecondaryMap<Label, BTreeSet<Label>>,
+    /// preds of each block
+    preds: SecondaryMap<Label, BTreeSet<Label>>,
 
     /// If true, then the graph is expected to be in SSA form
     ssa: bool,
+
+    /// A set of variables representing stack locations with a size and alignment constraint
+    pub stack: Vec<(Var, usize, u8)>,
+
+    /// Represent arguments of the function
+    pub args: Vec<Var>,
 }
 
 impl std::ops::Index<Label> for Cfg {
@@ -189,9 +203,9 @@ impl std::ops::Index<Label> for Cfg {
 }
 
 impl std::ops::Index<Var> for Cfg {
-    type Output = Option<Label>;
+    type Output = VarKind;
 
-    fn index(&self, name: Var) -> &Option<Label> {
+    fn index(&self, name: Var) -> &VarKind {
         &self.vars[name]
     }
 }
@@ -199,18 +213,20 @@ impl std::ops::Index<Var> for Cfg {
 impl Cfg {
     /// If ssa is set, then the SSA form will be checked during modification of the arguments
     /// and content of a block
-    pub fn new(ssa: bool) -> Self {
+    pub fn new(ssa: bool, args: Vec<Var>) -> Self {
         let mut blocks =
             SlotMap::with_key();
         let entry =
             blocks.insert(Block{stmt: vec![]});
-        let mut callers = SecondaryMap::new();
-        callers.insert(entry, BTreeSet::new());
+        let mut preds = SecondaryMap::new();
+        preds.insert(entry, BTreeSet::new());
         Self {
             ssa,
             entry,
+            args,
+            preds,
             blocks,
-            callers,
+            stack: Vec::new(),
             vars: SlotMap::with_key(),
         }
     }
@@ -219,8 +235,8 @@ impl Cfg {
         self.entry
     }
 
-    pub fn callers(&self, block: Label) -> &BTreeSet<Label> {
-        &self.callers[block]
+    pub fn preds(&self, block: Label) -> &BTreeSet<Label> {
+        &self.preds[block]
     }
 
     fn mk_preorder(&self, block: Label, order: &mut Vec<Label>, seen: &mut BTreeSet<Label>) {
@@ -228,8 +244,8 @@ impl Cfg {
         seen.insert(block);
         order.push(block);
 
-        for callee in self[block].callees() {
-            self.mk_preorder(callee, order, seen);
+        for succ in self[block].succs() {
+            self.mk_preorder(succ, order, seen);
         }
     }
 
@@ -253,25 +269,51 @@ impl Cfg {
         self.blocks.iter()
     }
 
-    pub fn iter_vars(&self) -> slotmap::basic::Iter<'_, Var, Option<Label>> {
+    pub fn iter_vars(&self) -> slotmap::basic::Iter<'_, Var, VarKind> {
         self.vars.iter()
     }
 
     pub fn fresh_var(&mut self) -> Var {
-        self.vars.insert(None)
+        self.vars.insert(VarKind::Undef)
+    }
+
+    pub fn fresh_stack_var(&mut self, size: usize, align: u8) -> Var {
+        let var = self.vars.insert(VarKind::Stack);
+        self.stack.push((var, size, align));
+        var
+    }
+
+    pub fn fresh_arg(&mut self) -> Var {
+        let var = self.vars.insert(VarKind::Arg);
+        self.args.push(var);
+        var
     }
 
     pub fn start_ssa(&mut self) {
         let mut vars = std::mem::take(&mut self.vars);
         assert!(!self.ssa);
 
+        for (_, kind) in vars.iter_mut() {
+            *kind = VarKind::Undef;
+        }
+
         for (label, block) in self.blocks.iter() {
             for instr in block.stmt.iter() {
                 if let Some(x) = instr.destination() {
-                    assert!(vars[x] == None);
-                    vars[x] = Some(label);
+                    assert!(vars[x] == VarKind::Undef);
+                    vars[x] = VarKind::Local(label);
                 }
             }
+        }
+
+        for &x in self.args.iter() {
+            assert!(vars[x] == VarKind::Undef);
+            vars[x] = VarKind::Arg;
+        }
+
+        for (x, _, _) in self.stack.iter() {
+            assert!(vars[*x] == VarKind::Undef);
+            vars[*x] = VarKind::Stack;
         }
 
         self.vars = vars;
@@ -281,8 +323,36 @@ impl Cfg {
     pub fn fresh_label(&mut self) -> Label {
         let new =
             self.blocks.insert(Block{stmt: vec![]});
-        self.callers.insert(new, BTreeSet::new());
+        self.preds.insert(new, BTreeSet::new());
         new
+    }
+
+    pub fn remove_var(&mut self, var: Var) {
+        assert!(self.vars[var] == VarKind::Undef);
+        self.vars.remove(var);
+    }
+
+    pub fn gc(&mut self) {
+        let mut seen = BTreeSet::new();
+
+        self.mk_preorder(self.entry, &mut vec![], &mut seen);
+
+        let blocks: Vec<Label> = self.blocks.iter().map(|(b,_)| b).collect();
+
+        for block in blocks {
+            if !seen.contains(&block) {
+                self.set_block_stmt(block, vec![]);
+                self.blocks.remove(block);
+            }
+        }
+
+        let vars: Vec<Var> = self.iter_vars().map(|(v,_)| v).collect();
+
+        for var in vars {
+            if self.vars[var] == VarKind::Undef {
+                self.remove_var(var);
+            }
+        }
     }
 
     pub fn set_block_stmt(&mut self, block: Label, stmt: Vec<Instr>) {
@@ -291,29 +361,29 @@ impl Cfg {
 
             for instr in self[block].stmt.iter() {
                 if let Some(x) = instr.destination() {
-                    assert!(vars[x] == Some(block));
-                    vars[x] = None;
+                    assert!(vars[x] == VarKind::Local(block));
+                    vars[x] = VarKind::Undef;
                 }
             }
 
             for instr in stmt.iter() {
                 if let Some(x) = instr.destination() {
-                    assert!(vars[x] == None);
-                    vars[x] = Some(block);
+                    assert!(vars[x] == VarKind::Undef);
+                    vars[x] = VarKind::Local(block);
                 }
             }
 
             self.vars = vars;
         }
 
-        for callee in self[block].callees() {
-            self.callers[callee].remove(&block);
+        for succ in self[block].succs() {
+            self.preds[succ].remove(&block);
         }
 
         self.blocks[block].stmt = stmt;
 
-        for callee in self[block].callees() {
-            self.callers[callee].insert(block);
+        for succ in self[block].succs() {
+            self.preds[succ].insert(block);
         }
     }
 
@@ -354,9 +424,11 @@ impl std::fmt::Display for Instr {
                 write!(f, "{} := {} {} {}", dest, src1, op, src2),
             Instr::Unop(dest, op, src1) =>
                 write!(f, "{} := {} {}", dest, op, src1),
-            Instr::Load(dest, src1) =>
-                write!(f, "{} := [{}]", dest, src1),
-            Instr::Store(addr, val) =>
+            Instr::Load{dest, addr, volatile: true, size} =>
+                write!(f, "{} := [volatile {}] as u{}", dest, addr, (8 as usize) << size),
+            Instr::Load{dest, addr, volatile: false, size} =>
+                write!(f, "{} := [{}] as u{}", dest, addr, (8 as usize) << size),
+            Instr::Store{addr, val, ..} =>
                 write!(f, "[{}] := {}", addr, val),
             Instr::Move(dest, src1) =>
                 write!(f, "{} := {}", dest, src1),
@@ -370,8 +442,6 @@ impl std::fmt::Display for Instr {
                 write!(f, "li {}, {}", x, i),
             Instr::La(x, l) =>
                 write!(f, "la {}, {}", x, l),
-            Instr::Alloca(dest) =>
-                write!(f, "{} := alloca", dest),
             Instr::Call(dest, name, args) => {
                 write!(f, "{} := {}(", dest, name)?;
                 for (i, arg) in args.iter().enumerate() {

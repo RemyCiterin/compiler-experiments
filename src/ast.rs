@@ -61,6 +61,8 @@ pub enum Stmt {
     While(Expr, Box<Stmt>),
     Ite(Expr, Box<Stmt>, Box<Stmt>),
     Return(Expr),
+    Break,
+    Continue,
 }
 
 peg::parser!(pub grammar customlang() for str {
