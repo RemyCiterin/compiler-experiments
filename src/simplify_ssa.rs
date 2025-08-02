@@ -8,7 +8,7 @@ pub struct Simplifier {
 }
 
 impl Simplifier {
-    pub fn new(cfg: &Cfg) -> Self {
+    pub fn new(cfg: &Cfg<Instr>) -> Self {
         // This simplification phase use an union find to simulate the fact that a variable has
         // been replaced by another
         let mut uf = UnionFind::new();
@@ -24,7 +24,7 @@ impl Simplifier {
         self.uf.find(v) == v
     }
 
-    fn search(&mut self, preorder: &Vec<Label>, cfg: &Cfg) -> bool {
+    fn search(&mut self, preorder: &Vec<Label>, cfg: &Cfg<Instr>) -> bool {
         let mut progress = false;
 
         // Use preorder (reverse post-order) to minimize the number of passes
@@ -53,7 +53,7 @@ impl Simplifier {
         return progress;
     }
 
-    pub fn run(&mut self, cfg: &mut Cfg) {
+    pub fn run(&mut self, cfg: &mut Cfg<Instr>) {
         let preorder = cfg.preorder();
 
         loop {

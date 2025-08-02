@@ -9,7 +9,7 @@ use slotmap::*;
 
 /// Naive SSA form generation using liveness relation, it rename each variable at the entry of each
 /// block using a phi expression
-pub fn into_ssa(cfg: &mut Cfg) {
+pub fn into_ssa(cfg: &mut Cfg<Instr>) {
     // Used to compute the translation as ssa of the output variables of each block
     let mut globals: HashMap<Label, HashMap<Var, Var>> = HashMap::new();
 
@@ -20,7 +20,7 @@ pub fn into_ssa(cfg: &mut Cfg) {
     let mut liveness = Liveness::new(cfg);
     liveness.run(cfg);
 
-    let order = cfg.preorder().clone();
+    let order = cfg.labels().clone();
 
     // Compute phis and rename variables (except in phi expressions)
     for &block in order.iter() {
@@ -84,7 +84,7 @@ pub struct IntoSsaTransform {
 }
 
 impl IntoSsaTransform {
-    pub fn new(cfg: &Cfg) -> Self {
+    pub fn new(cfg: &Cfg<Instr>) -> Self {
         let mut phis = SecondaryMap::new();
         let mut env = SecondaryMap::new();
         let mut dom = Dominance::new(cfg);
@@ -107,7 +107,7 @@ impl IntoSsaTransform {
 
     /// For each update of a variable `v` in a block `b`, insert the instruction
     /// `v := phi (v, ..., v)` at the dominance frontier of `b`
-    pub fn insert_phis(&mut self, cfg: &Cfg) {
+    pub fn insert_phis(&mut self, cfg: &Cfg<Instr>) {
         let mut phis =
             std::mem::take(&mut self.phis);
 
@@ -140,7 +140,7 @@ impl IntoSsaTransform {
         self.phis = phis;
     }
 
-    pub fn renaming(&mut self, cfg: &mut Cfg, block: Label) {
+    pub fn renaming(&mut self, cfg: &mut Cfg<Instr>, block: Label) {
         let mut env = self.env.clone();
 
         let mut useless_phi: Vec<Var> = vec![];
@@ -204,7 +204,7 @@ impl IntoSsaTransform {
         self.env = env_save;
     }
 
-    pub fn run(&mut self, cfg: &mut Cfg) {
+    pub fn run(&mut self, cfg: &mut Cfg<Instr>) {
         self.insert_phis(cfg);
         self.renaming(cfg, cfg.entry());
 

@@ -3,7 +3,7 @@ use crate::ast::*;
 use std::collections::HashMap;
 
 pub struct Builder {
-    cfg: Cfg,
+    cfg: Cfg<Instr>,
     stmt: Vec<Instr>,
     label: Label,
     map: HashMap<String, Var>,
@@ -31,7 +31,7 @@ impl Builder {
         }
     }
 
-    pub fn cfg(self) -> Cfg {
+    pub fn cfg(self) -> Cfg<Instr> {
         self.cfg
     }
 
@@ -164,7 +164,7 @@ impl Builder {
 }
 
 pub struct Builder2 {
-    cfg: Cfg,
+    cfg: Cfg<Instr>,
     stmt: Vec<Instr>,
     label: Label,
     map: HashMap<String, Var>,
@@ -191,7 +191,7 @@ impl Builder2 {
         }
     }
 
-    pub fn cfg(self) -> Cfg {
+    pub fn cfg(self) -> Cfg<Instr> {
         self.cfg
     }
 

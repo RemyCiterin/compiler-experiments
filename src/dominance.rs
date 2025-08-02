@@ -19,7 +19,7 @@ pub struct Dominance {
 }
 
 impl Dominance {
-    pub fn new(cfg: &Cfg) -> Self {
+    pub fn new<I: Instruction>(cfg: &Cfg<I>) -> Self {
         // Generate a postorder using a topo sort
         let mut order: Vec<Label> = cfg.postorder();
         let mut index: SecondaryMap<Label, usize> = SecondaryMap::new();
@@ -45,7 +45,7 @@ impl Dominance {
         }
     }
 
-    pub fn run_dom(&mut self, cfg: &Cfg) {
+    pub fn run_dom<I: Instruction>(&mut self, cfg: &Cfg<I>) {
         self.dom[cfg.entry()] = Some(cfg.entry());
 
         loop {
@@ -81,7 +81,7 @@ impl Dominance {
         }
     }
 
-    pub fn run_frontier(&mut self, cfg: &Cfg) {
+    pub fn run_frontier<I: Instruction>(&mut self, cfg: &Cfg<I>) {
         let blocks = self.preorder.clone();
 
         for block in blocks {
@@ -99,7 +99,7 @@ impl Dominance {
         }
     }
 
-    pub fn run(&mut self, cfg: &Cfg) {
+    pub fn run<I: Instruction>(&mut self, cfg: &Cfg<I>) {
         self.run_dom(cfg);
         self.run_frontier(cfg);
     }

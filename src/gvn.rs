@@ -180,7 +180,7 @@ impl Gvn {
         self.var2id.len() + self.expr2id.len() + self.alloc.len()
     }
 
-    pub fn run_analyse(&mut self, cfg: &Cfg) {
+    pub fn run_analyse(&mut self, cfg: &Cfg<Instr>) {
         let order = cfg.preorder();
 
         loop {

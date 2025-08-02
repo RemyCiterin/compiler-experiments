@@ -24,7 +24,7 @@ pub struct MemToReg {
 }
 
 impl MemToReg {
-    pub fn new(cfg: &Cfg) -> Self {
+    pub fn new(cfg: &Cfg<Instr>) -> Self {
         let mut removed = HashSet::new();
 
         for (v, kind) in cfg.iter_vars() {
@@ -48,7 +48,7 @@ impl MemToReg {
 
     /// Search for stack variables that are safe to remove: a stack variable is safe to remove iff
     /// we only use it to load/store from/to it in a non-volatile mode
-    pub fn search(&mut self, cfg: &Cfg) {
+    pub fn search(&mut self, cfg: &Cfg<Instr>) {
         for (_, block) in cfg.iter_blocks() {
             for instr in block.stmt.iter() {
                 match instr {
@@ -73,7 +73,7 @@ impl MemToReg {
     /// Introduce the necessary phi expressions, note that some of those expressions are not
     /// necessary because the introduce a phi in a block for a variable that is introduced in this
     /// same block, so it's necessary to detect them later
-    pub fn insert_phis(&mut self, cfg: &Cfg) {
+    pub fn insert_phis(&mut self, cfg: &Cfg<Instr>) {
         // Insert phis each times we store into a removed stack variable
 
         let mut phis =
@@ -109,7 +109,7 @@ impl MemToReg {
         self.phis = phis;
     }
 
-    pub fn renaming(&mut self, cfg: &mut Cfg, block: Label) {
+    pub fn renaming(&mut self, cfg: &mut Cfg<Instr>, block: Label) {
         let mut env = self.env.clone();
 
         let mut useless_phi: Vec<Var> = vec![];
@@ -177,7 +177,7 @@ impl MemToReg {
         self.env = env_save;
     }
 
-    pub fn run(&mut self, cfg: &mut Cfg) {
+    pub fn run(&mut self, cfg: &mut Cfg<Instr>) {
         self.search(cfg);
         self.insert_phis(cfg);
         self.renaming(cfg, cfg.entry());

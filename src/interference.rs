@@ -16,7 +16,7 @@ impl std::ops::Index<Var> for InterferenceGraph {
 }
 
 impl InterferenceGraph {
-    pub fn new(cfg: &Cfg) -> Self {
+    pub fn new<I: Instruction>(cfg: &Cfg<I>) -> Self {
         let mut matrix = SparseSecondaryMap::new();
 
         for (var, _) in cfg.iter_vars() {
@@ -31,7 +31,7 @@ impl InterferenceGraph {
         self.matrix[y].insert(x);
     }
 
-    pub fn run(&mut self, cfg: &Cfg, liveness: &Liveness) {
+    pub fn run<I: Instruction>(&mut self, cfg: &Cfg<I>, liveness: &Liveness) {
         for (block, _) in cfg.iter_blocks() {
             let mut lives = liveness[block].outputs.clone();
 

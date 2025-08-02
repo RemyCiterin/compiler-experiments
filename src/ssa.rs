@@ -2,6 +2,16 @@ use slotmap::*;
 use std::collections::BTreeSet;
 use crate::ast::*;
 
+pub trait Instruction: Clone + Eq + Ord + std::fmt::Display + std::hash::Hash {
+    fn operands(&self) -> Vec<Var>;
+    fn operands_mut(&mut self) -> Vec<&mut Var>;
+    fn destination(&self) -> Option<Var>;
+    fn destination_mut(&mut self) -> Option<&mut Var>;
+    fn labels(&self) -> Vec<Label>;
+    fn labels_mut(&mut self) -> Vec<&mut Label>;
+    fn exit_block(&self) -> bool;
+}
+
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum Instr {
     /// Binary operations
@@ -41,8 +51,8 @@ pub enum Instr {
     Phi(Var, Vec<(Var, Label)>),
 }
 
-impl Instr {
-    pub fn exit_block(&self) -> bool {
+impl Instruction for Instr {
+    fn exit_block(&self) -> bool {
         match self {
             Self::Jump(..)
                 | Self::Branch(..)
@@ -52,7 +62,7 @@ impl Instr {
         }
     }
 
-    pub fn destination(&self) -> Option<Var> {
+    fn destination(&self) -> Option<Var> {
         match self {
             Self::Binop(ret, ..)
                 | Self::Unop(ret, ..)
@@ -67,7 +77,7 @@ impl Instr {
         }
     }
 
-    pub fn destination_mut(&mut self) -> Option<&mut Var> {
+    fn destination_mut(&mut self) -> Option<&mut Var> {
         match self {
             Self::Binop(ret, ..)
                 | Self::Unop(ret, ..)
@@ -84,7 +94,7 @@ impl Instr {
 
     /// Return the list of operands the instruction depends on,
     /// including all the operands in the label arguments
-    pub fn operands(&self) -> Vec<Var> {
+    fn operands(&self) -> Vec<Var> {
         match self {
             Self::Binop(_, _, x, y) => vec![*x,*y],
             Self::Unop(_, _, x)=> vec![*x],
@@ -103,7 +113,7 @@ impl Instr {
 
     /// Return the list of operands the instruction depends on,
     /// including all the operands in the label arguments
-    pub fn operands_mut(&mut self) -> Vec<&mut Var> {
+    fn operands_mut(&mut self) -> Vec<&mut Var> {
         match self {
             Self::Binop(_, _, x, y) => vec![x,y],
             Self::Unop(_, _, x)=> vec![x],
@@ -121,7 +131,7 @@ impl Instr {
         }
     }
 
-    pub fn labels(&self) -> Vec<Label> {
+    fn labels(&self) -> Vec<Label> {
         match self {
             Self::Jump(label) => vec![*label],
             Self::Branch(_, l1, l2) => vec![*l1, *l2],
@@ -129,7 +139,7 @@ impl Instr {
         }
     }
 
-    pub fn labels_mut(&mut self) -> Vec<&mut Label> {
+    fn labels_mut(&mut self) -> Vec<&mut Label> {
         match self {
             Self::Jump(label) => vec![label],
             Self::Branch(_, l1, l2) => vec![l1, l2],
@@ -147,12 +157,17 @@ new_key_type!{
     pub struct Label;
 }
 
-
-pub struct Block {
-    pub stmt: Vec<Instr>,
+new_key_type!{
+    pub struct InstrId;
 }
 
-impl Block {
+
+pub struct Block<I: Instruction> {
+    pub stmt: Vec<I>,
+    pub ids: Vec<InstrId>,
+}
+
+impl<I: Instruction> Block<I> {
     pub fn succs(&self) -> Vec<Label> {
         for instr in self.stmt.iter() {
             if instr.labels().is_empty() { continue; }
@@ -180,10 +195,10 @@ pub enum VarKind {
 
 /// A control flow graph, each control flow graph is specific to one function or procedure,
 /// it contains an entry point, a set of blocks, and a set of variables
-pub struct Cfg {
+pub struct Cfg<I: Instruction> {
     /// Associate for each label the definition of it's
     /// associated block
-    blocks: SlotMap<Label, Block>,
+    blocks: SlotMap<Label, Block<I>>,
 
     /// Entry of the control flow graph
     entry: Label,
@@ -197,6 +212,10 @@ pub struct Cfg {
     /// If true, then the graph is expected to be in SSA form
     ssa: bool,
 
+    /// List all the instructions in a program, for each ID it contains
+    /// it's instruction, the label of it's block, and it's previous/next instruction in the block
+    instructions: SlotMap<InstrId, (Label, I, Option<InstrId>, Option<InstrId>)>,
+
     /// A set of variables representing stack locations with a size and alignment constraint
     pub stack: Vec<Var>,
 
@@ -204,15 +223,15 @@ pub struct Cfg {
     pub args: Vec<Var>,
 }
 
-impl std::ops::Index<Label> for Cfg {
-    type Output = Block;
+impl<I: Instruction> std::ops::Index<Label> for Cfg<I> {
+    type Output = Block<I>;
 
-    fn index(&self, name: Label) -> &Block {
+    fn index(&self, name: Label) -> &Block<I> {
         &self.blocks[name]
     }
 }
 
-impl std::ops::Index<Var> for Cfg {
+impl<I: Instruction> std::ops::Index<Var> for Cfg<I> {
     type Output = VarKind;
 
     fn index(&self, name: Var) -> &VarKind {
@@ -220,14 +239,22 @@ impl std::ops::Index<Var> for Cfg {
     }
 }
 
-impl Cfg {
+impl<I: Instruction> std::ops::Index<InstrId> for Cfg<I> {
+    type Output = I;
+
+    fn index(&self, name: InstrId) -> &I {
+        &self.instructions[name].1
+    }
+}
+
+impl<I: Instruction> Cfg<I> {
     /// If ssa is set, then the SSA form will be checked during modification of the arguments
     /// and content of a block
     pub fn new(ssa: bool, args: Vec<Var>) -> Self {
         let mut blocks =
             SlotMap::with_key();
         let entry =
-            blocks.insert(Block{stmt: vec![]});
+            blocks.insert(Block{stmt: vec![], ids: vec![]});
         let mut preds = SecondaryMap::new();
         preds.insert(entry, BTreeSet::new());
         Self {
@@ -238,6 +265,7 @@ impl Cfg {
             blocks,
             stack: Vec::new(),
             vars: SlotMap::with_key(),
+            instructions: SlotMap::with_key(),
         }
     }
 
@@ -259,12 +287,19 @@ impl Cfg {
         }
     }
 
-    /// Return the preorder (also called reverse postorder) of a control flow graph
+    /// Return the preorder (also called reverse postorder) of a control flow graph,
+    /// the returned order contains all the nodes of the graph, even if they are
+    /// unreachable
     pub fn preorder(&self) -> Vec<Label> {
         let mut seen = BTreeSet::new();
         let mut order = vec![];
 
         self.mk_preorder(self.entry, &mut order, &mut seen);
+
+        for (block, _) in self.iter_blocks() {
+            self.mk_preorder(block, &mut order, &mut seen);
+        }
+
         order
     }
 
@@ -275,7 +310,7 @@ impl Cfg {
         order
     }
 
-    pub fn iter_blocks(&self) -> slotmap::basic::Iter<'_, Label, Block> {
+    pub fn iter_blocks(&self) -> slotmap::basic::Iter<'_, Label, Block<I>> {
         self.blocks.iter()
     }
 
@@ -283,16 +318,44 @@ impl Cfg {
         self.vars.iter()
     }
 
+    pub fn iter_instr(&self)
+        -> slotmap::basic::Iter<'_, InstrId, (Label, I, Option<InstrId>, Option<InstrId>)> {
+        self.instructions.iter()
+    }
+
+    /// Return the predecessor of an instruction in it's block
+    pub fn prev_instr(&self, instr: InstrId) -> Option<InstrId> {
+        self.instructions[instr].2
+    }
+
+    /// Return the successor of an instruction in it's block
+    pub fn next_instr(&self, instr: InstrId) -> Option<InstrId> {
+        self.instructions[instr].3
+    }
+
+    /// Return the label of an instruction
+    pub fn label_instr(&self, instr: InstrId) -> Label {
+        self.instructions[instr].0
+    }
+
+    /// Return the list of labels in a control flow graph
+    pub fn labels(&self) -> Vec<Label> {
+        self.iter_blocks().map(|b| b.0).collect()
+    }
+
+    /// Return a fresh local variable
     pub fn fresh_var(&mut self) -> Var {
         self.vars.insert(VarKind::Undef)
     }
 
+    /// Return a fresh stack slot, and allocate it on the stack
     pub fn fresh_stack_var(&mut self) -> Var {
         let var = self.vars.insert(VarKind::Stack);
         self.stack.push(var);
         var
     }
 
+    /// Generate a fresh function argument
     pub fn fresh_arg(&mut self) -> Var {
         let var = self.vars.insert(VarKind::Arg);
         self.args.push(var);
@@ -334,18 +397,21 @@ impl Cfg {
         self.ssa = true;
     }
 
+    /// Generate a fresh block and return it's associated label
     pub fn fresh_label(&mut self) -> Label {
         let new =
-            self.blocks.insert(Block{stmt: vec![]});
+            self.blocks.insert(Block{stmt: vec![], ids: vec![]});
         self.preds.insert(new, BTreeSet::new());
         new
     }
 
+    /// Garbadge collect a variable from the control flow graph
     pub fn remove_var(&mut self, var: Var) {
         assert!(self.vars[var] == VarKind::Undef);
         self.vars.remove(var);
     }
 
+    /// GC all the unreachable blocks, variable from the control flow graph
     pub fn gc(&mut self) {
         let mut seen = BTreeSet::new();
 
@@ -369,7 +435,8 @@ impl Cfg {
         }
     }
 
-    pub fn set_block_stmt(&mut self, block: Label, stmt: Vec<Instr>) {
+    /// Update the body of a block
+    pub fn set_block_stmt(&mut self, block: Label, stmt: Vec<I>) {
         if self.ssa {
             let mut vars = std::mem::take(&mut self.vars);
 
@@ -390,18 +457,39 @@ impl Cfg {
             self.vars = vars;
         }
 
+        // Free all the instructions in the block
+        for i in std::mem::take(&mut self.blocks[block].ids) {
+            self.instructions.remove(i);
+        }
+
+        // Insert new instructions for the block
+        let instrs: Vec<InstrId> =
+            stmt.iter()
+            .map(|i| self.instructions.insert((block, i.clone(), None, None))).collect();
+
+        // Compute the predecessors, successors of the added instructions
+        for i in 0..stmt.len() {
+            let prev = if i != 0 {Some(instrs[i-1])} else {None};
+            let next = if i != stmt.len() - 1 {Some(instrs[i+1])} else {None};
+            self.instructions[instrs[i]].2 = prev;
+            self.instructions[instrs[i]].3 = next;
+        }
+
         // A non-empty block must exit at (and only at) it's last instruction
         for (i, instr) in stmt.iter().enumerate() {
             let last: bool = i == stmt.len() - 1;
             assert!(last == instr.exit_block());
         }
 
+        // Remove the block from the predecessors of it's old successors
         for succ in self[block].succs() {
             self.preds[succ].remove(&block);
         }
 
         self.blocks[block].stmt = stmt;
+        self.blocks[block].ids = instrs;
 
+        // Add the block as predecessor of it successors
         for succ in self[block].succs() {
             self.preds[succ].insert(block);
         }
@@ -482,7 +570,7 @@ impl std::fmt::Display for Instr {
     }
 }
 
-impl std::fmt::Display for Cfg {
+impl<I: Instruction> std::fmt::Display for Cfg<I> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "entry: {}\n", self.entry())?;
 
