@@ -17,6 +17,8 @@ impl Conventionalize {
         Self { copies }
     }
 
+    /// Conventionalize the ssa form: ensure that each phi expressions is of the form
+    /// `Phi(x0, Var(x1), ... Var(xn))` where x0, x1, ..., x2 doesn't interfer with each other
     pub fn run(&mut self, cfg: &mut Cfg<Instr>) {
         let blocks: Vec<Label> = cfg.iter_blocks().map(|(b,_)| b).collect();
 
@@ -25,10 +27,10 @@ impl Conventionalize {
 
             for instr in stmt.iter_mut() {
                 if let Instr::Phi(_, vars) = instr {
-                    for (old_var, label) in vars.iter_mut() {
+                    for (old_lit, label) in vars.iter_mut() {
                         let new_var = cfg.fresh_var();
-                        self.copies[*label].push(Instr::Move(new_var, *old_var));
-                        *old_var = new_var;
+                        self.copies[*label].push(Instr::Move(new_var, old_lit.clone()));
+                        *old_lit = Lit::Var(new_var);
                     }
                 }
             }
@@ -49,9 +51,9 @@ impl Conventionalize {
 
                 if found {
                     let tmp = cfg.fresh_var();
-                    moves.push(Instr::Move(tmp, dst));
+                    moves.push(Instr::Move(tmp, Lit::Var(dst)));
                     for copy in copies.iter_mut() {
-                        if let Instr::Move(_, src2) = copy && src2 == &dst {
+                        if let Instr::Move(_, Lit::Var(src2)) = copy && src2 == &dst {
                             *src2 = tmp;
                         }
                     }
@@ -86,7 +88,7 @@ impl Conventionalize {
                     let root = uf.find(*dest);
 
                     for (v, _) in vars.iter() {
-                        uf.merge(root, uf.find(*v));
+                        uf.merge(root, uf.find(v.as_var().unwrap()));
                     }
                 }
             }

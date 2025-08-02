@@ -31,8 +31,13 @@ pub fn into_ssa(cfg: &mut Cfg<Instr>) {
         for &var in liveness[block].inputs.iter() {
             let v = cfg.fresh_var();
             map.insert(var, v);
-            stmt.push(
-                Instr::Phi(v, cfg.preds(block).iter().map(|l| (var, *l)).collect()));
+
+            let phi_args = cfg
+                .preds(block)
+                .iter()
+                .map(|l| (Lit::Var(var), *l)).collect();
+
+            stmt.push(Instr::Phi(v, phi_args));
         }
 
         phis.insert(block, stmt);
@@ -61,7 +66,7 @@ pub fn into_ssa(cfg: &mut Cfg<Instr>) {
             match phi {
                 Instr::Phi(_, vars) => {
                     for (v, l) in vars.iter_mut() {
-                        *v = globals[l][v];
+                        *v = Lit::Var(globals[l][&v.as_var().unwrap()]);
                     }
                 }
                 _ => {}
@@ -129,7 +134,9 @@ impl IntoSsaTransform {
                 for &succ in self.dom.frontier(block) {
                     if !phis[succ].contains_key(var) {
                         let phi_args =
-                            cfg.preds(succ).iter().map(|l| (var, *l)).collect();
+                            cfg.preds(succ)
+                            .iter()
+                            .map(|l| (Lit::Var(var), *l)).collect();
                         phis[succ].insert(var, Instr::Phi(var, phi_args));
                         dirty.push(succ);
                     }
@@ -185,8 +192,8 @@ impl IntoSsaTransform {
                         // If env doesn't contains src, then this phi instruction will be deleted
                         // later cause all it's variable is not defined at idom(succ) (otherwise it
                         // must be definde at all it's predecessors)
-                        if *label == block && env.contains_key(*src) {
-                            *src = env[*src];
+                        if *label == block && env.contains_key(src.as_var().unwrap()) {
+                            *src = Lit::Var(env[src.as_var().unwrap()]);
                         }
                     }
                 }

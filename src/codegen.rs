@@ -25,7 +25,8 @@ pub trait Arch {
     /// List all the callee saved registers
     fn caller_save() -> Vec<Self::Register>;
 
-    fn entry_funct(cfg: &Cfg<Instr>, ) -> Vec<Self::Opcode>;
+    /// Declare a function using it's name, arguments, stack variables
+    fn declare_function(cfg: &Cfg<Instr>, ) -> Vec<Self::Opcode>;
 
     //fn entry(cfg: &Cfg<Instr>, coloring: )
     //fn encode_block(stmt: Box<Instr>, coloring: ) -> Vec<Self::Opcode>;

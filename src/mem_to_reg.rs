@@ -54,7 +54,9 @@ impl MemToReg {
                 match instr {
                     Instr::Load{volatile: false, ..} => {}
                     Instr::Store{val, volatile: false, ..} => {
-                        self.removed.remove(val);
+                        if let Some(x) = val.as_var() {
+                            self.removed.remove(&x);
+                        }
                     }
                     _ => {
                         for x in instr.operands() {
@@ -86,7 +88,8 @@ impl MemToReg {
 
         for (label, block) in cfg.iter_blocks() {
             for instr in block.stmt.iter() {
-                if let Instr::Store{addr, ..} = instr && self.removed.contains(addr) {
+                if let Instr::Store{addr: Lit::Var(addr), ..} = instr
+                    && self.removed.contains(addr) {
                     queue[*addr].push(label);
                 }
             }
@@ -96,8 +99,10 @@ impl MemToReg {
             while let Some(block) = dirty.pop() {
                 for &succ in self.dom.frontier(block) {
                     if !phis[succ].contains_key(var) {
-                        let phi_args =
-                            cfg.preds(succ).iter().map(|l|(var,*l)).collect();
+                        let phi_args = cfg
+                            .preds(succ)
+                            .iter()
+                            .map(|l|(Lit::Var(var),*l)).collect();
 
                         phis[succ].insert(var, Instr::Phi(var, phi_args));
                         dirty.push(succ);
@@ -134,16 +139,16 @@ impl MemToReg {
         // Introduce a new variable (and store it into `env) each times we store into a removed
         // stack slot. And replace each load from a removed stack slot by a move
         for instr in stmt.iter_mut() {
-            if let Instr::Load{addr, dest, ..} = instr
+            if let Instr::Load{addr: Lit::Var(addr), dest, ..} = instr
                 && self.removed.contains(addr) {
-                *instr = Instr::Move(*dest, env[*addr]);
+                *instr = Instr::Move(*dest, Lit::Var(env[*addr]));
             }
 
-            if let Instr::Store{addr, val, ..} = instr
+            if let Instr::Store{addr: Lit::Var(addr), val, ..} = instr
                 && self.removed.contains(addr) {
                 let new_dest = cfg.fresh_var();
                 env.insert(*addr, new_dest);
-                *instr = Instr::Move(new_dest, *val);
+                *instr = Instr::Move(new_dest, val.clone());
             }
         }
 
@@ -157,8 +162,8 @@ impl MemToReg {
                         // If env doesn't contains src, then this phi instruction will be deleted
                         // later cause all it's variable is not defined at idom(succ) (otherwise it
                         // must be definde at all it's predecessors)
-                        if *label == block && env.contains_key(*src) {
-                            *src = env[*src];
+                        if *label == block && env.contains_key(src.as_var().unwrap()) {
+                            *src = Lit::Var(env[src.as_var().unwrap()]);
                         }
                     }
                 }

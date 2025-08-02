@@ -39,7 +39,7 @@ impl Builder {
         match expr {
             Expr::Constant(i) => {
                 let id: Var = self.cfg.fresh_var();
-                self.stmt.push(Instr::Li(id, i));
+                self.stmt.push(Instr::Move(id, Lit::Int(i)));
                 id
             }
             Expr::Variable(s) => {
@@ -54,20 +54,20 @@ impl Builder {
                 let l: Var = self.gen_expr(*lhs);
                 let r: Var  = self.gen_expr(*rhs);
                 let id: Var = self.cfg.fresh_var();
-                self.stmt.push(Instr::Binop(id, binop, l, r));
+                self.stmt.push(Instr::Binop(id, binop, Lit::Var(l), Lit::Var(r)));
                 id
             }
             Expr::Unop(unop,x) => {
                 let y: Var = self.gen_expr(*x);
                 let id: Var = self.cfg.fresh_var();
-                self.stmt.push(Instr::Unop(id, unop, y));
+                self.stmt.push(Instr::Unop(id, unop, Lit::Var(y)));
                 id
             }
         }
     }
 
     pub fn gen_branch(&mut self, cond: Var, l1: Label, l2: Label) {
-        self.stmt.push(Instr::Branch(cond, l1, l2));
+        self.stmt.push(Instr::Branch(Lit::Var(cond), l1, l2));
         self.cfg.set_block_stmt(self.label, std::mem::take(&mut self.stmt));
     }
 
@@ -77,7 +77,7 @@ impl Builder {
     }
 
     pub fn gen_return(&mut self, id: Var) {
-        self.stmt.push(Instr::Return(id));
+        self.stmt.push(Instr::Return(Lit::Var(id)));
         self.cfg.set_block_stmt(self.label, std::mem::take(&mut self.stmt));
     }
 
@@ -141,7 +141,7 @@ impl Builder {
                     self.map.insert(s.clone(), id);
                 }
 
-                self.stmt.push(Instr::Move(self.map[&s], id));
+                self.stmt.push(Instr::Move(self.map[&s], Lit::Var(id)));
             }
             Stmt::Break => {
                 if self.current_exit.is_none() {
@@ -199,7 +199,7 @@ impl Builder2 {
         match expr {
             Expr::Constant(i) => {
                 let id: Var = self.cfg.fresh_var();
-                self.stmt.push(Instr::Li(id, i));
+                self.stmt.push(Instr::Move(id, Lit::Int(i)));
                 id
             }
             Expr::Variable(s) => {
@@ -209,27 +209,28 @@ impl Builder2 {
                 }
 
                 let x = self.cfg.fresh_var();
-                self.stmt.push(Instr::Load{dest: x, addr: self.map[&s], volatile: false});
+                self.stmt.push(
+                    Instr::Load{dest: x, addr: Lit::Var(self.map[&s]), volatile: false});
                 x
             }
             Expr::Binop(binop, lhs, rhs) => {
                 let l: Var = self.gen_expr(*lhs);
                 let r: Var  = self.gen_expr(*rhs);
                 let id: Var = self.cfg.fresh_var();
-                self.stmt.push(Instr::Binop(id, binop, l, r));
+                self.stmt.push(Instr::Binop(id, binop, Lit::Var(l), Lit::Var(r)));
                 id
             }
             Expr::Unop(unop,x) => {
                 let y: Var = self.gen_expr(*x);
                 let id: Var = self.cfg.fresh_var();
-                self.stmt.push(Instr::Unop(id, unop, y));
+                self.stmt.push(Instr::Unop(id, unop, Lit::Var(y)));
                 id
             }
         }
     }
 
     pub fn gen_branch(&mut self, cond: Var, l1: Label, l2: Label) {
-        self.stmt.push(Instr::Branch(cond, l1, l2));
+        self.stmt.push(Instr::Branch(Lit::Var(cond), l1, l2));
         self.cfg.set_block_stmt(self.label, std::mem::take(&mut self.stmt));
     }
 
@@ -239,7 +240,7 @@ impl Builder2 {
     }
 
     pub fn gen_return(&mut self, id: Var) {
-        self.stmt.push(Instr::Return(id));
+        self.stmt.push(Instr::Return(Lit::Var(id)));
         self.cfg.set_block_stmt(self.label, std::mem::take(&mut self.stmt));
     }
 
@@ -303,7 +304,8 @@ impl Builder2 {
                     self.map.insert(s.clone(), id);
                 }
 
-                self.stmt.push(Instr::Store{addr: self.map[&s], val: id, volatile: false});
+                self.stmt.push(
+                    Instr::Store{addr: Lit::Var(self.map[&s]), val: Lit::Var(id), volatile: false});
             }
             Stmt::Break => {
                 if self.current_exit.is_none() {

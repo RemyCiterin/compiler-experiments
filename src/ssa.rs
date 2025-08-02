@@ -3,52 +3,89 @@ use std::collections::BTreeSet;
 use crate::ast::*;
 
 pub trait Instruction: Clone + Eq + Ord + std::fmt::Display + std::hash::Hash {
-    fn operands(&self) -> Vec<Var>;
-    fn operands_mut(&mut self) -> Vec<&mut Var>;
+    fn literals(&self) -> Vec<Lit>;
+    fn literals_mut(&mut self) -> Vec<&mut Lit>;
     fn destination(&self) -> Option<Var>;
     fn destination_mut(&mut self) -> Option<&mut Var>;
     fn labels(&self) -> Vec<Label>;
     fn labels_mut(&mut self) -> Vec<&mut Label>;
     fn exit_block(&self) -> bool;
+
+    fn operands(&self) -> Vec<Var> {
+        self.literals().into_iter().filter_map(|v| v.as_var()).collect()
+    }
+
+    fn operands_mut(&mut self) -> Vec<&mut Var> {
+        self.literals_mut().into_iter().filter_map(|v| v.as_var_mut()).collect()
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub enum Lit {
+    /// Define the address of a symbol
+    Addr(String),
+
+    /// Define an integer constant
+    Int(isize),
+
+    /// A value from a variable (a virtual register)
+    Var(Var),
+}
+
+impl Lit {
+    pub fn as_var(&self) -> Option<Var> {
+        match self {
+            Lit::Var(var) => Some(*var),
+            _ => None
+        }
+    }
+
+    pub fn as_var_mut(&mut self) -> Option<&mut Var> {
+        match self {
+            Lit::Var(var) => Some(var),
+            _ => None
+        }
+    }
+
+    pub fn when_var(&self, f: impl FnOnce(Var) -> Var) -> Self {
+        match self {
+            Lit::Var(x) => Lit::Var(f(*x)),
+            _ => self.clone()
+        }
+    }
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum Instr {
     /// Binary operations
-    Binop(Var, Binop, Var, Var),
+    Binop(Var, Binop, Lit, Lit),
 
     /// Unary operations
-    Unop(Var, Unop, Var),
+    Unop(Var, Unop, Lit),
 
     /// Return a value from a function call
-    Return(Var),
+    Return(Lit),
 
     /// Move a value from one position to another
-    Move(Var, Var),
+    Move(Var, Lit),
 
     /// Load a value from a pointer
-    Load{dest: Var, addr: Var, volatile: bool},
+    Load{dest: Var, addr: Lit, volatile: bool},
 
     /// Store a value from a pointer
-    Store{val: Var, addr: Var, volatile: bool},
+    Store{val: Lit, addr: Lit, volatile: bool},
 
     /// Call a function with a given number of arguments
-    Call(Var, String, Vec<Var>),
+    Call(Var, String, Vec<Lit>),
 
     /// Jump to a label
     Jump(Label),
 
     /// Branch to a lable depending of a value
-    Branch(Var, Label, Label),
-
-    /// Assign a value to a pointer to a label
-    La(Var, String),
-
-    /// Assign a value to a constant integer
-    Li(Var, isize),
+    Branch(Lit, Label, Label),
 
     /// Phi expression, contains the assignation for the predecessors in order
-    Phi(Var, Vec<(Var, Label)>),
+    Phi(Var, Vec<(Lit, Label)>),
 }
 
 impl Instruction for Instr {
@@ -69,8 +106,6 @@ impl Instruction for Instr {
                 | Self::Move(ret, ..)
                 | Self::Load{dest:ret, ..}
                 | Self::Call(ret, ..)
-                | Self::La(ret, ..)
-                | Self::Li(ret, ..)
                 | Self::Phi(ret, ..)
                 => Some(*ret),
             _ => None
@@ -84,8 +119,6 @@ impl Instruction for Instr {
                 | Self::Move(ret, ..)
                 | Self::Load{dest: ret, ..}
                 | Self::Call(ret, ..)
-                | Self::La(ret, ..)
-                | Self::Li(ret, ..)
                 | Self::Phi(ret, ..)
                 => Some(ret),
             _ => None
@@ -94,40 +127,43 @@ impl Instruction for Instr {
 
     /// Return the list of operands the instruction depends on,
     /// including all the operands in the label arguments
-    fn operands(&self) -> Vec<Var> {
+    fn literals(&self) -> Vec<Lit> {
         match self {
-            Self::Binop(_, _, x, y) => vec![*x,*y],
-            Self::Unop(_, _, x)=> vec![*x],
-            Self::Move(_, x) => vec![*x],
-            Self::Load{addr: y, ..} => vec![*y],
-            Self::Store{addr: x, val: y, ..} => vec![*x,*y],
-            Self::Branch(x, _, _) => vec![*x],
-            Self::Return(x) => vec![*x],
+            Self::Binop(_, _, x, y)
+                | Self::Store{addr: x, val: y, ..}
+                => vec![x.clone(), y.clone()],
+            Self::Unop(_, _, x)
+                | Self::Move(_, x)
+                | Self::Load{addr: x, ..}
+                | Self::Branch(x, _, _)
+                | Self::Return(x)
+                => vec![x.clone()],
             Self::Jump(_) => vec![],
-            Self::Li(_, _) => vec![],
-            Self::La(_, _) => vec![],
-            Self::Call(_, _, args) => args.clone(),
-            Self::Phi(_, vars) => vars.iter().map(|(v, _)| *v).collect()
+            Self::Call(_, _, args) =>
+                args.iter().cloned().collect(),
+            Self::Phi(_, vars) =>
+                vars.iter().map(|(v, _)| v.clone()).collect()
         }
     }
 
     /// Return the list of operands the instruction depends on,
     /// including all the operands in the label arguments
-    fn operands_mut(&mut self) -> Vec<&mut Var> {
+    fn literals_mut(&mut self) -> Vec<&mut Lit> {
         match self {
-            Self::Binop(_, _, x, y) => vec![x,y],
-            Self::Unop(_, _, x)=> vec![x],
-            Self::Move(_, x) => vec![x],
-            Self::Load{addr: y, ..} => vec![y],
-            Self::Store{addr: x, val: y, ..} => vec![x,y],
-            Self::Branch(x, _, _) => vec![x],
-            Self::Return(x) => vec![x],
+            Self::Binop(_, _, x, y)
+                | Self::Store{addr: x, val: y, ..}
+                => vec![x, y],
+            Self::Unop(_, _, x)
+                | Self::Move(_, x)
+                | Self::Load{addr: x, ..}
+                | Self::Branch(x, _, _)
+                | Self::Return(x)
+                => vec![x],
             Self::Jump(_) => vec![],
-            Self::Li(_, _) => vec![],
-            Self::La(_, _) => vec![],
-            Self::Call(_, _, args) => args.iter_mut().collect(),
+            Self::Call(_, _, args) =>
+                args.iter_mut().collect(),
             Self::Phi(_, vars) =>
-                vars.iter_mut().map(|(v,_)| v).collect()
+                vars.iter_mut().map(|(v, _)| v).collect()
         }
     }
 
@@ -524,6 +560,15 @@ impl std::fmt::Display for Var {
     }
 }
 
+impl std::fmt::Display for Lit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Lit::Addr(s) => write!(f, "{}", s),
+            Lit::Int(i) => write!(f, "{}", i),
+            Lit::Var(v) => write!(f, "{}", v),
+        }
+    }
+}
 
 impl std::fmt::Display for Instr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -546,10 +591,6 @@ impl std::fmt::Display for Instr {
                 write!(f, "jump {}", l),
             Instr::Return(cond) =>
                 write!(f, "return {}", cond),
-            Instr::Li(x, i) =>
-                write!(f, "li {}, {}", x, i),
-            Instr::La(x, l) =>
-                write!(f, "la {}, {}", x, l),
             Instr::Call(dest, name, args) => {
                 write!(f, "{} := {}(", dest, name)?;
                 for (i, arg) in args.iter().enumerate() {

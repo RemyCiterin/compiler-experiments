@@ -54,10 +54,10 @@ pub fn test_ssa(program: &str) {
     println!("cfg (ssa): \n{}", cfg);
 
 
-    let mut gvn = gvn::Gvn::new();
-    gvn.run_analyse(&cfg);
+    //  let mut gvn = gvn::Gvn::new();
+    //  gvn.run_analyse(&cfg);
 
-    gvn.show();
+    //  gvn.show();
 
     cfg.gc();
 
