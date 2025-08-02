@@ -18,6 +18,8 @@ pub trait Instruction: Clone + Eq + Ord + std::fmt::Display + std::hash::Hash {
     fn operands_mut(&mut self) -> Vec<&mut Var> {
         self.literals_mut().into_iter().filter_map(|v| v.as_var_mut()).collect()
     }
+
+    fn may_have_side_effect(&self) -> bool;
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
@@ -164,6 +166,17 @@ impl Instruction for Instr {
                 args.iter_mut().collect(),
             Self::Phi(_, vars) =>
                 vars.iter_mut().map(|(v, _)| v).collect()
+        }
+    }
+
+    fn may_have_side_effect(&self) -> bool {
+        match self {
+            Self::Load{..}
+                | Self::Store{..}
+                | Self::Call(..)
+                | Self::Return(..)
+                => true,
+            _ => false,
         }
     }
 

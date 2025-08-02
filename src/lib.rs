@@ -17,3 +17,4 @@ pub mod simplify_ssa;
 pub mod interference;
 pub mod mem_to_reg;
 pub mod out_of_ssa;
+pub mod const_prop;

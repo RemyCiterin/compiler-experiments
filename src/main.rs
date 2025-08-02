@@ -74,6 +74,11 @@ pub fn test_ssa(program: &str) {
         } println!(" ]");
     }
 
+    let mut const_prop = const_prop::ConstProp::new();
+    const_prop.run(&mut cfg);
+
+    println!("cfg (ssa): \n{}", cfg);
+
     let mut conv = out_of_ssa::Conventionalize::new(&cfg);
     conv.run(&mut cfg);
 
