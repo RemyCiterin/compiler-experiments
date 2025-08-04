@@ -55,13 +55,46 @@ pub enum ExprCore {
     Deref(Expr),
 }
 
-type LineCol = peg::str::LineCol;
+impl std::fmt::Display for ExprCore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Constant(i) => write!(f, "{}", i),
+            Self::Variable(s) => write!(f, "{s}"),
+            Self::Binop(binop, e1, e2) =>
+                write!(f, "({} {binop} {})", e1.expr, e2.expr),
+            Self::Unop(unop, e) =>
+                write!(f, "({unop} {})", e.expr),
+            Self::Deref(e) =>
+                write!(f, "(*{})", e.expr),
+            Self::Call(funct, args) => {
+                write!(f, "{funct}")?;
+                for (i, a) in args.iter().enumerate() {
+                    write!(f, "{}", a.expr)?;
+                    if i != args.len() - 1 {
+                        write!(f, ", ")?;
+                    }
+                }
+                write!(f, ")")
+            }
+        }
+    }
+}
+
+pub type LineCol = peg::str::LineCol;
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Expr {
     pub expr: Box<ExprCore>,
     pub begin: LineCol,
     pub end: LineCol,
+}
+
+impl std::fmt::Display for Expr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f,
+            "expression: {} at line: {} column: {}",
+            self.expr, self.begin.line, self.begin.column)
+    }
 }
 
 impl Expr {
@@ -116,23 +149,190 @@ impl Expr {
 
 
 #[derive(Clone, PartialEq, Eq, Debug)]
-pub enum Stmt {
+pub enum StmtCore {
     Decl(String),
     Nop,
-    Seq(Box<Stmt>, Box<Stmt>),
+    Seq(Stmt, Stmt),
     Assign(Variable, Expr),
-    While(Expr, Box<Stmt>),
-    Ite(Expr, Box<Stmt>, Box<Stmt>),
+    While(Expr, Stmt),
+    Ite(Expr, Stmt, Stmt),
     Return(Expr),
     Break,
     Continue,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
-pub enum Decl{
+pub struct Stmt {
+    pub stmt: Box<StmtCore>,
+    pub begin: LineCol,
+    pub end: LineCol,
+}
+
+pub fn show_error(msg: &str, program: &str, begin: LineCol, end: LineCol) {
+    let lines: Vec<&str> = program.lines().collect();
+
+    if begin.line == end.line {
+        println!("{msg} at line {} column {}-{}:", begin.line, begin.column, end.column);
+    } else {
+        println!("{msg} at line {}-{}:", begin.line, end.line);
+    }
+
+    let fst = begin.line as isize - 3;
+    let lst = end.line as isize + 1;
+
+    let red: String = "\x1b[31m".to_string();
+    let white: String = "\x1b[0m".to_string();
+    let mut current_color: &str = &white;
+
+    for n in fst..=lst {
+        if n >= 0 && n < lines.len() as isize {
+            let n = n as usize;
+            let line = lines[n];
+
+            let digit_color =
+                if begin.line - 1 <= n && n <= end.line - 1 {&red} else {&white};
+            print!("{digit_color}{}:\t{current_color}", n+1);
+
+            if n == begin.line - 1 && n == end.line - 1 {
+                let (x, y) = line.split_at(begin.column-1);
+                let (y, z) = y.split_at(end.column-begin.column);
+                println!("{}{red}{}{white}{}", x.to_string(), y.to_string(), z.to_string());
+            } else if n == begin.line - 1 {
+                let (x, y) = line.split_at(begin.column-1);
+                println!("{}{red}{}", x.to_string(), y.to_string());
+                current_color = &red;
+            } else if n == end.line - 1 {
+                let (x, y) = line.split_at(end.column-1);
+                println!("{}{white}{}", x.to_string(), y.to_string());
+                current_color = &white;
+            } else {
+                println!("{}", lines[n as usize]);
+            }
+        }
+    }
+}
+
+impl Stmt {
+    fn decl(s: String, begin: LineCol, end: LineCol) -> Self {
+        Self {
+            stmt: Box::new(StmtCore::Decl(s)),
+            begin,
+            end,
+        }
+    }
+
+    fn nop(begin: LineCol, end: LineCol) -> Self {
+        Self {
+            stmt: Box::new(StmtCore::Nop),
+            begin,
+            end,
+        }
+    }
+
+    fn _break_(begin: LineCol, end: LineCol) -> Self {
+        Self {
+            stmt: Box::new(StmtCore::Break),
+            begin,
+            end,
+        }
+    }
+
+    fn _continue_(begin: LineCol, end: LineCol) -> Self {
+        Self {
+            stmt: Box::new(StmtCore::Continue),
+            begin,
+            end,
+        }
+    }
+
+    fn seq(s1: Stmt, s2: Stmt, begin: LineCol, end: LineCol) -> Self {
+        Self {
+            stmt: Box::new(StmtCore::Seq(s1, s2)),
+            begin,
+            end,
+        }
+    }
+
+    fn assign(s: Variable, e: Expr, begin: LineCol, end: LineCol) -> Self {
+        Self {
+            stmt: Box::new(StmtCore::Assign(s, e)),
+            begin,
+            end,
+        }
+    }
+
+    fn _while_(cond: Expr, body: Stmt, begin: LineCol, end: LineCol) -> Self {
+        Self {
+            stmt: Box::new(StmtCore::While(cond, body)),
+            begin,
+            end,
+        }
+    }
+
+    fn ite(cond: Expr, s1: Stmt, s2: Stmt, begin: LineCol, end: LineCol) -> Self {
+        Self {
+            stmt: Box::new(StmtCore::Ite(cond, s1, s2)),
+            begin,
+            end,
+        }
+    }
+
+    fn _return_(e: Expr, begin: LineCol, end: LineCol) -> Self {
+        Self {
+            stmt: Box::new(StmtCore::Return(e)),
+            begin,
+            end,
+        }
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum DeclCore{
     Variable(String, isize),
     Function(String, Vec<String>, Stmt),
-    Seq(Box<Decl>, Box<Decl>),
+    Seq(Decl, Decl),
+    Empty,
+}
+
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct Decl {
+    pub decl: Box<DeclCore>,
+    pub begin: LineCol,
+    pub end: LineCol,
+}
+
+impl Decl {
+    fn variable(s: String, x: isize, begin: LineCol, end: LineCol) -> Self {
+        Self {
+            decl: Box::new(DeclCore::Variable(s, x)),
+            begin,
+            end
+        }
+    }
+
+    fn function(s: String, args: Vec<String>, body: Stmt, begin: LineCol, end: LineCol) -> Self {
+        Self {
+            decl: Box::new(DeclCore::Function(s, args, body)),
+            begin,
+            end
+        }
+    }
+
+    fn seq(d1: Decl, d2: Decl, begin: LineCol, end: LineCol) -> Self {
+        Self {
+            decl: Box::new(DeclCore::Seq(d1, d2)),
+            begin,
+            end
+        }
+    }
+
+    fn empty(pos: LineCol) -> Self {
+        Self {
+            decl: Box::new(DeclCore::Empty),
+            begin: pos,
+            end: pos
+        }
+    }
 }
 
 peg::parser!(pub grammar customlang() for str {
@@ -231,40 +431,56 @@ peg::parser!(pub grammar customlang() for str {
     rule _ = quiet!{[' ' | '\n' | '\t']*}
 
     pub rule stmt_core() -> Stmt = precedence!{
-        "let" _ v:variable() _ "=" _ e:expr() _ ";"
-            { Stmt::Seq(Box::new(Stmt::Decl(v.clone())), Box::new(Stmt::Assign(v, e))) }
-        s1:(@) _ s2:@
-            { Stmt::Seq(Box::new(s1), Box::new(s2)) }
-        "nop" _ ";"
-            { Stmt::Nop }
-        "while" _ e:expr() _ "{" _ s:stmt_core() _ "}"
-            { Stmt::While(e, Box::new(s)) }
-        "if" _ e:expr() _ "then" _ "{" _ s1:stmt_core() _ "}" _ "else" _ "{" _ s2:stmt_core() _ "}"
-            { Stmt::Ite(e, Box::new(s1), Box::new(s2)) }
-        "return" _ e:expr() _ ";"
-            { Stmt::Return(e) }
-        v:variable() _ "=" _ e:expr() _ ";"
-            { Stmt::Assign(v, e) }
-        "break" _ ";"
-            { Stmt::Break }
-        "continue" _ ";"
-            { Stmt::Continue }
+        begin:location() "let" _ v:variable() _ "=" _ e:expr() _ ";" end:location() {
+            Stmt::seq(
+                Stmt::decl(v.clone(), begin, end),
+                Stmt::assign(v, e, begin, end),
+                begin,
+                end
+            )
+        }
+        s1:(@) _ s2:@ {
+            let begin = s1.begin;
+            let end = s2.end;
+            Stmt::seq(s1, s2, begin, end)
+        }
+        begin:location() "nop" _ ";" end:location()
+            { Stmt::nop(begin, end) }
+        begin:location() "while" _ e:expr() _ "{" _ s:stmt_core() _ "}" end:location()
+            { Stmt::_while_(e, s, begin, end) }
+        begin:location()
+            "if" _ e:expr() _ _ "{" _ s1:stmt_core() _ "}" _
+            "else" _ "{" _ s2:stmt_core() _ "}" end:location()
+            { Stmt::ite(e, s1, s2, begin, end) }
+        begin:location() "return" _ e:expr() _ ";" end:location()
+            { Stmt::_return_(e, begin, end) }
+        begin:location() v:variable() _ "=" _ e:expr() _ ";" end:location()
+            { Stmt::assign(v, e, begin, end) }
+        begin:location() "break" _ ";" end:location()
+            { Stmt::_break_(begin, end) }
+        begin:location() "continue" _ ";" end:location()
+            { Stmt::_continue_(begin, end) }
     }
 
     pub rule stmt() -> Stmt =
         _ s:stmt_core() _ { s }
 
     pub rule decl_core() -> Decl = precedence!{
-        d1:(@) _ d2:@
-            { Decl::Seq(Box::new(d1), Box::new(d2)) }
-        "def" _ s:variable() _ "(" args:(_variable_() ** ",") ")" _ "{" body:stmt() "}"
-            { Decl::Function(s, args, body) }
-        "var" _ s:variable() _ ":=" n:number() ";"
-            { Decl::Variable(s, n) }
+        d1:(@) _ d2:@ {
+            let begin = d1.begin;
+            let end = d2.end;
+            Decl::seq(d1, d2, begin, end)
+        }
+        begin:location() "def" _ s:variable() _ "(" args:(_variable_() ** ",") ")" _
+            "{" body:stmt() "}" end:location()
+            { Decl::function(s, args, body, begin, end) }
+        begin:location() "var" _ s:variable() _ ":=" _ n:number() _ ";" end:location()
+            { Decl::variable(s, n, begin, end) }
     }
 
     pub rule decl() -> Decl = precedence!{
         _ d:decl_core() _ { d }
+        l:location() _ { Decl::empty(l) }
     }
 
     rule number() -> isize

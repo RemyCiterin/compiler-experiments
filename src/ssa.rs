@@ -1,5 +1,6 @@
 use slotmap::*;
 use std::collections::BTreeSet;
+use std::collections::HashMap;
 use crate::ast::*;
 
 pub trait Instruction: Clone + Eq + Ord + std::fmt::Display + std::hash::Hash {
@@ -20,6 +21,8 @@ pub trait Instruction: Clone + Eq + Ord + std::fmt::Display + std::hash::Hash {
     }
 
     fn may_have_side_effect(&self) -> bool;
+
+    fn canon(&mut self);
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
@@ -175,6 +178,8 @@ impl Instruction for Instr {
                 | Self::Store{..}
                 | Self::Call(..)
                 | Self::Return(..)
+                | Self::Branch(..)
+                | Self::Jump(..)
                 => true,
             _ => false,
         }
@@ -193,6 +198,40 @@ impl Instruction for Instr {
             Self::Jump(label) => vec![label],
             Self::Branch(_, l1, l2) => vec![l1, l2],
             _ => vec![]
+        }
+    }
+
+    fn canon(&mut self) {
+        match self.clone() {
+            Self::Binop(dest, Binop::Add, Lit::Int(x), Lit::Int(y)) =>
+                *self = Self::Move(dest, Lit::Int(isize::wrapping_add(x, y))),
+            Self::Binop(dest, Binop::Equal, Lit::Int(x), Lit::Int(y)) =>
+                *self = Self::Move(dest, Lit::Int(if x == y { 1 } else { 0 })),
+            Self::Binop(dest, Binop::NotEqual, Lit::Int(x), Lit::Int(y)) =>
+                *self = Self::Move(dest, Lit::Int(if x != y { 1 } else { 0 })),
+            Self::Binop(dest, Binop::LessThan, Lit::Int(x), Lit::Int(y)) =>
+                *self = Self::Move(dest, Lit::Int(if x < y { 1 } else { 0 })),
+            Self::Binop(dest, Binop::LessEqual, Lit::Int(x), Lit::Int(y)) =>
+                *self = Self::Move(dest, Lit::Int(if x <= y { 1 } else { 0 })),
+            Self::Binop(dest, Binop::ULessThan, Lit::Int(x), Lit::Int(y)) =>
+                *self =  Self::Move(dest, Lit::Int(if (x as usize) < (y as usize) { 1 } else { 0 })),
+            Self::Binop(dest, Binop::ULessEqual, Lit::Int(x), Lit::Int(y)) =>
+                *self = Self::Move(dest, Lit::Int(if (x as usize) <= (y as usize) { 1 } else { 0 })),
+            Self::Binop(dest, Binop::And, Lit::Int(x), Lit::Int(y)) =>
+                *self = Self::Move(dest, Lit::Int(x & y)),
+            Self::Binop(dest, Binop::Or, Lit::Int(x), Lit::Int(y)) =>
+                *self = Self::Move(dest, Lit::Int(x | y)),
+            Self::Binop(dest, Binop::Xor, Lit::Int(x), Lit::Int(y)) =>
+                *self = Self::Move(dest, Lit::Int(x ^ y)),
+            Self::Binop(dest, Binop::Sub, Lit::Int(x), Lit::Int(y)) =>
+                *self = Self::Move(dest, Lit::Int(isize::wrapping_sub(x, y))),
+            Self::Binop(dest, Binop::Add, lit, Lit::Int(0)) =>
+                *self = Self::Move(dest, lit.clone()),
+            Self::Binop(dest, Binop::Add, Lit::Int(0), lit) =>
+                *self = Self::Move(dest, lit.clone()),
+            Self::Branch(Lit::Int(i), l1, l2) =>
+                *self = Self::Jump(if i != 0 {l1} else {l2}),
+            _ => {}
         }
     }
 }
@@ -545,6 +584,74 @@ impl<I: Instruction> Cfg<I> {
     }
 
     pub fn ssa(&self) -> bool { self.ssa }
+
+    /// Return the list of instructions that use each variables
+    pub fn ssa_graph(&self) -> SparseSecondaryMap<Var, BTreeSet<InstrId>> {
+        let mut graph = SparseSecondaryMap::new();
+
+        for (var, _) in self.iter_vars() {
+            graph.insert(var, BTreeSet::new());
+        }
+
+        for (_, block) in self.iter_blocks() {
+            for (instr, id) in block.stmt.iter().zip(block.ids.iter().cloned()) {
+                for op in instr.operands() {
+                    graph[op].insert(id);
+                }
+            }
+        }
+
+        graph
+    }
+}
+
+pub enum Word {
+    Addr(String),
+    Int(isize),
+}
+
+pub enum Section<I: Instruction> {
+    Text(Cfg<I>),
+    Data(Vec<Word>),
+}
+
+pub struct SymbolTable<I: Instruction> {
+    pub symbols: HashMap<String, Section<I>>,
+}
+
+impl std::fmt::Display for Word {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Addr(s) =>  write!(f, "{s}"),
+            Self::Int(i) => write!(f, "{i}"),
+        }
+    }
+}
+
+impl<I: Instruction> std::fmt::Display for Section<I> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Text(cfg) =>  write!(f, "{cfg}"),
+            Self::Data(items) => {
+                for x in items.iter() {
+                    write!(f, "\n\t{x}")?;
+                }
+
+                write!(f, "\n")?;
+                Ok(())
+            },
+        }
+    }
+}
+
+impl<I: Instruction> std::fmt::Display for SymbolTable<I> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for (symbol, section) in self.symbols.iter() {
+            write!(f, ".globl {symbol}:\n{section}\n\n")?;
+        }
+
+        Ok(())
+    }
 }
 
 impl std::fmt::Display for Label {

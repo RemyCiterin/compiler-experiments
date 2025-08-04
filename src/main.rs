@@ -1,12 +1,18 @@
 use compiler_experiments::*;
 
+use std::collections::HashSet;
+
 use builder;
 
 pub fn test_ssa(program: &str) {
     let parsed = ast::customlang::stmt(program);
 
-    let mut builder = builder::Builder::new(vec![]);
-    builder.gen_stmt(parsed.clone().unwrap());
+    let mut builder = builder::Builder::new(vec![], HashSet::new());
+
+    if let Err(err) = builder.gen_stmt(parsed.clone().unwrap()) {
+        builder::show_builder_error(program, err);
+        return;
+    }
 
     println!("program: \n{}", program);
 
@@ -53,29 +59,12 @@ pub fn test_ssa(program: &str) {
 
     println!("cfg (ssa): \n{}", cfg);
 
-
-    //  let mut gvn = gvn::Gvn::new();
-    //  gvn.run_analyse(&cfg);
-
-    //  gvn.show();
-
     cfg.gc();
+    println!("cfg (ssa): \n{}", cfg);
 
-    let mut liveness = liveness::Liveness::new(&cfg);
-    liveness.run(&cfg);
 
-    let mut matrix = interference::InterferenceGraph::new(&cfg);
-    matrix.run(&cfg, &liveness);
-
-    for (var, _) in cfg.iter_vars() {
-        print!("interference({}) := [", var);
-        for x in matrix[var].iter() {
-            print!(" {}", x);
-        } println!(" ]");
-    }
-
-    let mut const_prop = const_prop::ConstProp::new();
-    const_prop.run(&mut cfg);
+    let mut copy = copy_prop::CopyProp::new(&cfg);
+    copy.run(&mut cfg);
 
     println!("cfg (ssa): \n{}", cfg);
 
@@ -84,18 +73,44 @@ pub fn test_ssa(program: &str) {
 
     println!("cfg (ssa): \n{}", cfg);
 
-    conv.out_of_ssa(&mut cfg);
+    out_of_ssa::out_of_ssa(&mut cfg);
 
     println!("cfg (ssa): \n{}", cfg);
+
+}
+
+pub fn optimize(table: &mut ssa::SymbolTable<ssa::Instr>) {
+    for (_, section) in table.symbols.iter_mut() {
+        match section {
+            ssa::Section::Text(cfg) => {
+                let mut to_ssa = into_ssa::IntoSsaTransform::new(&cfg);
+                to_ssa.run(cfg);
+
+                let mut mem2reg = mem_to_reg::MemToReg::new(&cfg);
+                mem2reg.run(cfg);
+
+                let mut simplifier = simplify_ssa::Simplifier::new(&cfg);
+                simplifier.run(cfg);
+
+                let mut copy = copy_prop::CopyProp::new(&cfg);
+                copy.run(cfg);
+
+                cfg.gc();
+            }
+            _ => {}
+        }
+    }
 }
 
 fn main() {
 
     let foo: &str = "
+var A := 42;
+
 def foo(x) {
     let x = 4;
     while 1 {
-        if x == 0 then {
+        if x == 0 {
             break;
         } else {
             x = x - 1;
@@ -111,33 +126,47 @@ def bar(x) {
         x = x - 1;
     }
 
-    return x;
+    return x + foo(A);
 }
     ";
 
     let parsed = ast::customlang::decl(foo);
     println!("parse {foo} into {:?}", parsed);
 
-    let program: &str = "
-    let x = 2;
-    let y = 4;
-    while x != 3 {
-        if x == 2 then {
-            x = 1;
-        } else {
-            x = 3;
-        }
-    }
+    let mut table =
+        match builder::build(parsed.unwrap()) {
+            Ok(table) => table,
+            Err(err) => {
+                builder::show_builder_error(foo, err);
+                return;
+            }
+        };
 
-    x = 42;
+    println!("{table}");
+    optimize(&mut table);
 
-    while x != 0 {
-        x = x - 1;
-    }
+    println!("{table}");
 
-    x = x + y;
-    return x;
-    ";
+    //  let program: &str = "
+    //  let x = 2;
+    //  let y = 4;
+    //  while x != 3 {
+    //      if x == 2 {
+    //          x = 1;
+    //      } else {
+    //          x = 3;
+    //      }
+    //  }
 
-    test_ssa(program);
+    //  x = 42;
+
+    //  while x != 0 {
+    //      x = x - 1;
+    //  }
+
+    //  x = x + y;
+    //  return x;
+    //  ";
+
+    //  test_ssa(program);
 }

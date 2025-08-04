@@ -66,10 +66,6 @@ impl MemToReg {
                 }
             }
         }
-
-        for x in self.removed.iter() {
-            print!("{} ", x);
-        } println!();
     }
 
     /// Introduce the necessary phi expressions, note that some of those expressions are not

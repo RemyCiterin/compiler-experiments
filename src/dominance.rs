@@ -86,11 +86,11 @@ impl Dominance {
 
         for block in blocks {
             if !self.reachable(block) { continue; }
-            if cfg.preds(block).len() > 1 {
+            if cfg.preds(block).len() > 1 && self.reachable(block) {
                 for &pred in cfg.preds(block).iter() {
                     let mut runner = pred;
 
-                    while runner != self.idom(block) {
+                    while runner != self.idom(block) && self.reachable(runner) {
                         self.frontier[runner].insert(block);
                         runner = self.idom(runner);
                     }
