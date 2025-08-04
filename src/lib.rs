@@ -4,7 +4,6 @@ pub mod int_map;
 pub mod ast;
 pub mod identifiers;
 pub mod union_find;
-pub mod ir;
 pub mod codegen;
 pub mod trie;
 pub mod ssa;

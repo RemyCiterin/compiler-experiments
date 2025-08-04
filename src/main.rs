@@ -5,7 +5,7 @@ use builder;
 pub fn test_ssa(program: &str) {
     let parsed = ast::customlang::stmt(program);
 
-    let mut builder = builder::Builder2::new();
+    let mut builder = builder::Builder::new(vec![]);
     builder.gen_stmt(parsed.clone().unwrap());
 
     println!("program: \n{}", program);
@@ -91,24 +91,51 @@ pub fn test_ssa(program: &str) {
 
 fn main() {
 
-    let program: &str = "
-    x := 2;
-    y := 4;
-    while x != 3 {
-        if x == 2 then {
-            x := 1;
+    let foo: &str = "
+def foo(x) {
+    let x = 4;
+    while 1 {
+        if x == 0 then {
+            break;
         } else {
-            x := 3;
+            x = x - 1;
         }
     }
 
-    x := 42;
+    return x;
+}
 
+def bar(x) {
+    let x = 42;
     while x != 0 {
-        x := x - 1;
+        x = x - 1;
     }
 
-    x := x + y;
+    return x;
+}
+    ";
+
+    let parsed = ast::customlang::decl(foo);
+    println!("parse {foo} into {:?}", parsed);
+
+    let program: &str = "
+    let x = 2;
+    let y = 4;
+    while x != 3 {
+        if x == 2 then {
+            x = 1;
+        } else {
+            x = 3;
+        }
+    }
+
+    x = 42;
+
+    while x != 0 {
+        x = x - 1;
+    }
+
+    x = x + y;
     return x;
     ";
 
