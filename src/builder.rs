@@ -38,19 +38,26 @@ pub fn show_builder_error(program: &str, err: BuilderError) {
 impl Builder {
     pub fn new(args: Vec<String>, globals: HashSet<String>) -> Self {
         let mut cfg = Cfg::new(false, vec![]);
+        let mut stmt: Vec<Instr> = vec![];
         let label = cfg.entry();
 
         let mut env = HashMap::new();
+
+        // We start by pushing arguments to the stack in case we dereference them
         for arg in args {
-            env.insert(arg, cfg.fresh_arg());
+            let id = cfg.fresh_arg();
+            let slot = cfg.fresh_stack_var();
+            env.insert(arg, slot);
+
+            stmt.push(Instr::Store{volatile: false, val: Lit::Var(id), addr: Lit::Var(slot)});
         }
 
         Builder {
             cfg,
+            env,
+            stmt,
             label,
             globals,
-            stmt: vec![],
-            env: HashMap::new(),
             current_exit: None,
             current_header: None,
         }

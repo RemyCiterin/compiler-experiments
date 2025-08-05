@@ -14,7 +14,7 @@ pub enum Lattice {
     Bot,
 
     /// This variable contains a constant integer
-    Int(isize),
+    Int(i32),
 
     /// This variable contains a constant address
     Addr(String),
@@ -208,6 +208,11 @@ impl CopyProp {
         self.search(cfg);
 
         for block in cfg.labels() {
+            if !self.visited.contains(&block) {
+                cfg.remove_block(block);
+                continue;
+            }
+
             let mut stmt: Vec<Instr> = vec![];
 
             for mut instr in cfg[block].stmt.iter().cloned() {
@@ -220,6 +225,29 @@ impl CopyProp {
                             _ => {}
                         }
                     }
+                }
+
+                if let Instr::Phi(_, vars) = &mut instr {
+                    let mut i: usize = 0;
+
+                    while i < vars.len() {
+                        if !self.visited.contains(&vars[i].1) {
+                            vars.remove(i);
+                            continue;
+                        }
+
+                        i += 1;
+                    }
+                }
+
+                if let Instr::Branch(_, l1, l2) = &instr
+                    && !self.visited.contains(l1) {
+                    instr = Instr::Jump(*l2);
+                }
+
+                if let Instr::Branch(_, l1, l2) = &instr
+                    && !self.visited.contains(l2) {
+                    instr = Instr::Jump(*l1);
                 }
 
                 let used: bool =

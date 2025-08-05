@@ -108,7 +108,6 @@ fn main() {
 var A := 42;
 
 def foo(x) {
-    let x = 4;
     while 1 {
         if x == 0 {
             break;
@@ -121,7 +120,6 @@ def foo(x) {
 }
 
 def bar(x) {
-    let x = 42;
     while x != 0 {
         x = x - 1;
     }
@@ -131,7 +129,6 @@ def bar(x) {
     ";
 
     let parsed = ast::customlang::decl(foo);
-    println!("parse {foo} into {:?}", parsed);
 
     let mut table =
         match builder::build(parsed.unwrap()) {
@@ -142,14 +139,15 @@ def bar(x) {
             }
         };
 
+    println!("{foo}");
     println!("{table}");
     optimize(&mut table);
 
     println!("{table}");
 
     //  let program: &str = "
-    //  let x = 2;
-    //  let y = 4;
+    //  let x := 2;
+    //  let y := 4;
     //  while x != 3 {
     //      if x == 2 {
     //          x = 1;

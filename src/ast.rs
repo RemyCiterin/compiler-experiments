@@ -47,37 +47,12 @@ impl fmt::Display for Unop {
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum ExprCore {
-    Constant(isize),
+    Constant(i32),
     Variable(Variable),
     Binop(Binop, Expr, Expr),
     Unop(Unop, Expr),
     Call(String, Vec<Expr>),
     Deref(Expr),
-}
-
-impl std::fmt::Display for ExprCore {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Constant(i) => write!(f, "{}", i),
-            Self::Variable(s) => write!(f, "{s}"),
-            Self::Binop(binop, e1, e2) =>
-                write!(f, "({} {binop} {})", e1.expr, e2.expr),
-            Self::Unop(unop, e) =>
-                write!(f, "({unop} {})", e.expr),
-            Self::Deref(e) =>
-                write!(f, "(*{})", e.expr),
-            Self::Call(funct, args) => {
-                write!(f, "{funct}")?;
-                for (i, a) in args.iter().enumerate() {
-                    write!(f, "{}", a.expr)?;
-                    if i != args.len() - 1 {
-                        write!(f, ", ")?;
-                    }
-                }
-                write!(f, ")")
-            }
-        }
-    }
 }
 
 pub type LineCol = peg::str::LineCol;
@@ -87,14 +62,6 @@ pub struct Expr {
     pub expr: Box<ExprCore>,
     pub begin: LineCol,
     pub end: LineCol,
-}
-
-impl std::fmt::Display for Expr {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f,
-            "expression: {} at line: {} column: {}",
-            self.expr, self.begin.line, self.begin.column)
-    }
 }
 
 impl Expr {
@@ -138,7 +105,7 @@ impl Expr {
         }
     }
 
-    fn number(x: isize, begin: LineCol, end: LineCol) -> Self {
+    fn number(x: i32, begin: LineCol, end: LineCol) -> Self {
         Self {
             expr: Box::new(ExprCore::Constant(x)),
             begin,
@@ -288,7 +255,7 @@ impl Stmt {
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum DeclCore{
-    Variable(String, isize),
+    Variable(String, i32),
     Function(String, Vec<String>, Stmt),
     Seq(Decl, Decl),
     Empty,
@@ -302,7 +269,7 @@ pub struct Decl {
 }
 
 impl Decl {
-    fn variable(s: String, x: isize, begin: LineCol, end: LineCol) -> Self {
+    fn variable(s: String, x: i32, begin: LineCol, end: LineCol) -> Self {
         Self {
             decl: Box::new(DeclCore::Variable(s, x)),
             begin,
@@ -431,7 +398,7 @@ peg::parser!(pub grammar customlang() for str {
     rule _ = quiet!{[' ' | '\n' | '\t']*}
 
     pub rule stmt_core() -> Stmt = precedence!{
-        begin:location() "let" _ v:variable() _ "=" _ e:expr() _ ";" end:location() {
+        begin:location() "let" _ v:variable() _ ":=" _ e:expr() _ ";" end:location() {
             Stmt::seq(
                 Stmt::decl(v.clone(), begin, end),
                 Stmt::assign(v, e, begin, end),
@@ -483,8 +450,8 @@ peg::parser!(pub grammar customlang() for str {
         l:location() _ { Decl::empty(l) }
     }
 
-    rule number() -> isize
-        = n:$(['0'..='9']+) {? n.parse().or(Err("isize")) }
+    rule number() -> i32
+        = n:$(['0'..='9']+) {? n.parse().or(Err("i32")) }
 
     rule variable() -> String
         = s:$(['a'..='z' | 'A'..='Z' | '_']['a'..='z' | 'A'..='Z' | '0'..='9' | '_']*) { s.into() }

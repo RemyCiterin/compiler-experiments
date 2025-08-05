@@ -3,6 +3,18 @@ use std::collections::BTreeSet;
 use std::collections::HashMap;
 use crate::ast::*;
 
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub enum Lit {
+    /// Define the address of a symbol
+    Addr(String),
+
+    /// Define an integer constant
+    Int(i32),
+
+    /// A value from a variable (a virtual register)
+    Var(Var),
+}
+
 pub trait Instruction: Clone + Eq + Ord + std::fmt::Display + std::hash::Hash {
     fn literals(&self) -> Vec<Lit>;
     fn literals_mut(&mut self) -> Vec<&mut Lit>;
@@ -23,18 +35,6 @@ pub trait Instruction: Clone + Eq + Ord + std::fmt::Display + std::hash::Hash {
     fn may_have_side_effect(&self) -> bool;
 
     fn canon(&mut self);
-}
-
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
-pub enum Lit {
-    /// Define the address of a symbol
-    Addr(String),
-
-    /// Define an integer constant
-    Int(isize),
-
-    /// A value from a variable (a virtual register)
-    Var(Var),
 }
 
 impl Lit {
@@ -204,7 +204,7 @@ impl Instruction for Instr {
     fn canon(&mut self) {
         match self.clone() {
             Self::Binop(dest, Binop::Add, Lit::Int(x), Lit::Int(y)) =>
-                *self = Self::Move(dest, Lit::Int(isize::wrapping_add(x, y))),
+                *self = Self::Move(dest, Lit::Int(i32::wrapping_add(x, y))),
             Self::Binop(dest, Binop::Equal, Lit::Int(x), Lit::Int(y)) =>
                 *self = Self::Move(dest, Lit::Int(if x == y { 1 } else { 0 })),
             Self::Binop(dest, Binop::NotEqual, Lit::Int(x), Lit::Int(y)) =>
@@ -224,7 +224,7 @@ impl Instruction for Instr {
             Self::Binop(dest, Binop::Xor, Lit::Int(x), Lit::Int(y)) =>
                 *self = Self::Move(dest, Lit::Int(x ^ y)),
             Self::Binop(dest, Binop::Sub, Lit::Int(x), Lit::Int(y)) =>
-                *self = Self::Move(dest, Lit::Int(isize::wrapping_sub(x, y))),
+                *self = Self::Move(dest, Lit::Int(i32::wrapping_sub(x, y))),
             Self::Binop(dest, Binop::Add, lit, Lit::Int(0)) =>
                 *self = Self::Move(dest, lit.clone()),
             Self::Binop(dest, Binop::Add, Lit::Int(0), lit) =>
@@ -274,7 +274,7 @@ pub enum VarKind {
     /// A stack variable defined at the function entry point
     Stack,
 
-    /// A function argument
+    /// A function argument passed directly
     Arg,
 
     /// This variable is not defined in the current cfg
@@ -499,6 +499,12 @@ impl<I: Instruction> Cfg<I> {
         self.vars.remove(var);
     }
 
+    pub fn remove_block(&mut self, block: Label) {
+        self.set_block_stmt(block, vec![]);
+        self.blocks.remove(block);
+        self.preds.remove(block);
+    }
+
     /// GC all the unreachable blocks, variable from the control flow graph
     pub fn gc(&mut self) {
         let mut seen = BTreeSet::new();
@@ -571,7 +577,9 @@ impl<I: Instruction> Cfg<I> {
 
         // Remove the block from the predecessors of it's old successors
         for succ in self[block].succs() {
-            self.preds[succ].remove(&block);
+            if self.preds.contains_key(succ) {
+                self.preds[succ].remove(&block);
+            }
         }
 
         self.blocks[block].stmt = stmt;
@@ -607,7 +615,7 @@ impl<I: Instruction> Cfg<I> {
 
 pub enum Word {
     Addr(String),
-    Int(isize),
+    Int(i32),
 }
 
 pub enum Section<I: Instruction> {
@@ -733,7 +741,17 @@ impl std::fmt::Display for Instr {
 
 impl<I: Instruction> std::fmt::Display for Cfg<I> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "entry: {}\n", self.entry())?;
+        write!(f, "entry: {} args:", self.entry())?;
+        for arg in self.args.iter() {
+            write!(f, " {}", arg)?;
+        }
+
+        write!(f, "\nstack:")?;
+        for arg in self.stack.iter() {
+            write!(f, " {}", arg)?;
+        }
+
+        write!(f, "\n")?;
 
         for (name, block) in self.iter_blocks() {
             // Use an empty line between each block
