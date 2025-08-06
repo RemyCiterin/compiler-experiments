@@ -3,6 +3,17 @@ use std::collections::BTreeSet;
 use std::collections::HashMap;
 use crate::ast::*;
 
+pub trait Instruction: Clone + Eq + Ord + std::fmt::Display + std::hash::Hash {
+    fn operands(&self) -> Vec<Var>;
+    fn operands_mut(&mut self) -> Vec<&mut Var>;
+    fn destination(&self) -> Option<Var>;
+    fn destination_mut(&mut self) -> Option<&mut Var>;
+    fn labels(&self) -> Vec<Label>;
+    fn labels_mut(&mut self) -> Vec<&mut Label>;
+    fn exit_block(&self) -> bool;
+    fn may_have_side_effect(&self) -> bool;
+}
+
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum Lit {
     /// Define the address of a symbol
@@ -13,28 +24,6 @@ pub enum Lit {
 
     /// A value from a variable (a virtual register)
     Var(Var),
-}
-
-pub trait Instruction: Clone + Eq + Ord + std::fmt::Display + std::hash::Hash {
-    fn literals(&self) -> Vec<Lit>;
-    fn literals_mut(&mut self) -> Vec<&mut Lit>;
-    fn destination(&self) -> Option<Var>;
-    fn destination_mut(&mut self) -> Option<&mut Var>;
-    fn labels(&self) -> Vec<Label>;
-    fn labels_mut(&mut self) -> Vec<&mut Label>;
-    fn exit_block(&self) -> bool;
-
-    fn operands(&self) -> Vec<Var> {
-        self.literals().into_iter().filter_map(|v| v.as_var()).collect()
-    }
-
-    fn operands_mut(&mut self) -> Vec<&mut Var> {
-        self.literals_mut().into_iter().filter_map(|v| v.as_var_mut()).collect()
-    }
-
-    fn may_have_side_effect(&self) -> bool;
-
-    fn canon(&mut self);
 }
 
 impl Lit {
@@ -93,6 +82,50 @@ pub enum Instr {
     Phi(Var, Vec<(Lit, Label)>),
 }
 
+impl Instr {
+    /// Return the list of operands the instruction depends on,
+    /// including all the operands in the label arguments
+    pub fn literals(&self) -> Vec<Lit> {
+        match self {
+            Self::Binop(_, _, x, y)
+                | Self::Store{addr: x, val: y, ..}
+                => vec![x.clone(), y.clone()],
+            Self::Unop(_, _, x)
+                | Self::Move(_, x)
+                | Self::Load{addr: x, ..}
+                | Self::Branch(x, _, _)
+                | Self::Return(x)
+                => vec![x.clone()],
+            Self::Jump(_) => vec![],
+            Self::Call(_, _, args) =>
+                args.iter().cloned().collect(),
+            Self::Phi(_, vars) =>
+                vars.iter().map(|(v, _)| v.clone()).collect()
+        }
+    }
+
+    /// Return the list of operands the instruction depends on,
+    /// including all the operands in the label arguments
+    pub fn literals_mut(&mut self) -> Vec<&mut Lit> {
+        match self {
+            Self::Binop(_, _, x, y)
+                | Self::Store{addr: x, val: y, ..}
+                => vec![x, y],
+            Self::Unop(_, _, x)
+                | Self::Move(_, x)
+                | Self::Load{addr: x, ..}
+                | Self::Branch(x, _, _)
+                | Self::Return(x)
+                => vec![x],
+            Self::Jump(_) => vec![],
+            Self::Call(_, _, args) =>
+                args.iter_mut().collect(),
+            Self::Phi(_, vars) =>
+                vars.iter_mut().map(|(v, _)| v).collect()
+        }
+    }
+}
+
 impl Instruction for Instr {
     fn exit_block(&self) -> bool {
         match self {
@@ -130,48 +163,6 @@ impl Instruction for Instr {
         }
     }
 
-    /// Return the list of operands the instruction depends on,
-    /// including all the operands in the label arguments
-    fn literals(&self) -> Vec<Lit> {
-        match self {
-            Self::Binop(_, _, x, y)
-                | Self::Store{addr: x, val: y, ..}
-                => vec![x.clone(), y.clone()],
-            Self::Unop(_, _, x)
-                | Self::Move(_, x)
-                | Self::Load{addr: x, ..}
-                | Self::Branch(x, _, _)
-                | Self::Return(x)
-                => vec![x.clone()],
-            Self::Jump(_) => vec![],
-            Self::Call(_, _, args) =>
-                args.iter().cloned().collect(),
-            Self::Phi(_, vars) =>
-                vars.iter().map(|(v, _)| v.clone()).collect()
-        }
-    }
-
-    /// Return the list of operands the instruction depends on,
-    /// including all the operands in the label arguments
-    fn literals_mut(&mut self) -> Vec<&mut Lit> {
-        match self {
-            Self::Binop(_, _, x, y)
-                | Self::Store{addr: x, val: y, ..}
-                => vec![x, y],
-            Self::Unop(_, _, x)
-                | Self::Move(_, x)
-                | Self::Load{addr: x, ..}
-                | Self::Branch(x, _, _)
-                | Self::Return(x)
-                => vec![x],
-            Self::Jump(_) => vec![],
-            Self::Call(_, _, args) =>
-                args.iter_mut().collect(),
-            Self::Phi(_, vars) =>
-                vars.iter_mut().map(|(v, _)| v).collect()
-        }
-    }
-
     fn may_have_side_effect(&self) -> bool {
         match self {
             Self::Load{..}
@@ -201,38 +192,12 @@ impl Instruction for Instr {
         }
     }
 
-    fn canon(&mut self) {
-        match self.clone() {
-            Self::Binop(dest, Binop::Add, Lit::Int(x), Lit::Int(y)) =>
-                *self = Self::Move(dest, Lit::Int(i32::wrapping_add(x, y))),
-            Self::Binop(dest, Binop::Equal, Lit::Int(x), Lit::Int(y)) =>
-                *self = Self::Move(dest, Lit::Int(if x == y { 1 } else { 0 })),
-            Self::Binop(dest, Binop::NotEqual, Lit::Int(x), Lit::Int(y)) =>
-                *self = Self::Move(dest, Lit::Int(if x != y { 1 } else { 0 })),
-            Self::Binop(dest, Binop::LessThan, Lit::Int(x), Lit::Int(y)) =>
-                *self = Self::Move(dest, Lit::Int(if x < y { 1 } else { 0 })),
-            Self::Binop(dest, Binop::LessEqual, Lit::Int(x), Lit::Int(y)) =>
-                *self = Self::Move(dest, Lit::Int(if x <= y { 1 } else { 0 })),
-            Self::Binop(dest, Binop::ULessThan, Lit::Int(x), Lit::Int(y)) =>
-                *self =  Self::Move(dest, Lit::Int(if (x as usize) < (y as usize) { 1 } else { 0 })),
-            Self::Binop(dest, Binop::ULessEqual, Lit::Int(x), Lit::Int(y)) =>
-                *self = Self::Move(dest, Lit::Int(if (x as usize) <= (y as usize) { 1 } else { 0 })),
-            Self::Binop(dest, Binop::And, Lit::Int(x), Lit::Int(y)) =>
-                *self = Self::Move(dest, Lit::Int(x & y)),
-            Self::Binop(dest, Binop::Or, Lit::Int(x), Lit::Int(y)) =>
-                *self = Self::Move(dest, Lit::Int(x | y)),
-            Self::Binop(dest, Binop::Xor, Lit::Int(x), Lit::Int(y)) =>
-                *self = Self::Move(dest, Lit::Int(x ^ y)),
-            Self::Binop(dest, Binop::Sub, Lit::Int(x), Lit::Int(y)) =>
-                *self = Self::Move(dest, Lit::Int(i32::wrapping_sub(x, y))),
-            Self::Binop(dest, Binop::Add, lit, Lit::Int(0)) =>
-                *self = Self::Move(dest, lit.clone()),
-            Self::Binop(dest, Binop::Add, Lit::Int(0), lit) =>
-                *self = Self::Move(dest, lit.clone()),
-            Self::Branch(Lit::Int(i), l1, l2) =>
-                *self = Self::Jump(if i != 0 {l1} else {l2}),
-            _ => {}
-        }
+    fn operands(&self) -> Vec<Var> {
+        self.literals().into_iter().filter_map(|v| v.as_var()).collect()
+    }
+
+    fn operands_mut(&mut self) -> Vec<&mut Var> {
+        self.literals_mut().into_iter().filter_map(|v| v.as_var_mut()).collect()
     }
 }
 
@@ -291,7 +256,7 @@ pub struct Cfg<I: Instruction> {
     /// Entry of the control flow graph
     entry: Label,
 
-    /// Associate a type to each variable
+    /// Associate a kind to each variable
     vars: SlotMap<Var, VarKind>,
 
     /// preds of each block
@@ -621,6 +586,23 @@ pub enum Word {
 pub enum Section<I: Instruction> {
     Text(Cfg<I>),
     Data(Vec<Word>),
+}
+
+impl<I: Instruction> Section<I> {
+    pub fn as_text(&self) -> Option<&Cfg<I>> {
+        if let Self::Text(cfg) = self {return Some(cfg);}
+        return None;
+    }
+
+    pub fn as_text_mut(&mut self) -> Option<&mut Cfg<I>> {
+        if let Self::Text(cfg) = self {return Some(cfg);}
+        return None;
+    }
+
+    pub fn as_data_mut(&mut self) -> Option<&mut Vec<Word>> {
+        if let Self::Data(vec) = self {return Some(vec);}
+        return None;
+    }
 }
 
 pub struct SymbolTable<I: Instruction> {

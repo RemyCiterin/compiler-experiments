@@ -96,6 +96,14 @@ pub fn optimize(table: &mut ssa::SymbolTable<ssa::Instr>) {
                 copy.run(cfg);
 
                 cfg.gc();
+
+                println!("cfg (ssa): \n{}", cfg);
+
+                let mut conv = out_of_ssa::Conventionalize::new(&cfg);
+                conv.run(cfg);
+
+                out_of_ssa::out_of_ssa(cfg);
+
             }
             _ => {}
         }
@@ -108,13 +116,18 @@ fn main() {
 var A := 42;
 
 def foo(x) {
+    let counter := 0;
     while 1 {
         if x == 0 {
             break;
         } else {
             x = x - 1;
+            counter = counter + 1;
         }
     }
+
+    let _ := print_i32(x);
+    let _ := print_i32(counter);
 
     return x;
 }
@@ -124,7 +137,15 @@ def bar(x) {
         x = x - 1;
     }
 
+    let _ := print_i32(x);
+    A = A + 1;
+    let _ := print_i32(A);
+
     return x + foo(A);
+}
+
+def main() {
+    return bar(2);
 }
     ";
 
@@ -144,6 +165,11 @@ def bar(x) {
     optimize(&mut table);
 
     println!("{table}");
+
+    let mut interp = interpreter::Interpreter::new(&table);
+    interp.interpret_function();
+
+    println!("instret: {} loads: {} stores: {}", interp.instret, interp.loads, interp.stores);
 
     //  let program: &str = "
     //  let x := 2;
