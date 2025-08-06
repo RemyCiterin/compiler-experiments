@@ -121,13 +121,13 @@ var A = 42;
 
 var buf[100] = 0;
 
-def fibo_mem() {
+def fibo_mem(buffer, size) {
     let y = 2;
-    buf[0] = 0;
-    buf[1] = 1;
+    buffer[0] = 0;
+    buffer[1] = 1;
 
-    while y != 100 {
-        buf[y] = buf[y-1] + buf[y-2];
+    while y != size {
+        buffer[y] = buffer[y-1] + buffer[y-2];
         y = y + 1;
     }
 }
@@ -140,43 +140,12 @@ def fibo(x) {
     }
 }
 
-def foo(x) {
-    let counter = 0;
-    while 1 {
-        if x == 0 {
-            break;
-        } else {
-            x = x - 1;
-            counter = counter + 1;
-        }
-    }
-
-    return x;
-}
-
-def bar(x) {
-    while x != 0 {
-        x = x - 1;
-    }
-
-    return x + foo(A);
-}
-
-def update(x) {
-    *x = 53;
-    return 0;
-}
-
 def main() {
-    let _ = fibo_mem();
-    let x = buf[50];
-    let _ = print_i32(x);
-    *(&x) = 42;
-    let _ = print_i32(x);
-    let _ = update(&x);
-    let _ = print_i32(x);
+    fibo_mem(buf, 100);
 
-    return bar(2);
+    print_i32(buf[20]);
+
+    print_i32(fibo(20));
 }
     ";
 
@@ -202,7 +171,8 @@ def main() {
     let mut interp = interpreter::Interpreter::new(&table);
     interp.interpret_function();
 
-    println!("instret: {} loads: {} stores: {}", interp.instret, interp.loads, interp.stores);
+    println!("instret: {} loads: {} stores: {} calls: {}",
+        interp.instret, interp.loads, interp.stores, interp.calls);
 
     //println!("{}", fibo(50));
 

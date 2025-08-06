@@ -29,6 +29,8 @@ pub struct Interpreter<'a>{
 
     /// Number of executed store instructions
     pub stores: usize,
+
+    pub calls: usize,
 }
 
 impl<'a> Interpreter<'a> {
@@ -52,7 +54,7 @@ impl<'a> Interpreter<'a> {
                     .map(|word| {
                         match word {
                             Word::Int(i) => *i,
-                            Word::Addr(s) => symbols[s],
+                            Word::Addr(s, i) => symbols[s] + i,
                         }
                     })
                     .collect();
@@ -70,6 +72,7 @@ impl<'a> Interpreter<'a> {
             memory,
             symbols,
             loads: 0,
+            calls: 0,
             stores: 0,
             instret: 0,
             sp: 0x100_0000,
@@ -184,6 +187,8 @@ impl<'a> Interpreter<'a> {
     }
 
     pub fn interpret_function(&mut self) -> i32 {
+        self.calls += 1;
+
         // Push variables into the stack
         let sp = self.sp;
         for (var, size) in self.cfg().stack.iter() {

@@ -174,6 +174,10 @@ impl Builder {
 
                 Ok(())
             }
+            StmtCore::Expr{rvalue} => {
+                self.gen_rvalue(rvalue)?;
+                Ok(())
+            }
             StmtCore::Nop{} => Ok(()),
             StmtCore::Ite{cond, lhs, rhs} => {
                 let id = self.gen_rvalue(cond)?;
@@ -314,7 +318,8 @@ fn fill_table(program: Decl, symbols: &HashSet<String>, table: &mut SymbolTable<
         DeclCore::Variable{name, value} =>
             _ = table.symbols.insert(name, Section::Data(vec![Word::Int(value)])),
         DeclCore::Array{name, values} => {
-            let data = values.iter().map(|x| Word::Int(*x)).collect();
+            let mut data: Vec<Word> = values.iter().map(|x| Word::Int(*x)).collect();
+            data.insert(0, Word::Addr(name.clone(), 4));
             _ = table.symbols.insert(name, Section::Data(data))
         },
         DeclCore::Seq{lhs, rhs} => {

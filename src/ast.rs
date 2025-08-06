@@ -94,6 +94,7 @@ ast!{
     enum StmtCore Stmt {
         Decl decl(name: String),
         Nop nop(),
+        Expr expr(rvalue: RValue),
         Seq seq(lhs: Stmt, rhs: Stmt),
         Assign assign(lvalue: LValue, rvalue: RValue),
         While _while_(cond: RValue, body: Stmt),
@@ -242,7 +243,7 @@ peg::parser!(pub grammar customlang() for str {
             { let end = x.end; RValue::unop(Unop::Neg, x, begin, end) }
         begin:location() "~" _ x:@
             { let end= x.end; RValue::unop(Unop::Not, x, begin, end) }
-        begin:location() s:variable() _ "(" args:(rvalue() ** ",") ")" end:location()
+        begin:location() s:variable() _ "(" args:(_rvalue_() ** ",") ")" end:location()
             { RValue::call(s, args, begin, end) }
         begin:location() "&" _ lvalue:lvalue() end:location() {
             RValue::reference(lvalue, begin, end)
@@ -255,17 +256,22 @@ peg::parser!(pub grammar customlang() for str {
         "(" _ e:rvalue() _ ")" { e }
     }
 
+    rule _rvalue_() -> RValue =
+        _ r:rvalue() _ {r}
+
     pub rule lvalue() -> LValue = precedence!{
         begin:location() "*" _ rvalue:rvalue() end:location()
             { LValue::defer(rvalue, begin, end) }
         lvalue:@ _ "[" _ rvalue:rvalue() _ "]" end:location() {
             let begin = lvalue.begin;
             let two = RValue::constant(2, begin, end);
-            let reference = RValue::reference(lvalue, begin, end);
+            let reference = RValue::lvalue(lvalue, begin, end);
             let offset = RValue::binop(Binop::Sll, rvalue, two, begin ,end);
             let addr = RValue::binop(Binop::Add, reference, offset, begin, end);
             LValue::defer(addr, begin, end)
         }
+        "(" _ lvalue:lvalue() _ ")"
+            { lvalue }
         begin:location() var:variable() end:location()
             { LValue::variable(var, begin, end) }
     }
@@ -302,6 +308,8 @@ peg::parser!(pub grammar customlang() for str {
             { Stmt::_break_(begin, end) }
         begin:location() "continue" _ ";" end:location()
             { Stmt::_continue_(begin, end) }
+        begin:location() rvalue:rvalue() _ ";" end:location()
+            { Stmt::expr(rvalue, begin, end) }
     }
 
     pub rule stmt() -> Stmt =

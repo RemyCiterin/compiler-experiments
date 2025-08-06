@@ -579,7 +579,7 @@ impl<I: Instruction> Cfg<I> {
 }
 
 pub enum Word {
-    Addr(String),
+    Addr(String, i32),
     Int(i32),
 }
 
@@ -612,7 +612,7 @@ pub struct SymbolTable<I: Instruction> {
 impl std::fmt::Display for Word {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Addr(s) =>  write!(f, "{s}"),
+            Self::Addr(s, offset) =>  write!(f, "&{s}+{offset}"),
             Self::Int(i) => write!(f, "{i}"),
         }
     }
