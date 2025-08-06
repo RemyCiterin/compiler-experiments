@@ -45,95 +45,67 @@ impl fmt::Display for Unop {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Debug)]
-pub enum ExprCore {
-    Constant(i32),
-    Variable(Variable),
-    Binop(Binop, Expr, Expr),
-    Unop(Unop, Expr),
-    Call(String, Vec<Expr>),
-    Deref(Expr),
+macro_rules! ast {
+    ( enum $core:ident $name:ident { $($const:ident $fn:ident ( $($arg:ident : $field:ty),* ) ),* } ) => {
+        #[derive(Clone, PartialEq, Eq, Debug)]
+        pub enum $core { $($const { $( $arg : $field ),* } ),* }
+
+        #[derive(Clone, PartialEq, Eq, Debug)]
+        pub struct $name {
+            pub core: Box<$core>,
+            pub begin: LineCol,
+            pub end: LineCol,
+        }
+
+        impl $name {
+            $(
+                pub fn $fn ( $($arg : $field,)*  begin: LineCol, end: LineCol ) -> Self {
+                    Self {
+                        core: Box::new( $core::$const  {  $($arg),* } ),
+                        begin,
+                        end,
+                    }
+                }
+            )*
+        }
+    };
+}
+
+ast!{
+    enum LValueCore LValue {
+        Variable variable(name: Variable),
+        Deref defer(rvalue: RValue)
+    }
+}
+
+ast!{
+    enum RValueCore RValue {
+        Constant constant(value: i32),
+        Binop binop(binop: Binop, lhs: RValue, rhs: RValue),
+        Call call(name: String, args: Vec<RValue>),
+        Unop unop(unop: Unop, arg: RValue),
+        LValue lvalue(lvalue: LValue),
+        Ref reference(lvalue: LValue)
+    }
+}
+
+
+ast!{
+    enum StmtCore Stmt {
+        Decl decl(name: String),
+        Nop nop(),
+        Seq seq(lhs: Stmt, rhs: Stmt),
+        Assign assign(lvalue: LValue, rvalue: RValue),
+        While _while_(cond: RValue, body: Stmt),
+        Ite ite(cond: RValue, lhs: Stmt, rhs: Stmt),
+        Return _return_(expr: RValue),
+        Break _break_(),
+        Continue _continue_()
+    }
 }
 
 pub type LineCol = peg::str::LineCol;
 
-#[derive(Clone, PartialEq, Eq, Debug)]
-pub struct Expr {
-    pub expr: Box<ExprCore>,
-    pub begin: LineCol,
-    pub end: LineCol,
-}
-
-impl Expr {
-    fn binop(op: Binop, e1: Expr, e2: Expr, begin: LineCol, end: LineCol) -> Self {
-        Self {
-            expr: Box::new(ExprCore::Binop(op, e1, e2)),
-            begin,
-            end
-        }
-    }
-
-    fn unop(op: Unop, e: Expr, begin: LineCol, end: LineCol) -> Self {
-        Self {
-            expr: Box::new(ExprCore::Unop(op, e)),
-            begin,
-            end
-        }
-    }
-
-    fn deref(e: Expr, begin: LineCol, end: LineCol) -> Self {
-        Self {
-            expr: Box::new(ExprCore::Deref(e)),
-            begin,
-            end
-        }
-    }
-
-    fn call(s: String, args: Vec<Expr>, begin: LineCol, end: LineCol) -> Self {
-        Self {
-            expr: Box::new(ExprCore::Call(s, args)),
-            begin,
-            end
-        }
-    }
-
-    fn variable(s: String, begin: LineCol, end: LineCol) -> Self {
-        Self {
-            expr: Box::new(ExprCore::Variable(s)),
-            begin,
-            end
-        }
-    }
-
-    fn number(x: i32, begin: LineCol, end: LineCol) -> Self {
-        Self {
-            expr: Box::new(ExprCore::Constant(x)),
-            begin,
-            end
-        }
-    }
-}
-
-
-#[derive(Clone, PartialEq, Eq, Debug)]
-pub enum StmtCore {
-    Decl(String),
-    Nop,
-    Seq(Stmt, Stmt),
-    Assign(Variable, Expr),
-    While(Expr, Stmt),
-    Ite(Expr, Stmt, Stmt),
-    Return(Expr),
-    Break,
-    Continue,
-}
-
-#[derive(Clone, PartialEq, Eq, Debug)]
-pub struct Stmt {
-    pub stmt: Box<StmtCore>,
-    pub begin: LineCol,
-    pub end: LineCol,
-}
 
 pub fn show_error(msg: &str, program: &str, begin: LineCol, end: LineCol) {
     let lines: Vec<&str> = program.lines().collect();
@@ -179,229 +151,132 @@ pub fn show_error(msg: &str, program: &str, begin: LineCol, end: LineCol) {
     }
 }
 
-impl Stmt {
-    fn decl(s: String, begin: LineCol, end: LineCol) -> Self {
-        Self {
-            stmt: Box::new(StmtCore::Decl(s)),
-            begin,
-            end,
-        }
-    }
 
-    fn nop(begin: LineCol, end: LineCol) -> Self {
-        Self {
-            stmt: Box::new(StmtCore::Nop),
-            begin,
-            end,
-        }
-    }
-
-    fn _break_(begin: LineCol, end: LineCol) -> Self {
-        Self {
-            stmt: Box::new(StmtCore::Break),
-            begin,
-            end,
-        }
-    }
-
-    fn _continue_(begin: LineCol, end: LineCol) -> Self {
-        Self {
-            stmt: Box::new(StmtCore::Continue),
-            begin,
-            end,
-        }
-    }
-
-    fn seq(s1: Stmt, s2: Stmt, begin: LineCol, end: LineCol) -> Self {
-        Self {
-            stmt: Box::new(StmtCore::Seq(s1, s2)),
-            begin,
-            end,
-        }
-    }
-
-    fn assign(s: Variable, e: Expr, begin: LineCol, end: LineCol) -> Self {
-        Self {
-            stmt: Box::new(StmtCore::Assign(s, e)),
-            begin,
-            end,
-        }
-    }
-
-    fn _while_(cond: Expr, body: Stmt, begin: LineCol, end: LineCol) -> Self {
-        Self {
-            stmt: Box::new(StmtCore::While(cond, body)),
-            begin,
-            end,
-        }
-    }
-
-    fn ite(cond: Expr, s1: Stmt, s2: Stmt, begin: LineCol, end: LineCol) -> Self {
-        Self {
-            stmt: Box::new(StmtCore::Ite(cond, s1, s2)),
-            begin,
-            end,
-        }
-    }
-
-    fn _return_(e: Expr, begin: LineCol, end: LineCol) -> Self {
-        Self {
-            stmt: Box::new(StmtCore::Return(e)),
-            begin,
-            end,
-        }
+ast! {
+    enum DeclCore Decl{
+        Variable variable(name: String, value: i32),
+        Array array(name: String, values: Vec<i32>),
+        Function function(name: String, args: Vec<String>, body: Stmt),
+        Seq seq(lhs: Decl, rhs: Decl),
+        Empty empty()
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Debug)]
-pub enum DeclCore{
-    Variable(String, i32),
-    Function(String, Vec<String>, Stmt),
-    Seq(Decl, Decl),
-    Empty,
-}
-
-#[derive(Clone, PartialEq, Eq, Debug)]
-pub struct Decl {
-    pub decl: Box<DeclCore>,
-    pub begin: LineCol,
-    pub end: LineCol,
-}
-
-impl Decl {
-    fn variable(s: String, x: i32, begin: LineCol, end: LineCol) -> Self {
-        Self {
-            decl: Box::new(DeclCore::Variable(s, x)),
-            begin,
-            end
-        }
-    }
-
-    fn function(s: String, args: Vec<String>, body: Stmt, begin: LineCol, end: LineCol) -> Self {
-        Self {
-            decl: Box::new(DeclCore::Function(s, args, body)),
-            begin,
-            end
-        }
-    }
-
-    fn seq(d1: Decl, d2: Decl, begin: LineCol, end: LineCol) -> Self {
-        Self {
-            decl: Box::new(DeclCore::Seq(d1, d2)),
-            begin,
-            end
-        }
-    }
-
-    fn empty(pos: LineCol) -> Self {
-        Self {
-            decl: Box::new(DeclCore::Empty),
-            begin: pos,
-            end: pos
-        }
-    }
-}
 
 peg::parser!(pub grammar customlang() for str {
     rule location() -> peg::str::LineCol =
         #{|input, pos| peg::RuleResult::Matched(pos, peg::Parse::position_repr(input, pos))}
 
-    pub rule expr() -> Expr = precedence!{
+    pub rule rvalue() -> RValue = precedence!{
         x:(@) _ "==" _ y:@ {
             let begin = x.begin;
             let end = y.end;
-            Expr::binop(Binop::Equal, x, y, begin, end)
+            RValue::binop(Binop::Equal, x, y, begin, end)
         }
         x:(@) _ "!=" _ y:@ {
             let begin = x.begin;
             let end = y.end;
-            Expr::binop(Binop::NotEqual, x, y, begin, end)
+            RValue::binop(Binop::NotEqual, x, y, begin, end)
         }
         x:(@) _ "<s" _ y:@ {
             let begin = x.begin;
             let end = y.end;
-            Expr::binop(Binop::LessThan, x, y, begin, end)
+            RValue::binop(Binop::LessThan, x, y, begin, end)
         }
         x:(@) _ "<u" _ y:@ {
             let begin = x.begin;
             let end = y.end;
-            Expr::binop(Binop::ULessThan, x, y, begin, end)
+            RValue::binop(Binop::ULessThan, x, y, begin, end)
         }
         x:(@) _ "<=s" _ y:@ {
             let begin = x.begin;
             let end = y.end;
-            Expr::binop(Binop::LessEqual, x, y, begin, end)
+            RValue::binop(Binop::LessEqual, x, y, begin, end)
         }
         x:(@) _ "<=u" _ y:@ {
             let begin = x.begin;
             let end = y.end;
-            Expr::binop(Binop::ULessEqual, x, y, begin, end)
+            RValue::binop(Binop::ULessEqual, x, y, begin, end)
         }
         x:(@) _ "+" _ y:@ {
             let begin = x.begin;
             let end = y.end;
-            Expr::binop(Binop::Add, x, y, begin, end)
+            RValue::binop(Binop::Add, x, y, begin, end)
         }
         x:(@) _ "-" _ y:@ {
             let begin = x.begin;
             let end = y.end;
-            Expr::binop(Binop::Sub, x, y, begin, end)
+            RValue::binop(Binop::Sub, x, y, begin, end)
         }
         x:(@) _ "&" _ y:@ {
             let begin = x.begin;
             let end = y.end;
-            Expr::binop(Binop::And, x, y, begin, end)
+            RValue::binop(Binop::And, x, y, begin, end)
         }
         x:(@) _ "|" _ y:@ {
             let begin = x.begin;
             let end = y.end;
-            Expr::binop(Binop::Or, x, y, begin, end)
+            RValue::binop(Binop::Or, x, y, begin, end)
         }
         x:(@) _ "^" _ y:@ {
             let begin = x.begin;
             let end = y.end;
-            Expr::binop(Binop::Xor, x, y, begin, end)
+            RValue::binop(Binop::Xor, x, y, begin, end)
         }
         x:(@) _ "<<" _ y:@ {
             let begin = x.begin;
             let end = y.end;
-            Expr::binop(Binop::Sll, x, y, begin, end)
+            RValue::binop(Binop::Sll, x, y, begin, end)
         }
         x:(@) _ ">>a" _ y:@ {
             let begin = x.begin;
             let end = y.end;
-            Expr::binop(Binop::Sra, x, y, begin, end)
+            RValue::binop(Binop::Sra, x, y, begin, end)
         }
         x:(@) _ ">>l" _ y:@ {
             let begin = x.begin;
             let end = y.end;
-            Expr::binop(Binop::Srl, x, y, begin, end)
+            RValue::binop(Binop::Srl, x, y, begin, end)
         }
         begin:location() "-" _ x:@
-            { let end = x.end; Expr::unop(Unop::Neg, x, begin, end) }
+            { let end = x.end; RValue::unop(Unop::Neg, x, begin, end) }
         begin:location() "~" _ x:@
-            { let end= x.end; Expr::unop(Unop::Not, x, begin, end) }
-        begin:location() "*" _ x:@
-            { let end = x.end; Expr::deref(x, begin, end) }
-        x:@ _ "[" _ e:expr() _ "]" l:location() {
-            let begin = x.begin;
-            Expr::deref(Expr::binop(Binop::Add, x, e, begin, l), begin, l)
+            { let end= x.end; RValue::unop(Unop::Not, x, begin, end) }
+        begin:location() s:variable() _ "(" args:(rvalue() ** ",") ")" end:location()
+            { RValue::call(s, args, begin, end) }
+        begin:location() "&" _ lvalue:lvalue() end:location() {
+            RValue::reference(lvalue, begin, end)
         }
-        begin:location() s:variable() _ "(" args:(expr() ** ",") ")" end:location()
-            { Expr::call(s, args, begin, end) }
-        begin:location() s:variable() end:location()
-            { Expr::variable(s, begin, end) }
+        begin:location() lvalue:lvalue() end:location() {
+            RValue::lvalue(lvalue, begin, end)
+        }
         begin:location() n:number() end:location()
-            { Expr::number(n, begin, end) }
+            { RValue::constant(n, begin, end) }
+        "(" _ e:rvalue() _ ")" { e }
     }
 
-    rule _ = quiet!{[' ' | '\n' | '\t']*}
+    pub rule lvalue() -> LValue = precedence!{
+        begin:location() "*" _ rvalue:rvalue() end:location()
+            { LValue::defer(rvalue, begin, end) }
+        lvalue:@ _ "[" _ rvalue:rvalue() _ "]" end:location() {
+            let begin = lvalue.begin;
+            let two = RValue::constant(2, begin, end);
+            let reference = RValue::reference(lvalue, begin, end);
+            let offset = RValue::binop(Binop::Sll, rvalue, two, begin ,end);
+            let addr = RValue::binop(Binop::Add, reference, offset, begin, end);
+            LValue::defer(addr, begin, end)
+        }
+        begin:location() var:variable() end:location()
+            { LValue::variable(var, begin, end) }
+    }
+
+    rule _ = ( quiet!{[' ' | '\n' | '\t']} / quiet!{ "//"[^ '\n']*['\n'] } )*
 
     pub rule stmt_core() -> Stmt = precedence!{
-        begin:location() "let" _ v:variable() _ ":=" _ e:expr() _ ";" end:location() {
+        begin:location() "let" _ v:variable() _ "=" _ e:rvalue() _ ";" end:location() {
             Stmt::seq(
                 Stmt::decl(v.clone(), begin, end),
-                Stmt::assign(v, e, begin, end),
+                Stmt::assign(LValue::variable(v, begin, end), e, begin, end),
                 begin,
                 end
             )
@@ -413,16 +288,16 @@ peg::parser!(pub grammar customlang() for str {
         }
         begin:location() "nop" _ ";" end:location()
             { Stmt::nop(begin, end) }
-        begin:location() "while" _ e:expr() _ "{" _ s:stmt_core() _ "}" end:location()
+        begin:location() "while" _ e:rvalue() _ "{" _ s:stmt_core() _ "}" end:location()
             { Stmt::_while_(e, s, begin, end) }
         begin:location()
-            "if" _ e:expr() _ _ "{" _ s1:stmt_core() _ "}" _
+            "if" _ e:rvalue() _ _ "{" _ s1:stmt_core() _ "}" _
             "else" _ "{" _ s2:stmt_core() _ "}" end:location()
             { Stmt::ite(e, s1, s2, begin, end) }
-        begin:location() "return" _ e:expr() _ ";" end:location()
+        begin:location() "return" _ e:rvalue() _ ";" end:location()
             { Stmt::_return_(e, begin, end) }
-        begin:location() v:variable() _ "=" _ e:expr() _ ";" end:location()
-            { Stmt::assign(v, e, begin, end) }
+        begin:location() lvalue:lvalue() _ "=" _ e:rvalue() _ ";" end:location()
+            { Stmt::assign(lvalue, e, begin, end) }
         begin:location() "break" _ ";" end:location()
             { Stmt::_break_(begin, end) }
         begin:location() "continue" _ ";" end:location()
@@ -441,13 +316,16 @@ peg::parser!(pub grammar customlang() for str {
         begin:location() "def" _ s:variable() _ "(" args:(_variable_() ** ",") ")" _
             "{" body:stmt() "}" end:location()
             { Decl::function(s, args, body, begin, end) }
-        begin:location() "var" _ s:variable() _ ":=" _ n:number() _ ";" end:location()
+        begin:location() "var" _ s:variable() _ "=" _ n:number() _ ";" end:location()
             { Decl::variable(s, n, begin, end) }
+        begin:location() "var" _ s:variable() _ "[" _ n1:number() _ "]" _
+            "=" _ n2:number() _ ";" end:location()
+            { Decl::array(s, std::iter::repeat(n2).take(n1 as usize).collect(), begin, end) }
     }
 
     pub rule decl() -> Decl = precedence!{
         _ d:decl_core() _ { d }
-        l:location() _ { Decl::empty(l) }
+        l:location() _ { Decl::empty(l, l) }
     }
 
     rule number() -> i32

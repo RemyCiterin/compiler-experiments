@@ -501,12 +501,13 @@ impl Translator {
             vars.insert(*v, new.fresh_arg());
         }
 
+        for (v, size) in old.stack.iter() {
+            vars.insert(*v, new.fresh_stack_var(*size));
+        }
+
         for (v, kind) in old.iter_vars() {
             match kind {
                 VarKind::Arg => {}
-                VarKind::Stack => {
-                    vars.insert(v, new.fresh_stack_var());
-                }
                 _ => {
                     vars.insert(v, new.fresh_var());
                 }

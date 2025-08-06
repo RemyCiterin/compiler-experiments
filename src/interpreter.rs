@@ -59,7 +59,7 @@ impl<'a> Interpreter<'a> {
                 let mut offset = symbols[symbol];
 
                 for x in vec {
-                    memory.insert(offset, x);
+                    memory.insert(offset / 4, x);
                     offset += 4;
                 }
             }
@@ -166,12 +166,28 @@ impl<'a> Interpreter<'a> {
         self.write_var(dest, result);
     }
 
+    pub fn load(&self, addr: i32) -> i32 {
+        assert!(addr % 4 == 0);
+        self.memory[&(addr / 4)]
+    }
+
+    pub fn store(&mut self, addr: i32, val: i32) {
+        assert!(addr % 4 == 0);
+        self.memory.insert(addr / 4, val);
+    }
+
+    pub fn push(&mut self, var: Var, size: usize) {
+        assert!(size % 4 == 0);
+        self.memory.insert(self.sp / 4, 0);
+        self.write_var(var, self.sp);
+        self.sp += size as i32;
+    }
+
     pub fn interpret_function(&mut self) -> i32 {
         // Push variables into the stack
-        for var in self.cfg().stack.iter() {
-            self.memory.insert(self.sp, 0);
-            self.write_var(*var, self.sp);
-            self.sp += 4;
+        let sp = self.sp;
+        for (var, size) in self.cfg().stack.iter() {
+            self.push(*var, *size);
         }
 
         for (var, _) in self.cfg().iter_vars() {
@@ -208,7 +224,10 @@ impl<'a> Interpreter<'a> {
                             args.iter().map(|x|self.lit(x)).collect()
                          );
                     }
-                    Instr::Return(l) => return self.lit(l),
+                    Instr::Return(l) => {
+                        self.sp = sp;
+                        return self.lit(l)
+                    },
                     Instr::Jump(l) => {
                         prev_label = label;
                         label = *l;
@@ -220,11 +239,12 @@ impl<'a> Interpreter<'a> {
                         continue;
                     }
                     Instr::Load{dest, addr, ..} => {
-                        self.write_var(*dest, self.memory[&self.lit(addr)]);
+                        let val = self.load(self.lit(addr));
+                        self.write_var(*dest, val);
                         self.loads += 1;
                     }
                     Instr::Store{val, addr, ..} => {
-                        self.memory.insert(self.lit(addr), self.lit(val));
+                        self.store(self.lit(addr), self.lit(val));
                         self.stores += 1;
                     }
                 }

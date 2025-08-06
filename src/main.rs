@@ -103,20 +103,45 @@ pub fn optimize(table: &mut ssa::SymbolTable<ssa::Instr>) {
                 conv.run(cfg);
 
                 out_of_ssa::out_of_ssa(cfg);
-
             }
             _ => {}
         }
     }
 }
 
+pub fn fibo(x: i32) -> i32 {
+    if x < 2 { x }
+    else { fibo(x-1) + fibo(x-2) }
+}
+
 fn main() {
 
     let foo: &str = "
-var A := 42;
+var A = 42;
+
+var buf[100] = 0;
+
+def fibo_mem() {
+    let y = 2;
+    buf[0] = 0;
+    buf[1] = 1;
+
+    while y != 100 {
+        buf[y] = buf[y-1] + buf[y-2];
+        y = y + 1;
+    }
+}
+
+def fibo(x) {
+    if (x == 0) | (x == 1) {
+        return x;
+    } else {
+        return fibo(x-1) + fibo(x-2);
+    }
+}
 
 def foo(x) {
-    let counter := 0;
+    let counter = 0;
     while 1 {
         if x == 0 {
             break;
@@ -126,9 +151,6 @@ def foo(x) {
         }
     }
 
-    let _ := print_i32(x);
-    let _ := print_i32(counter);
-
     return x;
 }
 
@@ -137,19 +159,30 @@ def bar(x) {
         x = x - 1;
     }
 
-    let _ := print_i32(x);
-    A = A + 1;
-    let _ := print_i32(A);
-
     return x + foo(A);
 }
 
+def update(x) {
+    *x = 53;
+    return 0;
+}
+
 def main() {
+    let _ = fibo_mem();
+    let x = buf[50];
+    let _ = print_i32(x);
+    *(&x) = 42;
+    let _ = print_i32(x);
+    let _ = update(&x);
+    let _ = print_i32(x);
+
     return bar(2);
 }
     ";
 
     let parsed = ast::customlang::decl(foo);
+
+    println!("{:?}", parsed);
 
     let mut table =
         match builder::build(parsed.unwrap()) {
@@ -171,9 +204,11 @@ def main() {
 
     println!("instret: {} loads: {} stores: {}", interp.instret, interp.loads, interp.stores);
 
+    //println!("{}", fibo(50));
+
     //  let program: &str = "
-    //  let x := 2;
-    //  let y := 4;
+    //  let x = 2;
+    //  let y = 4;
     //  while x != 3 {
     //      if x == 2 {
     //          x = 1;

@@ -46,7 +46,7 @@ impl Builder {
         // We start by pushing arguments to the stack in case we dereference them
         for arg in args {
             let id = cfg.fresh_arg();
-            let slot = cfg.fresh_stack_var();
+            let slot = cfg.fresh_stack_var(4);
             env.insert(arg, slot);
 
             stmt.push(Instr::Store{volatile: false, val: Lit::Var(id), addr: Lit::Var(slot)});
@@ -64,7 +64,10 @@ impl Builder {
     }
 
     /// Return the current control flow graph
-    pub fn cfg(self) -> Cfg<Instr> {
+    pub fn cfg(mut self) -> Cfg<Instr> {
+        let id = self.cfg.fresh_var();
+        self.stmt.push(Instr::Move(id, Lit::Int(0)));
+        self.gen_return(id);
         self.cfg
     }
 
@@ -83,47 +86,64 @@ impl Builder {
         });
     }
 
+    pub fn gen_lvalue(&mut self, lvalue: LValue) -> Result<Lit, BuilderError> {
+        match *lvalue.core {
+            LValueCore::Variable{name} => {
+                Ok(self.lookup(name, lvalue.begin, lvalue.end)?)
+            }
+            LValueCore::Deref{rvalue} => {
+                Ok(Lit::Var(self.gen_rvalue(rvalue)?))
+            }
+        }
+    }
+
     /// Build an expression and return a variable representing the output value
-    pub fn gen_expr(&mut self, expr: Expr) -> Result<Var, BuilderError> {
-        match *expr.expr {
-            ExprCore::Call(func, args) => {
+    pub fn gen_rvalue(&mut self, expr: RValue) -> Result<Var, BuilderError> {
+        match *expr.core {
+            RValueCore::Call{name, args} => {
                 let mut ids: Vec<Lit> = vec![];
-                for arg in args { ids.push(Lit::Var(self.gen_expr(arg)?)); }
+                for arg in args { ids.push(Lit::Var(self.gen_rvalue(arg)?)); }
                 let id: Var = self.cfg.fresh_var();
-                self.stmt.push(Instr::Call(id, func, ids));
+                self.stmt.push(Instr::Call(id, name, ids));
                 Ok(id)
             }
-            ExprCore::Constant(i) => {
+            RValueCore::Constant{value} => {
                 let id: Var = self.cfg.fresh_var();
-                self.stmt.push(Instr::Move(id, Lit::Int(i)));
+                self.stmt.push(Instr::Move(id, Lit::Int(value)));
                 Ok(id)
             }
-            ExprCore::Variable(s) => {
+            RValueCore::LValue{lvalue} => {
                 let x = self.cfg.fresh_var();
-                let addr = self.lookup(s, expr.begin, expr.end)?;
+                let addr = self.gen_lvalue(lvalue)?;
                 self.stmt.push(
                     Instr::Load{dest: x, addr, volatile: false});
                 Ok(x)
             }
-            ExprCore::Binop(binop, lhs, rhs) => {
-                let l: Var = self.gen_expr(lhs)?;
-                let r: Var  = self.gen_expr(rhs)?;
+            RValueCore::Binop{binop, lhs, rhs} => {
+                let l: Var = self.gen_rvalue(lhs)?;
+                let r: Var  = self.gen_rvalue(rhs)?;
                 let id: Var = self.cfg.fresh_var();
                 self.stmt.push(Instr::Binop(id, binop, Lit::Var(l), Lit::Var(r)));
                 Ok(id)
             }
-            ExprCore::Unop(unop,x) => {
-                let y: Var = self.gen_expr(x)?;
+            RValueCore::Unop{unop,arg} => {
+                let y: Var = self.gen_rvalue(arg)?;
                 let id: Var = self.cfg.fresh_var();
                 self.stmt.push(Instr::Unop(id, unop, Lit::Var(y)));
                 Ok(id)
             }
-            ExprCore::Deref(x) => {
-                let y: Var = self.gen_expr(x)?;
-                let id: Var = self.cfg.fresh_var();
-                self.stmt.push(Instr::Load{dest: id, addr: Lit::Var(y), volatile: false});
+            RValueCore::Ref{lvalue} => {
+                let id = self.cfg.fresh_var();
+                let lit = self.gen_lvalue(lvalue)?;
+                self.stmt.push(Instr::Move(id, lit));
                 Ok(id)
             }
+            //RValueCore::Deref(x) => {
+            //    let y: Var = self.gen_rvalue(x)?;
+            //    let id: Var = self.cfg.fresh_var();
+            //    self.stmt.push(Instr::Load{dest: id, addr: Lit::Var(y), volatile: false});
+            //    Ok(id)
+            //}
         }
     }
 
@@ -147,16 +167,16 @@ impl Builder {
 
     /// Generate the instructions/block for a given statement
     pub fn gen_stmt(&mut self, stmt: Stmt) -> Result<(), BuilderError> {
-        match *stmt.stmt {
-            StmtCore::Decl(s) => {
-                let id = self.cfg.fresh_stack_var();
+        match *stmt.core {
+            StmtCore::Decl{name: s} => {
+                let id = self.cfg.fresh_stack_var(4);
                 self.env.insert(s.clone(), id);
 
                 Ok(())
             }
-            StmtCore::Nop => Ok(()),
-            StmtCore::Ite(cond, lhs, rhs) => {
-                let id = self.gen_expr(cond)?;
+            StmtCore::Nop{} => Ok(()),
+            StmtCore::Ite{cond, lhs, rhs} => {
+                let id = self.gen_rvalue(cond)?;
                 let l1 = self.cfg.fresh_label();
                 let l2 = self.cfg.fresh_label();
                 let exit = self.cfg.fresh_label();
@@ -178,7 +198,7 @@ impl Builder {
 
                 Ok(())
             }
-            StmtCore::While(cond, stmt) => {
+            StmtCore::While{cond, body: stmt} => {
                 let header = self.cfg.fresh_label();
                 let body = self.cfg.fresh_label();
                 let exit = self.cfg.fresh_label();
@@ -186,7 +206,7 @@ impl Builder {
                 self.gen_jump(header);
 
                 self.label = header;
-                let id = self.gen_expr(cond)?;
+                let id = self.gen_rvalue(cond)?;
                 self.gen_branch(id, body, exit);
 
                 let header_save =
@@ -205,24 +225,25 @@ impl Builder {
                 self.label = exit;
                 Ok(())
             }
-            StmtCore::Seq(lhs, rhs) => {
+            StmtCore::Seq{lhs, rhs} => {
                 self.gen_stmt(lhs)?;
                 self.gen_stmt(rhs)
             }
-            StmtCore::Return(e) => {
-                let id = self.gen_expr(e)?;
+            StmtCore::Return{expr} => {
+                let id = self.gen_rvalue(expr)?;
                 self.gen_return(id);
+                self.label = self.cfg.fresh_label();
                 Ok(())
             }
-            StmtCore::Assign(s, e) => {
-                let id = self.gen_expr(e)?;
-                let addr = self.lookup(s, stmt.begin, stmt.end)?;
+            StmtCore::Assign{lvalue, rvalue} => {
+                let id = self.gen_rvalue(rvalue)?;
+                let addr = self.gen_lvalue(lvalue)?;
 
                 self.stmt.push(
                     Instr::Store{addr, val: Lit::Var(id), volatile: false});
                 Ok(())
             }
-            StmtCore::Break => {
+            StmtCore::Break{} => {
                 if self.current_exit.is_none() {
                     return Err(BuilderError{
                         message: "`break` is illegal outside of a loop".to_string(),
@@ -237,7 +258,7 @@ impl Builder {
                 self.label = self.cfg.fresh_label();
                 Ok(())
             }
-            StmtCore::Continue => {
+            StmtCore::Continue{} => {
                 if self.current_header.is_none() {
                     return Err(BuilderError{
                         message: "`continue` is illegal outside of a loop".to_string(),
@@ -272,14 +293,15 @@ fn get_symbols(program: Decl, symbols: &mut HashSet<String>) -> Result<(), Build
         }
     };
 
-    match *program.decl {
-        DeclCore::Variable(v, ..) => add(&v)?,
-        DeclCore::Seq(d1, d2) => {
-            get_symbols(d1, symbols)?;
-            get_symbols(d2, symbols)?;
+    match *program.core {
+        DeclCore::Array{name, ..} => add(&name)?,
+        DeclCore::Variable{name, ..} => add(&name)?,
+        DeclCore::Seq{lhs, rhs} => {
+            get_symbols(lhs, symbols)?;
+            get_symbols(rhs, symbols)?;
         },
-        DeclCore::Function(s, ..) => add(&s)?,
-        DeclCore::Empty => {}
+        DeclCore::Function{name, ..} => add(&name)?,
+        DeclCore::Empty{} => {}
     }
 
     Ok(())
@@ -288,20 +310,24 @@ fn get_symbols(program: Decl, symbols: &mut HashSet<String>) -> Result<(), Build
 fn fill_table(program: Decl, symbols: &HashSet<String>, table: &mut SymbolTable<Instr>)
     -> Result<(), BuilderError> {
 
-    match *program.decl {
-        DeclCore::Variable(v, i) =>
-            _ = table.symbols.insert(v, Section::Data(vec![Word::Int(i)])),
-        DeclCore::Seq(d1, d2) => {
-            fill_table(d1, symbols, table)?;
-            fill_table(d2, symbols, table)?;
+    match *program.core {
+        DeclCore::Variable{name, value} =>
+            _ = table.symbols.insert(name, Section::Data(vec![Word::Int(value)])),
+        DeclCore::Array{name, values} => {
+            let data = values.iter().map(|x| Word::Int(*x)).collect();
+            _ = table.symbols.insert(name, Section::Data(data))
         },
-        DeclCore::Function(s, args, body) => {
+        DeclCore::Seq{lhs, rhs} => {
+            fill_table(lhs, symbols, table)?;
+            fill_table(rhs, symbols, table)?;
+        },
+        DeclCore::Function{name, args, body} => {
             let mut builder = Builder::new(args, symbols.clone());
             builder.gen_stmt(body)?;
 
-            table.symbols.insert(s, Section::Text(builder.cfg()));
+            table.symbols.insert(name, Section::Text(builder.cfg()));
         },
-        DeclCore::Empty => {}
+        DeclCore::Empty{} => {}
     }
 
     Ok(())

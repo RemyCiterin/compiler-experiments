@@ -270,7 +270,7 @@ pub struct Cfg<I: Instruction> {
     instructions: SlotMap<InstrId, (Label, I, Option<InstrId>, Option<InstrId>)>,
 
     /// A set of variables representing stack locations with a size and alignment constraint
-    pub stack: Vec<Var>,
+    pub stack: Vec<(Var, usize)>,
 
     /// Arguments of the function
     pub args: Vec<Var>,
@@ -402,9 +402,9 @@ impl<I: Instruction> Cfg<I> {
     }
 
     /// Return a fresh stack slot, and allocate it on the stack
-    pub fn fresh_stack_var(&mut self) -> Var {
+    pub fn fresh_stack_var(&mut self, size: usize) -> Var {
         let var = self.vars.insert(VarKind::Stack);
-        self.stack.push(var);
+        self.stack.push((var, size));
         var
     }
 
@@ -441,7 +441,7 @@ impl<I: Instruction> Cfg<I> {
             vars[x] = VarKind::Arg;
         }
 
-        for x in self.stack.iter() {
+        for (x, _) in self.stack.iter() {
             assert!(vars[*x] == VarKind::Undef);
             vars[*x] = VarKind::Stack;
         }
@@ -729,8 +729,8 @@ impl<I: Instruction> std::fmt::Display for Cfg<I> {
         }
 
         write!(f, "\nstack:")?;
-        for arg in self.stack.iter() {
-            write!(f, " {}", arg)?;
+        for (arg, size) in self.stack.iter() {
+            write!(f, " [{arg}; {size}]")?;
         }
 
         write!(f, "\n")?;
