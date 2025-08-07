@@ -106,6 +106,7 @@ pub enum RvInstr {
     Return(Reg),
     Load(Reg, Reg, i16),
     Store(Reg, Reg, i16),
+    Ret,
 }
 
 
@@ -350,6 +351,8 @@ impl std::fmt::Display for RvInstr {
                 }
                 Ok(())
             }
+            Self::Ret =>
+                write!(f, "ret"),
             Self::Load(dest, addr, imm) =>
                 write!(f, "lw {dest}, {imm}({addr})"),
             Self::Store(addr, val, imm) =>
@@ -378,6 +381,7 @@ impl RvInstr {
             Self::Return(x) => vec![*x],
             Self::Load(_, x, _) => vec![*x],
             Self::Store(x, y, _) => vec![*x, *y],
+            Self::Ret => vec![],
         }
     }
 
@@ -400,6 +404,7 @@ impl RvInstr {
             Self::Return(x) => vec![x],
             Self::Load(_, x, _) => vec![x],
             Self::Store(x, y, _) => vec![x, y],
+            Self::Ret => vec![],
         }
     }
 
@@ -420,6 +425,7 @@ impl RvInstr {
             Self::Return(_) => None,
             Self::Load(x, _, _) => Some(*x),
             Self::Store(_, _, _) => None,
+            Self::Ret => None,
         }
     }
 
@@ -440,6 +446,7 @@ impl RvInstr {
             Self::Return(_) => None,
             Self::Load(x, _, _) => Some(x),
             Self::Store(_, _, _) => None,
+            Self::Ret => None,
         }
     }
 }
@@ -484,6 +491,7 @@ impl Instruction for RvInstr {
             Self::Return(_) => vec![],
             Self::Load(_, _, _) => vec![],
             Self::Store(_, _, _) => vec![],
+            Self::Ret => vec![],
         }
     }
 
@@ -504,6 +512,7 @@ impl Instruction for RvInstr {
             Self::Return(_) => vec![],
             Self::Load(_, _, _) => vec![],
             Self::Store(_, _, _) => vec![],
+            Self::Ret => vec![],
         }
     }
 
@@ -524,6 +533,7 @@ impl Instruction for RvInstr {
             Self::Return(_) => true,
             Self::Load(_, _, _) => false,
             Self::Store(_, _, _) => false,
+            Self::Ret => true,
         }
     }
 
@@ -544,6 +554,7 @@ impl Instruction for RvInstr {
             Self::Return(_) => true,
             Self::Load(_, _, _) => true,
             Self::Store(_, _, _) => true,
+            Self::Ret => true,
         }
     }
 }

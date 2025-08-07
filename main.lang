@@ -1,6 +1,6 @@
 var A = 42;
 
-var buf[100] = 0;
+var buf[30] = 0;
 
 // Fibo function using memoisation with a given buffer
 def fibo_mem(buffer, size) {
