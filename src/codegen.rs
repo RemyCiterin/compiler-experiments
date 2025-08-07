@@ -47,15 +47,6 @@ pub enum Reg {
     Virt(Var),
 }
 
-impl std::fmt::Display for Reg {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Virt(v) => write!(f, "{v}"),
-            Self::Phys(v) => write!(f, "p{v}"),
-        }
-    }
-}
-
 impl Reg {
     pub fn to_virt(&self) -> Option<Var> {
         match self {
@@ -87,86 +78,282 @@ impl Reg {
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub enum RvBinop {
+    Add, Sub, Slt, Sltu, Sll, Srl, Sra, And, Or, Xor
+}
+
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub enum RvUnop {
+    Add, Slt, Sltu, Sll, Srl, Sra, And, Or, Xor
+}
+
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub enum RvBranchKind {
+    Eq, Ne, Lt, Ltu, Ge, Geu
+}
+
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum RvInstr {
-    Add(Reg, Reg, Reg),
-    Addi(Reg, Reg, i16),
-    Xori(Reg, Reg, i16),
-    Sltiu(Reg, Reg, i16),
-    Sub(Reg, Reg, Reg),
-    Slt(Reg, Reg, Reg),
-    Sltu(Reg, Reg, Reg),
-    Sll(Reg, Reg, Reg),
-    Srl(Reg, Reg, Reg),
-    Sra(Reg, Reg, Reg),
-    And(Reg, Reg, Reg),
-    Or(Reg, Reg, Reg),
-    Xor(Reg, Reg, Reg),
-    Beq(Reg, Reg, Label, Label),
-    Bne(Reg, Reg, Label, Label),
-    Blt(Reg, Reg, Label, Label),
-    Bltu(Reg, Reg, Label, Label),
-    Bge(Reg, Reg, Label, Label),
-    Bgeu(Reg, Reg, Label, Label),
+    Unop(Reg, RvUnop, Reg, i16),
+    Binop(Reg, RvBinop, Reg, Reg),
+    Branch(RvBranchKind, Reg, Reg, Label, Label),
     Jump(Label),
     La(Reg, String),
     Li(Reg, i32),
     RvCall(String),
     GenericCall(Reg, String, Vec<Reg>),
+    Phi(Reg, Vec<(Reg, Label)>),
     Return(Reg),
     Load(Reg, Reg, i16),
     Store(Reg, Reg, i16),
 }
 
+
+pub fn check_riscv_immediate(imm: i16) -> bool {
+    imm >= -2048 && imm <= 2047
+}
+
 impl RvInstr {
+    /// Bitwise negation
     pub fn neg(dst: Reg, src: Reg) -> Self {
-        Self::Sub(dst, Reg::Phys(0), src)
+        Self::sub(dst, Reg::Phys(0), src)
+    }
+
+    pub fn ne_zero(dst: Reg, src: Reg) -> Self {
+        Self::sltu(dst, Reg::Phys(0), src)
+    }
+
+    pub fn eq_zero(dst: Reg, src: Reg) -> Self {
+        Self::sltiu(dst, src, 1)
     }
 
     pub fn not(dst: Reg, src: Reg) -> Self {
-        Self::Xori(dst, src, -1)
+        Self::xori(dst, src, -1)
+    }
+
+    pub fn add(dst: Reg, src1: Reg, src2: Reg) -> Self {
+        Self::Binop(dst, RvBinop::Add, src1, src2)
+    }
+
+    pub fn and(dst: Reg, src1: Reg, src2: Reg) -> Self {
+        Self::Binop(dst, RvBinop::And, src1, src2)
+    }
+
+    pub fn sub(dst: Reg, src1: Reg, src2: Reg) -> Self {
+        Self::Binop(dst, RvBinop::Sub, src1, src2)
+    }
+
+    pub fn or(dst: Reg, src1: Reg, src2: Reg) -> Self {
+        Self::Binop(dst, RvBinop::Or, src1, src2)
+    }
+
+    pub fn xor(dst: Reg, src1: Reg, src2: Reg) -> Self {
+        Self::Binop(dst, RvBinop::Xor, src1, src2)
+    }
+
+    pub fn sll(dst: Reg, src1: Reg, src2: Reg) -> Self {
+        Self::Binop(dst, RvBinop::Sll, src1, src2)
+    }
+
+    pub fn sra(dst: Reg, src1: Reg, src2: Reg) -> Self {
+        Self::Binop(dst, RvBinop::Sra, src1, src2)
+    }
+
+    pub fn srl(dst: Reg, src1: Reg, src2: Reg) -> Self {
+        Self::Binop(dst, RvBinop::Srl, src1, src2)
+    }
+
+    pub fn slt(dst: Reg, src1: Reg, src2: Reg) -> Self {
+        Self::Binop(dst, RvBinop::Slt, src1, src2)
+    }
+
+    pub fn sltu(dst: Reg, src1: Reg, src2: Reg) -> Self {
+        Self::Binop(dst, RvBinop::Sltu, src1, src2)
+    }
+
+    pub fn addi(dst: Reg, src: Reg, imm: i16) -> Self {
+        assert!(check_riscv_immediate(imm));
+        Self::Unop(dst, RvUnop::Add, src, imm)
+    }
+
+    pub fn andi(dst: Reg, src: Reg, imm: i16) -> Self {
+        assert!(check_riscv_immediate(imm));
+        Self::Unop(dst, RvUnop::And, src, imm)
+    }
+
+    pub fn ori(dst: Reg, src: Reg, imm: i16) -> Self {
+        assert!(check_riscv_immediate(imm));
+        Self::Unop(dst, RvUnop::Or, src, imm)
+    }
+
+    pub fn xori(dst: Reg, src: Reg, imm: i16) -> Self {
+        assert!(check_riscv_immediate(imm));
+        Self::Unop(dst, RvUnop::Xor, src, imm)
+    }
+
+    pub fn slli(dst: Reg, src: Reg, imm: i16) -> Self {
+        assert!(check_riscv_immediate(imm));
+        Self::Unop(dst, RvUnop::Sll, src, imm)
+    }
+
+    pub fn srai(dst: Reg, src: Reg, imm: i16) -> Self {
+        assert!(check_riscv_immediate(imm));
+        Self::Unop(dst, RvUnop::Sra, src, imm)
+    }
+
+    pub fn srli(dst: Reg, src: Reg, imm: i16) -> Self {
+        assert!(check_riscv_immediate(imm));
+        Self::Unop(dst, RvUnop::Srl, src, imm)
+    }
+
+    pub fn slti(dst: Reg, src: Reg, imm: i16) -> Self {
+        assert!(check_riscv_immediate(imm));
+        Self::Unop(dst, RvUnop::Slt, src, imm)
+    }
+
+    pub fn sltiu(dst: Reg, src: Reg, imm: i16) -> Self {
+        assert!(check_riscv_immediate(imm));
+        Self::Unop(dst, RvUnop::Sltu, src, imm)
     }
 
     pub fn from_binop(dst: Var, binop: Binop, v1: Var, v2: Var) -> Vec<Self> {
         match binop {
-            Binop::Add => vec![Self::Add(Reg::Virt(dst), Reg::Virt(v1), Reg::Virt(v2))],
-            Binop::Sub => vec![Self::Sub(Reg::Virt(dst), Reg::Virt(v1), Reg::Virt(v2))],
-            Binop::And => vec![Self::And(Reg::Virt(dst), Reg::Virt(v1), Reg::Virt(v2))],
-            Binop::Or => vec![Self::Or(Reg::Virt(dst), Reg::Virt(v1), Reg::Virt(v2))],
-            Binop::Xor => vec![Self::Xor(Reg::Virt(dst), Reg::Virt(v1), Reg::Virt(v2))],
-            Binop::Sll => vec![Self::Sll(Reg::Virt(dst), Reg::Virt(v1), Reg::Virt(v2))],
-            Binop::Sra => vec![Self::Sra(Reg::Virt(dst), Reg::Virt(v1), Reg::Virt(v2))],
-            Binop::Srl => vec![Self::Srl(Reg::Virt(dst), Reg::Virt(v1), Reg::Virt(v2))],
-            Binop::LessThan => vec![Self::Slt(Reg::Virt(dst), Reg::Virt(v1), Reg::Virt(v2))],
-            Binop::ULessThan => vec![Self::Sltu(Reg::Virt(dst), Reg::Virt(v1), Reg::Virt(v2))],
+            Binop::Add => vec![Self::add(Reg::Virt(dst), Reg::Virt(v1), Reg::Virt(v2))],
+            Binop::Sub => vec![Self::sub(Reg::Virt(dst), Reg::Virt(v1), Reg::Virt(v2))],
+            Binop::And => vec![Self::and(Reg::Virt(dst), Reg::Virt(v1), Reg::Virt(v2))],
+            Binop::Or => vec![Self::or(Reg::Virt(dst), Reg::Virt(v1), Reg::Virt(v2))],
+            Binop::Xor => vec![Self::xor(Reg::Virt(dst), Reg::Virt(v1), Reg::Virt(v2))],
+            Binop::Sll => vec![Self::sll(Reg::Virt(dst), Reg::Virt(v1), Reg::Virt(v2))],
+            Binop::Sra => vec![Self::sra(Reg::Virt(dst), Reg::Virt(v1), Reg::Virt(v2))],
+            Binop::Srl => vec![Self::srl(Reg::Virt(dst), Reg::Virt(v1), Reg::Virt(v2))],
+            Binop::LessThan => vec![Self::slt(Reg::Virt(dst), Reg::Virt(v1), Reg::Virt(v2))],
+            Binop::ULessThan => vec![Self::sltu(Reg::Virt(dst), Reg::Virt(v1), Reg::Virt(v2))],
 
             Binop::Equal =>
                 vec![
-                    Self::Sub(Reg::Virt(dst), Reg::Virt(v1), Reg::Virt(v2)),
-                    Self::Sltiu(Reg::Virt(dst), Reg::Virt(dst), 1)
+                    Self::sub(Reg::Virt(dst), Reg::Virt(v1), Reg::Virt(v2)),
+                    Self::eq_zero(Reg::Virt(dst), Reg::Virt(dst))
                 ],
             Binop::NotEqual =>
                 vec![
-                    Self::Sub(Reg::Virt(dst), Reg::Virt(v1), Reg::Virt(v2)),
-                    Self::Sltu(Reg::Virt(dst), Reg::Phys(0), Reg::Virt(dst))
+                    Self::sub(Reg::Virt(dst), Reg::Virt(v1), Reg::Virt(v2)),
+                    Self::ne_zero(Reg::Virt(dst), Reg::Virt(dst))
                 ],
             Binop::LessEqual =>
                 vec![
-                    Self::Slt(Reg::Virt(dst), Reg::Virt(v2), Reg::Virt(v1)),
-                    Self::Xori(Reg::Virt(dst), Reg::Virt(dst), -1)
+                    Self::slt(Reg::Virt(dst), Reg::Virt(v2), Reg::Virt(v1)),
+                    Self::not(Reg::Virt(dst), Reg::Virt(dst))
                 ],
             Binop::ULessEqual =>
                 vec![
-                    Self::Sltu(Reg::Virt(dst), Reg::Virt(v2), Reg::Virt(v1)),
-                    Self::Xori(Reg::Virt(dst), Reg::Virt(dst), -1)
+                    Self::sltu(Reg::Virt(dst), Reg::Virt(v2), Reg::Virt(v1)),
+                    Self::not(Reg::Virt(dst), Reg::Virt(dst))
                 ],
+        }
+    }
+
+    pub fn from_unop(dst: Var, unop: Unop, v: Var) -> Vec<Self> {
+        match unop {
+            Unop::Not => vec![Self::not(Reg::Virt(dst), Reg::Virt(v))],
+            Unop::Neg => vec![Self::neg(Reg::Virt(dst), Reg::Virt(v))],
+        }
+    }
+}
+
+impl std::fmt::Display for RvBinop {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Add => write!(f, "add"),
+            Self::And => write!(f, "and"),
+            Self::Sub => write!(f, "sub"),
+            Self::Or => write!(f, "or"),
+            Self::Xor => write!(f, "xor"),
+            Self::Sll => write!(f, "sll"),
+            Self::Sra => write!(f, "sra"),
+            Self::Srl => write!(f, "srl"),
+            Self::Slt => write!(f, "stl"),
+            Self::Sltu => write!(f, "sltu"),
+        }
+    }
+}
+
+impl std::fmt::Display for RvUnop {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Add => write!(f, "addi"),
+            Self::And => write!(f, "andi"),
+            Self::Or => write!(f, "ori"),
+            Self::Xor => write!(f, "xori"),
+            Self::Sll => write!(f, "slli"),
+            Self::Sra => write!(f, "srai"),
+            Self::Srl => write!(f, "srli"),
+            Self::Slt => write!(f, "stli"),
+            Self::Sltu => write!(f, "sltiu"),
+        }
+    }
+}
+
+impl std::fmt::Display for RvBranchKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Eq => write!(f, "beq"),
+            Self::Ne => write!(f, "bne"),
+            Self::Lt => write!(f, "blt"),
+            Self::Ltu => write!(f, "bltu"),
+            Self::Ge => write!(f, "bge"),
+            Self::Geu => write!(f, "bgeu"),
+        }
+    }
+}
+
+impl std::fmt::Display for Reg {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Virt(v) => write!(f, "{v}"),
+            Self::Phys(v) => write!(f, "x{v}"),
         }
     }
 }
 
 impl std::fmt::Display for RvInstr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        //write!(f, "{:?}", self)
         match self {
-            _ => Ok(())
+            Self::Binop(dest, binop, src1, src2) =>
+                write!(f, "{binop} {dest}, {src1}, {src2}"),
+            Self::Unop(dest, unop, src, imm) =>
+                write!(f, "{unop} {dest}, {src}, {imm}"),
+            Self::Branch(kind, x, y, l1, l2) =>
+                write!(f, "{kind} {x}, {y}, {l1}, {l2}"),
+            Self::Jump(label) =>
+                write!(f, "jump {label}"),
+            Self::Li(r, i) =>
+                write!(f, "li {r}, {i}"),
+            Self::La(r, s) =>
+                write!(f, "la {r}, {s}"),
+            Self::RvCall(s) =>
+                write!(f, "call {s}"),
+            Self::GenericCall(r, s, args) => {
+                write!(f, "call {r} {s} (")?;
+                for (i, a) in args.iter().enumerate() {
+                    write!(f, "{a}")?;
+                    if i != args.len() - 1 { write!(f, ", ")?; }
+                }
+                write!(f, ")")
+            }
+            Self::Return(r) =>
+                write!(f, "ret {r}"),
+            Self::Phi(r ,args) => {
+                write!(f, "phi {r}")?;
+                for (r, l) in args.iter() {
+                    write!(f, " ({r}, {l})")?;
+                }
+                Ok(())
+            }
+            Self::Load(dest, addr, imm) =>
+                write!(f, "lw {dest}, {imm}({addr})"),
+            Self::Store(addr, val, imm) =>
+                write!(f, "sw {val}, {imm}({addr})"),
         }
     }
 }
@@ -174,30 +361,16 @@ impl std::fmt::Display for RvInstr {
 impl RvInstr {
     pub fn dependencies(&self) -> Vec<Reg> {
         match self {
-            Self::Add(_, x, y)
-                | Self::Sub(_, x, y)
-                | Self::Slt(_, x, y)
-                | Self::Sltu(_, x, y)
-                | Self::Srl(_, x, y)
-                | Self::Sll(_, x, y)
-                | Self::Sra(_, x, y)
-                | Self::And(_, x, y)
-                | Self::Or(_, x, y)
-                | Self::Xor(_, x, y)
+            Self::Phi(_, args) =>
+                args.iter().map(|(r, _)| *r).collect(),
+            Self::Binop(_, _, x, y)
                 => vec![*x, *y],
-            Self::Beq(x, y, _, _)
-                | Self::Bne(x, y, _, _)
-                | Self::Blt(x, y, _, _)
-                | Self::Bltu(x, y, _, _)
-                | Self::Bge(x, y, _, _)
-                | Self::Bgeu(x, y, _, _)
+            Self::Branch(_, x, y, _, _)
                 => vec![*x, *y],
             Self::RvCall(_) => vec![],
             Self::GenericCall(_, _, args) =>
                 args.iter().cloned().collect(),
-            Self::Addi(_, x, _)
-                | Self::Xori(_, x, _)
-                | Self::Sltiu(_, x, _)
+            Self::Unop(_, _, x, _)
                 => vec![*x],
             Self::Jump(_) => vec![],
             Self::Li(_, _) => vec![],
@@ -210,30 +383,16 @@ impl RvInstr {
 
     pub fn dependencies_mut(&mut self) -> Vec<&mut Reg> {
         match self {
-            Self::Add(_, x, y)
-                | Self::Sub(_, x, y)
-                | Self::Slt(_, x, y)
-                | Self::Sltu(_, x, y)
-                | Self::Srl(_, x, y)
-                | Self::Sll(_, x, y)
-                | Self::Sra(_, x, y)
-                | Self::And(_, x, y)
-                | Self::Or(_, x, y)
-                | Self::Xor(_, x, y)
+            Self::Phi(_, args) =>
+                args.iter_mut().map(|(r, _)| r).collect(),
+            Self::Binop(_, _, x, y)
                 => vec![x, y],
-            Self::Beq(x, y, _, _)
-                | Self::Bne(x, y, _, _)
-                | Self::Blt(x, y, _, _)
-                | Self::Bltu(x, y, _, _)
-                | Self::Bge(x, y, _, _)
-                | Self::Bgeu(x, y, _, _)
+            Self::Branch(_, x, y, _, _)
                 => vec![x, y],
             Self::RvCall(_) => vec![],
             Self::GenericCall(_, _, args) =>
                 args.iter_mut().collect(),
-            Self::Addi(_, x, _)
-                | Self::Xori(_, x, _)
-                | Self::Sltiu(_, x, _)
+            Self::Unop(_, _, x, _)
                 => vec![x],
             Self::Jump(_) => vec![],
             Self::Li(_, _) => vec![],
@@ -246,29 +405,14 @@ impl RvInstr {
 
     pub fn target(&self) -> Option<Reg> {
         match self {
-            Self::Add(x, _, _)
-                | Self::Sub(x, _, _)
-                | Self::Slt(x, _, _)
-                | Self::Sltu(x, _, _)
-                | Self::Srl(x, _, _)
-                | Self::Sll(x, _, _)
-                | Self::Sra(x, _, _)
-                | Self::And(x, _, _)
-                | Self::Or(x, _, _)
-                | Self::Xor(x, _, _)
+            Self::Phi(x, ..) => Some(*x),
+            Self::Binop(x, _, _, _)
                 => Some(*x),
-            Self::Beq(_, _, _, _)
-                | Self::Bne(_, _, _, _)
-                | Self::Blt(_, _, _, _)
-                | Self::Bltu(_, _, _, _)
-                | Self::Bge(_, _, _, _)
-                | Self::Bgeu(_, _, _, _)
+            Self::Branch(_, _, _, _, _)
                 => None,
             Self::RvCall(_) => None,
             Self::GenericCall(x, _, _) => Some(*x),
-            Self::Addi(x, _, _)
-                | Self::Xori(x, _, _)
-                | Self::Sltiu(x, _, _)
+            Self::Unop(x, _, _, _)
                 => Some(*x),
             Self::Jump(_) => None,
             Self::Li(x, _) => Some(*x),
@@ -281,29 +425,14 @@ impl RvInstr {
 
     pub fn target_mut(&mut self) -> Option<&mut Reg> {
         match self {
-            Self::Add(x, _, _)
-                | Self::Sub(x, _, _)
-                | Self::Slt(x, _, _)
-                | Self::Sltu(x, _, _)
-                | Self::Srl(x, _, _)
-                | Self::Sll(x, _, _)
-                | Self::Sra(x, _, _)
-                | Self::And(x, _, _)
-                | Self::Or(x, _, _)
-                | Self::Xor(x, _, _)
+            Self::Phi(x, ..) => Some(x),
+            Self::Binop(x, _, _, _)
                 => Some(x),
-            Self::Beq(_, _, _, _)
-                | Self::Bne(_, _, _, _)
-                | Self::Blt(_, _, _, _)
-                | Self::Bltu(_, _, _, _)
-                | Self::Bge(_, _, _, _)
-                | Self::Bgeu(_, _, _, _)
+            Self::Branch(_, _, _, _, _)
                 => None,
             Self::RvCall(_) => None,
             Self::GenericCall(x, _, _) => Some(x),
-            Self::Addi(x, _, _)
-                | Self::Xori(x, _, _)
-                | Self::Sltiu(x, _, _)
+            Self::Unop(x, _, _, _)
                 => Some(x),
             Self::Jump(_) => None,
             Self::Li(x, _) => Some(x),
@@ -340,29 +469,14 @@ impl Instruction for RvInstr {
 
     fn labels_mut(&mut self) -> Vec<&mut Label> {
         match self {
-            Self::Add(_, _, _)
-                | Self::Sub(_, _, _)
-                | Self::Slt(_, _, _)
-                | Self::Sltu(_, _, _)
-                | Self::Srl(_, _, _)
-                | Self::Sll(_, _, _)
-                | Self::Sra(_, _, _)
-                | Self::And(_, _, _)
-                | Self::Or(_, _, _)
-                | Self::Xor(_, _, _)
+            Self::Phi(..) => vec![],
+            Self::Binop(_, _, _, _)
                 => vec![],
-            Self::Beq(_, _, l1, l2)
-                | Self::Bne(_, _, l1, l2)
-                | Self::Blt(_, _, l1, l2)
-                | Self::Bltu(_, _, l1, l2)
-                | Self::Bge(_, _, l1, l2)
-                | Self::Bgeu(_, _, l1, l2)
+            Self::Branch(_, _, _, l1, l2)
                 => vec![l1, l2],
             Self::RvCall(_) => vec![],
             Self::GenericCall(_, _, _) => vec![],
-            Self::Addi(_, _, _)
-                | Self::Xori(_, _, _)
-                | Self::Sltiu(_, _, _)
+            Self::Unop(_, _, _, _)
                 => vec![],
             Self::Jump(l) => vec![l],
             Self::Li(_, _) => vec![],
@@ -375,29 +489,14 @@ impl Instruction for RvInstr {
 
     fn labels(&self) -> Vec<Label> {
         match self {
-            Self::Add(_, _, _)
-                | Self::Sub(_, _, _)
-                | Self::Slt(_, _, _)
-                | Self::Sltu(_, _, _)
-                | Self::Srl(_, _, _)
-                | Self::Sll(_, _, _)
-                | Self::Sra(_, _, _)
-                | Self::And(_, _, _)
-                | Self::Or(_, _, _)
-                | Self::Xor(_, _, _)
+            Self::Phi(..) => vec![],
+            Self::Binop(_, _, _, _)
                 => vec![],
-            Self::Beq(_, _, l1, l2)
-                | Self::Bne(_, _, l1, l2)
-                | Self::Blt(_, _, l1, l2)
-                | Self::Bltu(_, _, l1, l2)
-                | Self::Bge(_, _, l1, l2)
-                | Self::Bgeu(_, _, l1, l2)
+            Self::Branch(_, _, _, l1, l2)
                 => vec![*l1, *l2],
             Self::RvCall(_) => vec![],
             Self::GenericCall(_, _, _) => vec![],
-            Self::Addi(_, _, _)
-                | Self::Xori(_, _, _)
-                | Self::Sltiu(_, _, _)
+            Self::Unop(_, _, _, _)
                 => vec![],
             Self::Jump(l) => vec![*l],
             Self::Li(_, _) => vec![],
@@ -410,29 +509,14 @@ impl Instruction for RvInstr {
 
     fn exit_block(&self) -> bool {
         match self {
-            Self::Add(_, _, _)
-                | Self::Sub(_, _, _)
-                | Self::Slt(_, _, _)
-                | Self::Sltu(_, _, _)
-                | Self::Srl(_, _, _)
-                | Self::Sll(_, _, _)
-                | Self::Sra(_, _, _)
-                | Self::And(_, _, _)
-                | Self::Or(_, _, _)
-                | Self::Xor(_, _, _)
+            Self::Phi(..) => false,
+            Self::Binop(_, _, _, _)
                 => false,
-            Self::Beq(_, _, _, _)
-                | Self::Bne(_, _, _, _)
-                | Self::Blt(_, _, _, _)
-                | Self::Bltu(_, _, _, _)
-                | Self::Bge(_, _, _, _)
-                | Self::Bgeu(_, _, _, _)
+            Self::Branch(_, _, _, _, _)
                 => true,
             Self::RvCall(_) => false,
             Self::GenericCall(_, _, _) => false,
-            Self::Addi(_, _, _)
-                | Self::Xori(_, _, _)
-                | Self::Sltiu(_, _, _)
+            Self::Unop(_, _, _, _)
                 => false,
             Self::Jump(_) => true,
             Self::Li(_, _) => false,
@@ -445,29 +529,14 @@ impl Instruction for RvInstr {
 
     fn may_have_side_effect(&self) -> bool {
         match self {
-            Self::Add(_, _, _)
-                | Self::Sub(_, _, _)
-                | Self::Slt(_, _, _)
-                | Self::Sltu(_, _, _)
-                | Self::Srl(_, _, _)
-                | Self::Sll(_, _, _)
-                | Self::Sra(_, _, _)
-                | Self::And(_, _, _)
-                | Self::Or(_, _, _)
-                | Self::Xor(_, _, _)
+            Self::Phi(..) => false,
+            Self::Binop(_, _, _, _)
                 => false,
-            Self::Beq(_, _, _, _)
-                | Self::Bne(_, _, _, _)
-                | Self::Blt(_, _, _, _)
-                | Self::Bltu(_, _, _, _)
-                | Self::Bge(_, _, _, _)
-                | Self::Bgeu(_, _, _, _)
+            Self::Branch(_, _, _, _, _)
                 => true,
             Self::RvCall(_) => true,
             Self::GenericCall(_, _, _) => true,
-            Self::Addi(_, _, _)
-                | Self::Xori(_, _, _)
-                | Self::Sltiu(_, _, _)
+            Self::Unop(_, _, _, _)
                 => false,
             Self::Jump(_) => true,
             Self::Li(_, _) => false,
@@ -479,21 +548,57 @@ impl Instruction for RvInstr {
     }
 }
 
+impl crate::out_of_ssa::HasMove for RvInstr {
+    fn mv(dst: Var, src: Lit) -> Self {
+        match src {
+            Lit::Var(v) => RvInstr::Unop(Reg::Virt(dst), RvUnop::Add, Reg::Virt(v), 0),
+            Lit::Addr(s) => RvInstr::La(Reg::Virt(dst), s),
+            Lit::Int(i) => RvInstr::Li(Reg::Virt(dst), i),
+        }
+    }
+}
+
+impl crate::out_of_ssa::HasPhi for RvInstr {
+    fn from_phi(dest: Var, args: Vec<(Var, Label)>) -> Self {
+        Self::Phi(
+            Reg::Virt(dest),
+            args.into_iter().map(|(v, l)| (Reg::Virt(v), l)).collect())
+    }
+
+    fn to_phi(&self) -> Option<(Var, Vec<(Lit, Label)>)> {
+        match self {
+            Self::Phi(dest, args) => {
+                Some((
+                    dest.to_virt().unwrap(),
+                    args.iter()
+                    .map(|(v,l)| {
+                        (Lit::Var(v.to_virt().unwrap()), *l)
+                    }).collect()
+                ))
+            }
+            _ => None,
+        }
+    }
+}
+
 
 pub struct Translator {
-    old: Cfg<Instr>,
     new: Cfg<RvInstr>,
     labels: SecondaryMap<Label, Label>,
     vars: SparseSecondaryMap<Var, Var>,
 }
 
 impl Translator {
-    pub fn new(old: Cfg<Instr>) -> Self {
+    pub fn new(old: &Cfg<Instr>) -> Self {
         let mut labels = SecondaryMap::new();
         let mut vars = SparseSecondaryMap::new();
         let mut new = Cfg::new(false, vec![]);
 
         for (b, _) in old.iter_blocks() {
+            if b == old.entry() {
+                labels.insert(b, new.entry());
+                continue;
+            }
             labels.insert(b, new.fresh_label());
         }
 
@@ -508,6 +613,7 @@ impl Translator {
         for (v, kind) in old.iter_vars() {
             match kind {
                 VarKind::Arg => {}
+                VarKind::Stack => {}
                 _ => {
                     vars.insert(v, new.fresh_var());
                 }
@@ -517,9 +623,16 @@ impl Translator {
         Self {
             labels,
             vars,
-            old,
             new,
         }
+    }
+
+    pub fn translate(mut self: Self, old: &Cfg<Instr>) -> Cfg<RvInstr> {
+        for (b, _) in old.iter_blocks() {
+            self.translate_block(old, b);
+        }
+
+        self.new
     }
 
     pub fn load_lit(&mut self, stmt: &mut Vec<RvInstr>, lit: Lit) -> Var {
@@ -538,17 +651,65 @@ impl Translator {
         }
     }
 
-    pub fn translate_block(&mut self, block: Label) {
+    pub fn translate_block(&mut self, old: &Cfg<Instr>, block: Label) {
         let mut stmt: Vec<RvInstr> = vec![];
 
-        for instr in self.old[block].stmt.clone() {
+        for instr in old[block].stmt.clone() {
             match instr {
                 Instr::Binop(dst, binop, l1, l2) => {
                     let v1 = self.load_lit(&mut stmt, l1);
                     let v2 = self.load_lit(&mut stmt, l2);
-                    stmt.extend(RvInstr::from_binop(dst, binop, v1, v2));
+                    stmt.extend(RvInstr::from_binop(self.vars[dst], binop, v1, v2));
                 }
-                _ => {}
+                Instr::Unop(dst, unop, l) => {
+                    let v = self.load_lit(&mut stmt, l);
+                    stmt.extend(RvInstr::from_unop(self.vars[dst], unop, v));
+                }
+                Instr::Return(l) => {
+                    let v = self.load_lit(&mut stmt, l);
+                    stmt.push(RvInstr::Return(Reg::Virt(v)));
+                }
+                Instr::Move(dst, l) => {
+                    let v = self.load_lit(&mut stmt, l);
+                    stmt.push(
+                        RvInstr::addi(Reg::Virt(self.vars[dst]), Reg::Virt(v), 0));
+                }
+                Instr::Load{dest, addr, ..} => {
+                    let v = self.load_lit(&mut stmt, addr);
+                    stmt.push(RvInstr::Load(Reg::Virt(self.vars[dest]), Reg::Virt(v), 0));
+                }
+                Instr::Store{val, addr, ..} => {
+                    let val = self.load_lit(&mut stmt, val);
+                    let addr = self.load_lit(&mut stmt, addr);
+                    stmt.push(RvInstr::Load(Reg::Virt(addr), Reg::Virt(val), 0));
+                }
+                Instr::Jump(l) => {
+                    stmt.push(RvInstr::Jump(self.labels[l]));
+                }
+                Instr::Call(dest, name, args) => {
+                    let args = args.into_iter()
+                        .map(|a| {
+                            Reg::Virt(self.load_lit(&mut stmt, a))
+                        }).collect();
+                    stmt.push(RvInstr::GenericCall(Reg::Virt(self.vars[dest]), name, args));
+                }
+                Instr::Branch(cond, l1, l2) => {
+                    let cond = self.load_lit(&mut stmt, cond);
+                    stmt.push(
+                        RvInstr::Branch(
+                            RvBranchKind::Ne,
+                            Reg::Virt(cond),
+                            Reg::Phys(0),
+                            self.labels[l1],
+                            self.labels[l2]));
+                }
+                Instr::Phi(dest, args) => {
+                    let args = args.into_iter()
+                        .map(|(lit, label)| {
+                            (Reg::Virt(self.load_lit(&mut stmt, lit)), label)
+                        }).collect();
+                    stmt.push(RvInstr::Phi(Reg::Virt(self.vars[dest]), args));
+                }
             }
         }
 

@@ -3,11 +3,42 @@ use slotmap::*;
 use crate::union_find::*;
 
 pub struct Conventionalize {
-    copies: SecondaryMap<Label, Vec<Instr>>,
+    copies: SecondaryMap<Label, Vec<(Var, Lit)>>,
+}
+
+pub trait HasMove: Instruction {
+    fn mv(dest: Var, src: Lit) -> Self;
+}
+
+/// HasPhi must be generate enough such that instructions from the general IR and the machine
+/// specific ISA can use it (even if they don't use Lit directly), this is why `from_phi` take a
+/// list of variables as arguments instead of literals
+pub trait HasPhi: Instruction {
+    fn to_phi(&self) -> Option<(Var, Vec<(Lit, Label)>)>;
+    fn from_phi(dest: Var, args: Vec<(Var, Label)>) -> Self;
+}
+
+impl HasMove for Instr {
+    fn mv(dest: Var, src: Lit) -> Self {
+        Instr::Move(dest, src)
+    }
+}
+
+impl HasPhi for Instr {
+    fn from_phi(dest: Var, args: Vec<(Var, Label)>) -> Self {
+        Instr::Phi(dest, args.into_iter().map(|(v,l)| (Lit::Var(v),l)).collect())
+    }
+
+    fn to_phi(&self) -> Option<(Var, Vec<(Lit, Label)>)> {
+        match self.clone() {
+            Instr::Phi(dest, args) => Some((dest, args)),
+            _ => None
+        }
+    }
 }
 
 impl Conventionalize {
-    pub fn new(cfg: &Cfg<Instr>) -> Self {
+    pub fn new<I: Instruction>(cfg: &Cfg<I>) -> Self {
         let mut copies = SecondaryMap::new();
 
         for (b, _) in cfg.iter_blocks() {
@@ -19,47 +50,52 @@ impl Conventionalize {
 
     /// Conventionalize the ssa form: ensure that each phi expressions is of the form
     /// `Phi(x0, Var(x1), ... Var(xn))` where x0, x1, ..., x2 doesn't interfer with each other
-    pub fn run(&mut self, cfg: &mut Cfg<Instr>) {
+    pub fn run<I: HasPhi + HasMove>(&mut self, cfg: &mut Cfg<I>) {
         let blocks: Vec<Label> = cfg.iter_blocks().map(|(b,_)| b).collect();
 
         for &block in blocks.iter() {
             let mut stmt = cfg[block].stmt.clone();
 
             for instr in stmt.iter_mut() {
-                if let Instr::Phi(_, vars) = instr {
-                    for (old_lit, label) in vars.iter_mut() {
+                if let Some((dest, args)) = instr.to_phi() {
+                    let mut new_vars: Vec<(Var, Label)> = vec![];
+                    for (old_lit, label) in args {
                         let new_var = cfg.fresh_var();
-                        self.copies[*label].push(Instr::Move(new_var, old_lit.clone()));
-                        *old_lit = Lit::Var(new_var);
+                        self.copies[label].push((new_var, old_lit));
+                        new_vars.push((new_var, label));
                     }
+
+                    *instr = I::from_phi(dest, new_vars);
                 }
             }
 
             cfg.set_block_stmt(block, stmt);
         }
 
+        // For each blocks, we solve potential parallel copies by introducing new variables, then
+        // we push the generated moves just before the exit of the block
         for &block in blocks.iter() {
             let mut copies = std::mem::take(&mut self.copies[block]);
-            let mut moves: Vec<Instr> = vec![];
+            let mut moves: Vec<I> = vec![];
 
-            while let Some(Instr::Move(dst, src)) = copies.pop() {
+            while let Some((dst, src)) = copies.pop() {
                 // If any other copy read from `dst`, we need to save the current value
                 // of `dst` into another fresh variable
                 let found = copies
                     .iter()
-                    .any(|c| c.operands().first() == Some(&dst));
+                    .any(|(_, l)| l == &Lit::Var(dst));
 
                 if found {
                     let tmp = cfg.fresh_var();
-                    moves.push(Instr::Move(tmp, Lit::Var(dst)));
+                    moves.push(I::mv(tmp, Lit::Var(dst)));
                     for copy in copies.iter_mut() {
-                        if let Instr::Move(_, Lit::Var(src2)) = copy && src2 == &dst {
+                        if let (_, Lit::Var(src2)) = copy && src2 == &dst {
                             *src2 = tmp;
                         }
                     }
                 }
 
-                moves.push(Instr::Move(dst, src));
+                moves.push(I::mv(dst, src));
             }
 
             let mut body = vec![];
@@ -74,7 +110,7 @@ impl Conventionalize {
     }
 }
 
-pub fn out_of_ssa(cfg: &mut Cfg<Instr>) {
+pub fn out_of_ssa<I: HasPhi + HasMove>(cfg: &mut Cfg<I>) {
     cfg.end_ssa();
 
     let mut uf: UnionFind<Var> = UnionFind::new();
@@ -85,10 +121,10 @@ pub fn out_of_ssa(cfg: &mut Cfg<Instr>) {
 
     for (_, block) in cfg.iter_blocks() {
         for instr in block.stmt.iter() {
-            if let Instr::Phi(dest, vars) = instr {
-                let root = uf.find(*dest);
+            if let Some((dest, args)) = instr.to_phi() {
+                let root = uf.find(dest);
 
-                for (v, _) in vars.iter() {
+                for (v, _) in args.iter() {
                     uf.merge(root, uf.find(v.as_var().unwrap()));
                 }
             }
@@ -103,7 +139,7 @@ pub fn out_of_ssa(cfg: &mut Cfg<Instr>) {
         let mut i: usize = 0;
 
         while i < stmt.len() {
-            if let Instr::Phi(..) = stmt[i] {
+            if let Some(_) = stmt[i].to_phi() {
                 stmt.remove(i);
                 continue;
             }

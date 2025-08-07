@@ -1,83 +1,8 @@
 use compiler_experiments::*;
 
-use std::collections::HashSet;
+use std::io::prelude::*;
 
 use builder;
-
-pub fn test_ssa(program: &str) {
-    let parsed = ast::customlang::stmt(program);
-
-    let mut builder = builder::Builder::new(vec![], HashSet::new());
-
-    if let Err(err) = builder.gen_stmt(parsed.clone().unwrap()) {
-        builder::show_builder_error(program, err);
-        return;
-    }
-
-    println!("program: \n{}", program);
-
-    let mut cfg = builder.cfg();
-
-    println!("cfg (no-ssa): \n{}", cfg);
-
-    let mut dom = dominance::Dominance::new(&cfg);
-    dom.run(&cfg);
-
-    for (label, _) in cfg.iter_blocks() {
-        print!("idom({}) := ", label);
-        if dom.reachable(label) {
-            println!("{}", dom.idom(label));
-        } else {
-            println!("_");
-        }
-    }
-
-    for (label, _) in cfg.iter_blocks() {
-        print!("frontier({}) := ", label);
-        if dom.reachable(label) {
-            for b in dom.frontier(label).iter() {
-                print!("{} ", b);
-            }
-            println!("");
-        } else {
-            println!("_");
-        }
-    }
-
-    let mut to_ssa = into_ssa::IntoSsaTransform::new(&cfg);
-    to_ssa.run(&mut cfg);
-    //into_ssa::into_ssa(&mut cfg);
-    println!("cfg (ssa): \n{}", cfg);
-
-    let mut mem2reg = mem_to_reg::MemToReg::new(&cfg);
-    mem2reg.run(&mut cfg);
-
-    println!("cfg (ssa): \n{}", cfg);
-
-    let mut simplifier = simplify_ssa::Simplifier::new(&cfg);
-    simplifier.run(&mut cfg);
-
-    println!("cfg (ssa): \n{}", cfg);
-
-    cfg.gc();
-    println!("cfg (ssa): \n{}", cfg);
-
-
-    let mut copy = copy_prop::CopyProp::new(&cfg);
-    copy.run(&mut cfg);
-
-    println!("cfg (ssa): \n{}", cfg);
-
-    let mut conv = out_of_ssa::Conventionalize::new(&cfg);
-    conv.run(&mut cfg);
-
-    println!("cfg (ssa): \n{}", cfg);
-
-    out_of_ssa::out_of_ssa(&mut cfg);
-
-    println!("cfg (ssa): \n{}", cfg);
-
-}
 
 pub fn optimize(table: &mut ssa::SymbolTable<ssa::Instr>) {
     for (_, section) in table.symbols.iter_mut() {
@@ -99,10 +24,15 @@ pub fn optimize(table: &mut ssa::SymbolTable<ssa::Instr>) {
 
                 println!("cfg (ssa): \n{}", cfg);
 
-                let mut conv = out_of_ssa::Conventionalize::new(&cfg);
-                conv.run(cfg);
+                let translator = codegen::Translator::new(cfg);
+                let mut cfg = translator.translate(cfg);
 
-                out_of_ssa::out_of_ssa(cfg);
+                let mut conv = out_of_ssa::Conventionalize::new(&cfg);
+                conv.run(&mut cfg);
+
+                out_of_ssa::out_of_ssa(&mut cfg);
+
+                println!("cfg (ssa): \n{}", cfg);
             }
             _ => {}
         }
@@ -115,41 +45,14 @@ pub fn fibo(x: i32) -> i32 {
 }
 
 fn main() {
+    let file_name = std::env::args().nth(1).unwrap();
+    let mut file = std::fs::File::open(file_name).unwrap();
 
-    let foo: &str = "
-var A = 42;
+    let mut program: String = String::new();
 
-var buf[100] = 0;
+    file.read_to_string(&mut program).unwrap();
 
-def fibo_mem(buffer, size) {
-    let y = 2;
-    buffer[0] = 0;
-    buffer[1] = 1;
-
-    while y != size {
-        buffer[y] = buffer[y-1] + buffer[y-2];
-        y = y + 1;
-    }
-}
-
-def fibo(x) {
-    if (x == 0) | (x == 1) {
-        return x;
-    } else {
-        return fibo(x-1) + fibo(x-2);
-    }
-}
-
-def main() {
-    fibo_mem(buf, 100);
-
-    print_i32(buf[20]);
-
-    print_i32(fibo(20));
-}
-    ";
-
-    let parsed = ast::customlang::decl(foo);
+    let parsed = ast::customlang::decl(&program);
 
     println!("{:?}", parsed);
 
@@ -157,12 +60,12 @@ def main() {
         match builder::build(parsed.unwrap()) {
             Ok(table) => table,
             Err(err) => {
-                builder::show_builder_error(foo, err);
+                builder::show_builder_error(&program, err);
                 return;
             }
         };
 
-    println!("{foo}");
+    println!("{program}");
     println!("{table}");
     optimize(&mut table);
 

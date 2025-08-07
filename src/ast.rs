@@ -6,13 +6,56 @@ pub type Variable = String;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
 pub enum Binop {
-    And, Or, Xor, Add, Sub, Sll, Sra, Srl,
-    Equal, NotEqual, LessThan, ULessThan, LessEqual, ULessEqual
+    /// Bitwise and
+    And,
+
+    /// Bitwise or
+    Or,
+
+    /// Bitwise xor
+    Xor,
+
+    /// Addition
+    Add,
+
+    /// Substraction
+    Sub,
+
+    /// Left shift
+    Sll,
+
+    /// Right arithmetic (signed) shift
+    Sra,
+
+    /// Right linear (unsigned) shift
+    Srl,
+
+    /// Return 1 if equals, 0 otherwise
+    Equal,
+
+    /// Return 0 if equals, 1 otherwise
+    NotEqual,
+
+    /// Signed less than, return 1 if true, 0 otherwise
+    LessThan,
+
+    /// Unsigned less than, return 1 if true, 0 otherwise
+    ULessThan,
+
+    /// Signed less than or equal, return 1 if true, 0 otherwise
+    LessEqual,
+
+    /// Unsigned less than or equal, return 1 if true, 0 otherwise
+    ULessEqual
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
 pub enum Unop {
-    Not, Neg
+    /// Bitwise not
+    Not,
+
+    /// Negation operator
+    Neg
 }
 
 impl fmt::Display for Binop {
@@ -163,12 +206,27 @@ ast! {
     }
 }
 
-
 peg::parser!(pub grammar customlang() for str {
     rule location() -> peg::str::LineCol =
         #{|input, pos| peg::RuleResult::Matched(pos, peg::Parse::position_repr(input, pos))}
 
     pub rule rvalue() -> RValue = precedence!{
+        x:(@) _ "&&" _ y:@ {
+            let begin = x.begin;
+            let end = y.end;
+            let zero = RValue::constant(0, begin, end);
+            let lhs = RValue::binop(Binop::NotEqual, x, zero.clone(), begin, end);
+            let rhs = RValue::binop(Binop::NotEqual, y, zero, begin, end);
+            RValue::binop(Binop::And, lhs, rhs, begin, end)
+        }
+        x:(@) _ "||" _ y:@ {
+            let begin = x.begin;
+            let end = y.end;
+            let zero = RValue::constant(0, begin, end);
+            let lhs = RValue::binop(Binop::NotEqual, x, zero.clone(), begin, end);
+            let rhs = RValue::binop(Binop::NotEqual, y, zero, begin, end);
+            RValue::binop(Binop::Or, lhs, rhs, begin, end)
+        }
         x:(@) _ "==" _ y:@ {
             let begin = x.begin;
             let end = y.end;
@@ -179,25 +237,15 @@ peg::parser!(pub grammar customlang() for str {
             let end = y.end;
             RValue::binop(Binop::NotEqual, x, y, begin, end)
         }
-        x:(@) _ "<s" _ y:@ {
+        x:(@) _ "<" _ y:@ {
             let begin = x.begin;
             let end = y.end;
             RValue::binop(Binop::LessThan, x, y, begin, end)
         }
-        x:(@) _ "<u" _ y:@ {
-            let begin = x.begin;
-            let end = y.end;
-            RValue::binop(Binop::ULessThan, x, y, begin, end)
-        }
-        x:(@) _ "<=s" _ y:@ {
+        x:(@) _ "<=" _ y:@ {
             let begin = x.begin;
             let end = y.end;
             RValue::binop(Binop::LessEqual, x, y, begin, end)
-        }
-        x:(@) _ "<=u" _ y:@ {
-            let begin = x.begin;
-            let end = y.end;
-            RValue::binop(Binop::ULessEqual, x, y, begin, end)
         }
         x:(@) _ "+" _ y:@ {
             let begin = x.begin;
@@ -229,20 +277,26 @@ peg::parser!(pub grammar customlang() for str {
             let end = y.end;
             RValue::binop(Binop::Sll, x, y, begin, end)
         }
-        x:(@) _ ">>a" _ y:@ {
+        x:(@) _ ">>" _ y:@ {
             let begin = x.begin;
             let end = y.end;
             RValue::binop(Binop::Sra, x, y, begin, end)
-        }
-        x:(@) _ ">>l" _ y:@ {
-            let begin = x.begin;
-            let end = y.end;
-            RValue::binop(Binop::Srl, x, y, begin, end)
         }
         begin:location() "-" _ x:@
             { let end = x.end; RValue::unop(Unop::Neg, x, begin, end) }
         begin:location() "~" _ x:@
             { let end= x.end; RValue::unop(Unop::Not, x, begin, end) }
+        begin:location() "!" _ x:@ {
+            let end= x.end;
+            let zero = RValue::constant(0, begin, end);
+            RValue::binop(Binop::Equal, x, zero, begin, end)
+        }
+        begin:location() "@srl" _ "(" _ x:rvalue() _ "," _ y:rvalue() _ ")" end:location()
+            { RValue::binop(Binop::Srl, x, y, begin, end) }
+        begin:location() "@ult" _ "(" _ x:rvalue() _ "," _ y:rvalue() _ ")" end:location()
+            { RValue::binop(Binop::ULessThan, x, y, begin, end) }
+        begin:location() "@ule" _ "(" _ x:rvalue() _ "," _ y:rvalue() _ ")" end:location()
+            { RValue::binop(Binop::ULessEqual, x, y, begin, end) }
         begin:location() s:variable() _ "(" args:(_rvalue_() ** ",") ")" end:location()
             { RValue::call(s, args, begin, end) }
         begin:location() "&" _ lvalue:lvalue() end:location() {
@@ -329,6 +383,13 @@ peg::parser!(pub grammar customlang() for str {
         begin:location() "var" _ s:variable() _ "[" _ n1:number() _ "]" _
             "=" _ n2:number() _ ";" end:location()
             { Decl::array(s, std::iter::repeat(n2).take(n1 as usize).collect(), begin, end) }
+        begin:location() "var" _ s:variable() _ "=" _ mem:string() _ ";" end:location() {
+                let vec = mem.as_bytes()
+                    .iter().map(|x| *x as i32)
+                    .chain(std::iter::once(0))
+                    .collect();
+                Decl::array(s, vec, begin, end)
+            }
     }
 
     pub rule decl() -> Decl = precedence!{
@@ -342,6 +403,42 @@ peg::parser!(pub grammar customlang() for str {
     rule variable() -> String
         = s:$(['a'..='z' | 'A'..='Z' | '_']['a'..='z' | 'A'..='Z' | '0'..='9' | '_']*) { s.into() }
 
+    rule builtin() -> String
+        = s:$(['@']['a'..='z' | 'A'..='Z' | '_']['a'..='z' | 'A'..='Z' | '0'..='9' | '_']*)
+            { s.into() }
+
     rule _variable_() -> String
         = _ s:variable() _ { s }
+
+    rule string() -> String =
+        "\"" s:$([^'"']*) "\"" { parse_string(s) }
 });
+
+
+
+pub fn parse_string(s: &str) -> String {
+    let mut result = Vec::<u8>::new();
+    let bytes = s.as_bytes();
+    let mut i: usize = 0;
+
+
+    while i < s.len() {
+        if i+1 < bytes.len() && bytes[i] == b'\\' {
+            match bytes[i+1] {
+                b'n' => result.push(b'\n'),
+                b'\\' => result.push(b'\\'),
+                b't' => result.push(b'\t'),
+                _ => panic!(),
+            }
+
+            i += 2;
+
+            continue;
+        }
+
+        result.push(bytes[i]);
+        i += 1;
+    }
+
+    String::from_utf8(result).unwrap()
+}
