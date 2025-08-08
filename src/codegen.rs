@@ -38,6 +38,22 @@ pub trait Arch {
     //fn encode_block(stmt: Box<Instr>, coloring: ) -> Vec<Self::Opcode>;
 }
 
+
+pub struct MachineInstr {
+    /// Name of the instruction
+    pub name: &'static str,
+
+    /// Does this instruction has side effects
+    pub has_side_effect: bool,
+
+    /// Arity of the instruction
+    pub arity: usize,
+
+    /// Does this instruction produce a result
+    pub has_output: bool,
+}
+
+
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum Reg {
     /// A physical register represented as an `usize`

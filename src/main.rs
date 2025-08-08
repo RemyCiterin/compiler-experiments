@@ -17,22 +17,23 @@ pub fn optimize(table: &mut ssa::SymbolTable<ssa::Instr>) {
                 let mut simplifier = simplify_ssa::Simplifier::new(&cfg);
                 simplifier.run(cfg);
 
+                let mut gvn = gvn::ValueTable::new();
+                gvn.run(cfg);
+
                 let mut copy = copy_prop::CopyProp::new(&cfg);
                 copy.run(cfg);
 
                 cfg.gc();
 
-                println!("cfg (ssa): \n{}", cfg);
+                // let translator = codegen::Translator::new(cfg);
+                // let mut cfg = translator.translate(cfg);
 
-                let translator = codegen::Translator::new(cfg);
-                let mut cfg = translator.translate(cfg);
+                // let mut conv = out_of_ssa::Conventionalize::new(&cfg);
+                // conv.run(&mut cfg);
 
-                let mut conv = out_of_ssa::Conventionalize::new(&cfg);
-                conv.run(&mut cfg);
+                // out_of_ssa::out_of_ssa(&mut cfg);
 
-                out_of_ssa::out_of_ssa(&mut cfg);
-
-                println!("cfg (ssa): \n{}", cfg);
+                // println!("cfg (ssa): \n{}", cfg);
             }
             _ => {}
         }
@@ -54,7 +55,14 @@ fn main() {
 
     let parsed = ast::customlang::decl(&program);
 
-    println!("{:?}", parsed);
+    match &parsed {
+        Err(peg::error::ParseError{location, expected}) => {
+            let msg = format!("unexpected token, expect {}", expected);
+            ast::show_error(&msg, &program, *location, *location);
+            return;
+        }
+        _ => {}
+    }
 
     let mut table =
         match builder::build(parsed.unwrap()) {
@@ -66,7 +74,7 @@ fn main() {
         };
 
     println!("{program}");
-    println!("{table}");
+    //println!("{table}");
     optimize(&mut table);
 
     println!("{table}");

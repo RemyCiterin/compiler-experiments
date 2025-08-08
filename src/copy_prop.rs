@@ -57,8 +57,16 @@ pub struct CopyProp {
 impl CopyProp {
     pub fn new(cfg: &Cfg<Instr>) -> Self {
         let mut lattice = SparseSecondaryMap::new();
-        for (var, _) in cfg.iter_vars() {
-            lattice.insert(var, Lattice::Top);
+
+        for (var, kind) in cfg.iter_vars() {
+            match kind {
+                VarKind::Arg | VarKind::Stack =>
+                    _ = lattice.insert(var, Lattice::Copy(var)),
+                _ =>
+                    _ = lattice.insert(var, Lattice::Top),
+            }
+
+
         }
 
         Self {
@@ -183,14 +191,14 @@ impl CopyProp {
             };
 
             ret = match (ret, elem.clone()) {
-                (Lattice::Bot, Lattice::Copy(v)) => {
-                    if v == dest { self.copy(dest) }
-                    else { Lattice::Bot }
-                }
-                (Lattice::Copy(v), Lattice::Bot) => {
-                    if Lattice::Copy(v) == elem { self.copy(v) }
-                    else { Lattice::Bot }
-                }
+                //(Lattice::Bot, Lattice::Copy(v)) => {
+                //    if v == dest { self.copy(dest) }
+                //    else { Lattice::Bot }
+                //}
+                //(Lattice::Copy(v), Lattice::Bot) => {
+                //    if Lattice::Copy(v) == elem { self.copy(v) }
+                //    else { Lattice::Bot }
+                //}
                 (Lattice::Bot, _) => Lattice::Bot,
                 (_, Lattice::Bot) => Lattice::Bot,
                 (Lattice::Top, x) => x,
@@ -200,6 +208,7 @@ impl CopyProp {
                 }
             };
         }
+
 
         self.lattice[dest] = ret;
     }

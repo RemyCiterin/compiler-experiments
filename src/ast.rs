@@ -178,14 +178,14 @@ pub fn show_error(msg: &str, program: &str, begin: LineCol, end: LineCol) {
 
             if n == begin.line - 1 && n == end.line - 1 {
                 let (x, y) = line.split_at(begin.column-1);
-                let (y, z) = y.split_at(end.column-begin.column);
+                let (y, z) = y.split_at(end.column-begin.column+1);
                 println!("{}{red}{}{white}{}", x.to_string(), y.to_string(), z.to_string());
             } else if n == begin.line - 1 {
                 let (x, y) = line.split_at(begin.column-1);
                 println!("{}{red}{}", x.to_string(), y.to_string());
                 current_color = &red;
             } else if n == end.line - 1 {
-                let (x, y) = line.split_at(end.column-1);
+                let (x, y) = line.split_at(end.column);
                 println!("{}{white}{}", x.to_string(), y.to_string());
                 current_color = &white;
             } else {

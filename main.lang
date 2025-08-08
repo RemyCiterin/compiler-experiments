@@ -84,7 +84,7 @@ def main() {
 
   print_i32(buf[20]);
 
-  print_i32(fibo(20));
+  //print_i32(fibo(20));
 
   print_i32(factorial(12));
   print_i32(tail_factorial(12));

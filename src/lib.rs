@@ -18,3 +18,4 @@ pub mod mem_to_reg;
 pub mod out_of_ssa;
 pub mod copy_prop;
 pub mod interpreter;
+pub mod parallel_copies;

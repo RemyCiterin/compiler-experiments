@@ -74,34 +74,19 @@ impl Conventionalize {
 
         // For each blocks, we solve potential parallel copies by introducing new variables, then
         // we push the generated moves just before the exit of the block
-        for &block in blocks.iter() {
-            let mut copies = std::mem::take(&mut self.copies[block]);
-            let mut moves: Vec<I> = vec![];
-
-            while let Some((dst, src)) = copies.pop() {
-                // If any other copy read from `dst`, we need to save the current value
-                // of `dst` into another fresh variable
-                let found = copies
-                    .iter()
-                    .any(|(_, l)| l == &Lit::Var(dst));
-
-                if found {
-                    let tmp = cfg.fresh_var();
-                    moves.push(I::mv(tmp, Lit::Var(dst)));
-                    for copy in copies.iter_mut() {
-                        if let (_, Lit::Var(src2)) = copy && src2 == &dst {
-                            *src2 = tmp;
-                        }
-                    }
-                }
-
-                moves.push(I::mv(dst, src));
-            }
+        for block in blocks {
+            let copies = std::mem::take(&mut self.copies[block]);
+            let moves =
+                crate::parallel_copies::copies_to_moves(|| cfg.fresh_var(), copies);
 
             let mut body = vec![];
 
             for instr in cfg[block].stmt.iter() {
-                if instr.exit_block() { body.extend(moves.iter().cloned()); }
+                if instr.exit_block() {
+                    body.extend(
+                        moves.iter().map(|(v,l)| I::mv(*v,l.clone())));
+                }
+
                 body.push(instr.clone());
             }
 

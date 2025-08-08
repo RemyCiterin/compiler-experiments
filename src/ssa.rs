@@ -50,42 +50,44 @@ impl Lit {
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
-pub enum Instr {
+pub enum GenericInstr<Destination, Operand> {
     /// Binary operations
-    Binop(Var, Binop, Lit, Lit),
+    Binop(Destination, Binop, Operand, Operand),
 
     /// Unary operations
-    Unop(Var, Unop, Lit),
+    Unop(Destination, Unop, Operand),
 
     /// Return a value from a function call
-    Return(Lit),
+    Return(Operand),
 
     /// Move a value from one position to another
-    Move(Var, Lit),
+    Move(Destination, Operand),
 
     /// Load a value from a pointer
-    Load{dest: Var, addr: Lit, volatile: bool},
+    Load{dest: Destination, addr: Operand, volatile: bool},
 
     /// Store a value from a pointer
-    Store{val: Lit, addr: Lit, volatile: bool},
+    Store{val: Operand, addr: Operand, volatile: bool},
 
     /// Call a function with a given number of arguments
-    Call(Var, String, Vec<Lit>),
+    Call(Destination, String, Vec<Operand>),
 
     /// Jump to a label
     Jump(Label),
 
     /// Branch to a lable depending of a value
-    Branch(Lit, Label, Label),
+    Branch(Operand, Label, Label),
 
     /// Phi expression, contains the assignation for the predecessors in order
-    Phi(Var, Vec<(Lit, Label)>),
+    Phi(Destination, Vec<(Operand, Label)>),
 }
 
-impl Instr {
+pub type Instr = GenericInstr<Var, Lit>;
+
+impl<Destination: Clone, Operand: Clone> GenericInstr<Destination, Operand> {
     /// Return the list of operands the instruction depends on,
     /// including all the operands in the label arguments
-    pub fn literals(&self) -> Vec<Lit> {
+    pub fn literals(&self) -> Vec<Operand> {
         match self {
             Self::Binop(_, _, x, y)
                 | Self::Store{addr: x, val: y, ..}
@@ -106,7 +108,7 @@ impl Instr {
 
     /// Return the list of operands the instruction depends on,
     /// including all the operands in the label arguments
-    pub fn literals_mut(&mut self) -> Vec<&mut Lit> {
+    pub fn literals_mut(&mut self) -> Vec<&mut Operand> {
         match self {
             Self::Binop(_, _, x, y)
                 | Self::Store{addr: x, val: y, ..}
@@ -233,8 +235,8 @@ impl<I: Instruction> Block<I> {
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum VarKind {
-    /// A local variable defined in a block
-    Local(Label),
+    /// A local variable defined by a given instruction
+    Local(InstrId),
 
     /// A stack variable defined at the function entry point
     Stack,
@@ -427,11 +429,11 @@ impl<I: Instruction> Cfg<I> {
             *kind = VarKind::Undef;
         }
 
-        for (label, block) in self.blocks.iter() {
-            for instr in block.stmt.iter() {
+        for (_, block) in self.blocks.iter() {
+            for (instr, id) in block.stmt.iter().zip(block.ids.iter()) {
                 if let Some(x) = instr.destination() {
                     assert!(vars[x] == VarKind::Undef);
-                    vars[x] = VarKind::Local(label);
+                    vars[x] = VarKind::Local(*id);
                 }
             }
         }
@@ -496,26 +498,6 @@ impl<I: Instruction> Cfg<I> {
 
     /// Update the body of a block
     pub fn set_block_stmt(&mut self, block: Label, stmt: Vec<I>) {
-        if self.ssa {
-            let mut vars = std::mem::take(&mut self.vars);
-
-            for instr in self[block].stmt.iter() {
-                if let Some(x) = instr.destination() {
-                    assert!(vars[x] == VarKind::Local(block));
-                    vars[x] = VarKind::Undef;
-                }
-            }
-
-            for instr in stmt.iter() {
-                if let Some(x) = instr.destination() {
-                    assert!(vars[x] == VarKind::Undef);
-                    vars[x] = VarKind::Local(block);
-                }
-            }
-
-            self.vars = vars;
-        }
-
         // Free all the instructions in the block
         for i in std::mem::take(&mut self.blocks[block].ids) {
             self.instructions.remove(i);
@@ -532,6 +514,26 @@ impl<I: Instruction> Cfg<I> {
             let next = if i != stmt.len() - 1 {Some(instrs[i+1])} else {None};
             self.instructions[instrs[i]].2 = prev;
             self.instructions[instrs[i]].3 = next;
+        }
+
+        if self.ssa {
+            let mut vars = std::mem::take(&mut self.vars);
+
+            for instr in self[block].stmt.iter() {
+                if let Some(x) = instr.destination() {
+                    assert!(matches!(vars[x], VarKind::Local(..)));
+                    vars[x] = VarKind::Undef;
+                }
+            }
+
+            for (instr, id) in stmt.iter().zip(instrs.iter()) {
+                if let Some(x) = instr.destination() {
+                    assert!(vars[x] == VarKind::Undef);
+                    vars[x] = VarKind::Local(*id);
+                }
+            }
+
+            self.vars = vars;
         }
 
         // A non-empty block must exit at (and only at) it's last instruction
