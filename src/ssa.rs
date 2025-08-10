@@ -24,6 +24,9 @@ pub enum Lit {
 
     /// A value from a variable (a virtual register)
     Var(Var),
+
+    /// A reference to the local stack frame
+    Stack(Slot),
 }
 
 impl Lit {
@@ -209,6 +212,10 @@ new_key_type!{
 }
 
 new_key_type!{
+    pub struct Slot;
+}
+
+new_key_type!{
     pub struct Label;
 }
 
@@ -237,9 +244,6 @@ impl<I: Instruction> Block<I> {
 pub enum VarKind {
     /// A local variable defined by a given instruction
     Local(InstrId),
-
-    /// A stack variable defined at the function entry point
-    Stack,
 
     /// A function argument passed directly
     Arg,
@@ -272,7 +276,7 @@ pub struct Cfg<I: Instruction> {
     instructions: SlotMap<InstrId, (Label, I, Option<InstrId>, Option<InstrId>)>,
 
     /// A set of variables representing stack locations with a size and alignment constraint
-    pub stack: Vec<(Var, usize)>,
+    pub stack: SlotMap<Slot, usize>,
 
     /// Arguments of the function
     pub args: Vec<Var>,
@@ -318,8 +322,8 @@ impl<I: Instruction> Cfg<I> {
             args,
             preds,
             blocks,
-            stack: Vec::new(),
             vars: SlotMap::with_key(),
+            stack: SlotMap::with_key(),
             instructions: SlotMap::with_key(),
         }
     }
@@ -404,10 +408,8 @@ impl<I: Instruction> Cfg<I> {
     }
 
     /// Return a fresh stack slot, and allocate it on the stack
-    pub fn fresh_stack_var(&mut self, size: usize) -> Var {
-        let var = self.vars.insert(VarKind::Stack);
-        self.stack.push((var, size));
-        var
+    pub fn fresh_stack_var(&mut self, size: usize) -> Slot {
+        self.stack.insert(size)
     }
 
     /// Generate a fresh function argument
@@ -443,10 +445,10 @@ impl<I: Instruction> Cfg<I> {
             vars[x] = VarKind::Arg;
         }
 
-        for (x, _) in self.stack.iter() {
-            assert!(vars[*x] == VarKind::Undef);
-            vars[*x] = VarKind::Stack;
-        }
+        //  for (x, _) in self.stack.iter() {
+        //      assert!(vars[*x] == VarKind::Undef);
+        //      vars[*x] = VarKind::Stack;
+        //  }
 
         self.vars = vars;
         self.ssa = true;
@@ -659,6 +661,19 @@ impl std::fmt::Display for Label {
     }
 }
 
+impl std::fmt::Display for Slot {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let lsb = self.data().as_ffi() & 0xffff_ffff;
+        let msb = self.data().as_ffi() >> 32;
+
+        if msb == 1 {
+            write!(f, "s{}", lsb)
+        } else {
+            write!(f, "s{}_{}", lsb, msb)
+        }
+    }
+}
+
 impl std::fmt::Display for Var {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let lsb = self.data().as_ffi() & 0xffff_ffff;
@@ -678,6 +693,7 @@ impl std::fmt::Display for Lit {
             Lit::Addr(s) => write!(f, "{}", s),
             Lit::Int(i) => write!(f, "{}", i),
             Lit::Var(v) => write!(f, "{}", v),
+            Lit::Stack(off) => write!(f, "stack({off})"),
         }
     }
 }
@@ -731,8 +747,8 @@ impl<I: Instruction> std::fmt::Display for Cfg<I> {
         }
 
         write!(f, "\nstack:")?;
-        for (arg, size) in self.stack.iter() {
-            write!(f, " [{arg}; {size}]")?;
+        for (slot, size) in self.stack.iter() {
+            write!(f, " [{slot}; {size}]")?;
         }
 
         write!(f, "\n")?;

@@ -36,23 +36,6 @@ impl InterferenceGraph {
             let mut lives = liveness[block].outputs.clone();
 
             for instr in cfg[block].stmt.iter().rev() {
-                // Loads/stores from/to a stack known offset doesn't need to be added to the
-                // interference graph
-                if let Instr::Load{addr: Lit::Var(addr), dest, ..} = instr
-                    && cfg[*addr] == VarKind::Stack {
-                    lives.remove(&dest);
-                    lives.iter().for_each(|x| self.add_conflict(*x, *dest));
-                    continue;
-                }
-
-                if let Instr::Store{addr: Lit::Var(addr), val, ..} = instr
-                    && cfg[*addr] == VarKind::Stack {
-                    if let Some(x) = val.as_var() {
-                        lives.insert(x);
-                    }
-                    continue;
-                }
-
                 if let Some(dest) = instr.destination() {
                     lives.remove(&dest);
                     lives.iter().for_each(|x| self.add_conflict(*x, dest));

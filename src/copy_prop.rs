@@ -21,6 +21,9 @@ pub enum Lattice {
 
     /// This variable is a copy of a variable previously defined in the dominance tree
     Copy(Var),
+
+    /// A local stack pointer
+    Stack(Slot),
 }
 
 impl std::fmt::Display for Lattice {
@@ -29,6 +32,7 @@ impl std::fmt::Display for Lattice {
             Lattice::Addr(s) => write!(f, "{}", s),
             Lattice::Int(i) => write!(f, "{}", i),
             Lattice::Copy(v) => write!(f, "{}", v),
+            Lattice::Stack(off) => write!(f, "stack({off})"),
             Lattice::Top => write!(f, "top"),
             Lattice::Bot => write!(f, "bot"),
         }
@@ -60,7 +64,7 @@ impl CopyProp {
 
         for (var, kind) in cfg.iter_vars() {
             match kind {
-                VarKind::Arg | VarKind::Stack =>
+                VarKind::Arg =>
                     _ = lattice.insert(var, Lattice::Copy(var)),
                 _ =>
                     _ = lattice.insert(var, Lattice::Top),
@@ -139,6 +143,7 @@ impl CopyProp {
     /// if we try to copy from an already analysed variable
     pub fn copy(&self, v: Var) -> Lattice {
         match &self.lattice[v] {
+            Lattice::Stack(offset) => Lattice::Stack(*offset),
             Lattice::Addr(s) => Lattice::Addr(s.clone()),
             Lattice::Copy(x) => Lattice::Copy(*x),
             Lattice::Int(i) => Lattice::Int(*i),
@@ -150,6 +155,7 @@ impl CopyProp {
     pub fn visit_move(&mut self, v: Var, l: Lit) {
         self.lattice[v] = match l {
             Lit::Var(x) => self.copy(x),
+            Lit::Stack(off) => Lattice::Stack(off),
             Lit::Addr(a) => Lattice::Addr(a.clone()),
             Lit::Int(i) => Lattice::Int(i),
         };
@@ -188,17 +194,18 @@ impl CopyProp {
                 Lit::Var(v) => self.lattice[v].clone(),
                 Lit::Int(x) => Lattice::Int(x),
                 Lit::Addr(s) => Lattice::Addr(s.clone()),
+                Lit::Stack(off) => Lattice::Stack(off),
             };
 
             ret = match (ret, elem.clone()) {
-                //(Lattice::Bot, Lattice::Copy(v)) => {
-                //    if v == dest { self.copy(dest) }
-                //    else { Lattice::Bot }
-                //}
-                //(Lattice::Copy(v), Lattice::Bot) => {
-                //    if Lattice::Copy(v) == elem { self.copy(v) }
-                //    else { Lattice::Bot }
-                //}
+                (Lattice::Bot, Lattice::Copy(v)) => {
+                    if v == dest { self.copy(dest) }
+                    else { Lattice::Bot }
+                }
+                (Lattice::Copy(v), Lattice::Bot) => {
+                    if Lattice::Copy(v) == elem { self.copy(v) }
+                    else { Lattice::Bot }
+                }
                 (Lattice::Bot, _) => Lattice::Bot,
                 (_, Lattice::Bot) => Lattice::Bot,
                 (Lattice::Top, x) => x,
@@ -208,7 +215,6 @@ impl CopyProp {
                 }
             };
         }
-
 
         self.lattice[dest] = ret;
     }
@@ -228,6 +234,7 @@ impl CopyProp {
                 for lit in instr.literals_mut() {
                     if let Lit::Var(x) = lit.clone() {
                         match self.lattice[x].clone() {
+                            Lattice::Stack(offset) => *lit = Lit::Stack(offset),
                             Lattice::Addr(s) => *lit = Lit::Addr(s),
                             Lattice::Int(i) => *lit = Lit::Int(i),
                             Lattice::Copy(v) => *lit = Lit::Var(v),

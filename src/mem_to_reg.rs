@@ -2,7 +2,7 @@
 //! and introduce the necessary phi expressions and renaming to replace those stack slots by
 //! registers.
 
-use std::collections::HashSet;
+use std::collections::{HashSet, HashMap};
 
 use slotmap::*;
 use crate::dominance::*;
@@ -10,14 +10,14 @@ use crate::ssa::*;
 
 pub struct MemToReg {
     /// The set of stack slots to remove
-    removed: HashSet<Var>,
+    removed: HashSet<Slot>,
 
     /// Necessary phi instruction per label/variable
-    phis: SecondaryMap<Label, SparseSecondaryMap<Var, Instr>>,
+    phis: SecondaryMap<Label, HashMap<Slot, (Var, Vec<(Lit, Label)>)>>,
 
     /// Current environment of variables in removed, as a mapping from stack slots to fresh
     /// variables
-    env: SecondaryMap<Var, Var>,
+    env: HashMap<Slot, Var>,
 
     /// Dominance tree/dominance frontier
     dom: Dominance,
@@ -27,20 +27,23 @@ impl MemToReg {
     pub fn new(cfg: &Cfg<Instr>) -> Self {
         let mut removed = HashSet::new();
 
-        for (v, kind) in cfg.iter_vars() {
-            if *kind == VarKind::Stack {
-                removed.insert(v);
-            }
+        //for (v, kind) in cfg.iter_vars() {
+        //    if *kind == VarKind::Stack {
+        //        removed.insert(v);
+        //    }
+        //}
+        for (slot, _) in cfg.stack.iter() {
+            removed.insert(slot);
         }
 
         let mut dom = Dominance::new(cfg);
         dom.run(cfg);
 
-        let env = SecondaryMap::new();
+        let env = HashMap::new();
         let mut phis = SecondaryMap::new();
 
         for (b, _) in cfg.iter_blocks() {
-            phis.insert(b, SparseSecondaryMap::new());
+            phis.insert(b, HashMap::new());
         }
 
         Self { removed, dom, env, phis }
@@ -54,13 +57,16 @@ impl MemToReg {
                 match instr {
                     Instr::Load{volatile: false, ..} => {}
                     Instr::Store{val, volatile: false, ..} => {
-                        if let Some(x) = val.as_var() {
-                            self.removed.remove(&x);
+                        if let Lit::Stack(x) = val {
+                            self.removed.remove(x);
                         }
                     }
                     _ => {
-                        for x in instr.operands() {
-                            self.removed.remove(&x);
+                        for x in instr.literals() {
+                            match x {
+                                Lit::Stack(offset) => _ = self.removed.remove(&offset),
+                                _ => {}
+                            }
                         }
                     }
                 }
@@ -71,22 +77,22 @@ impl MemToReg {
     /// Introduce the necessary phi expressions, note that some of those expressions are not
     /// necessary because the introduce a phi in a block for a variable that is introduced in this
     /// same block, so it's necessary to detect them later
-    pub fn insert_phis(&mut self, cfg: &Cfg<Instr>) {
+    pub fn insert_phis(&mut self, cfg: &mut Cfg<Instr>) {
         // Insert phis each times we store into a removed stack variable
 
         let mut phis =
             std::mem::take(&mut self.phis);
 
-        let mut queue: SecondaryMap<Var, Vec<Label>> = SecondaryMap::new();
+        let mut queue: HashMap<Slot, Vec<Label>> = HashMap::new();
         for &var in self.removed.iter() {
             queue.insert(var, vec![]);
         }
 
         for (label, block) in cfg.iter_blocks() {
             for instr in block.stmt.iter() {
-                if let Instr::Store{addr: Lit::Var(addr), ..} = instr
-                    && self.removed.contains(addr) {
-                    queue[*addr].push(label);
+                if let Instr::Store{addr: Lit::Stack(offset), ..} = instr
+                    && self.removed.contains(offset) {
+                    queue.get_mut(offset).unwrap().push(label);
                 }
             }
         }
@@ -98,9 +104,10 @@ impl MemToReg {
                         let phi_args = cfg
                             .preds(succ)
                             .iter()
-                            .map(|l|(Lit::Var(var),*l)).collect();
+                            .map(|l|(Lit::Stack(*var),*l)).collect();
 
-                        phis[succ].insert(var, Instr::Phi(var, phi_args));
+                        let new = cfg.fresh_var();
+                        phis[succ].insert(*var, (new, phi_args));
                         dirty.push(succ);
                     }
                 }
@@ -113,21 +120,17 @@ impl MemToReg {
     pub fn renaming(&mut self, cfg: &mut Cfg<Instr>, block: Label) {
         let mut env = self.env.clone();
 
-        let mut useless_phi: Vec<Var> = vec![];
-        for (var, phi) in self.phis[block].iter_mut() {
-            let dest = phi.destination_mut().unwrap();
-
-            if env.contains_key(*dest) {
-                let new_dest = cfg.fresh_var();
-                env.insert(*dest, new_dest);
-                *dest = new_dest;
+        let mut useless_phi: Vec<Slot> = vec![];
+        for (var, (dest, _)) in self.phis[block].iter_mut() {
+            if env.contains_key(var) {
+                env.insert(*var, *dest);
             } else {
-                useless_phi.push(var);
+                useless_phi.push(*var);
             }
         }
 
         for var in useless_phi {
-            self.phis[block].remove(var);
+            self.phis[block].remove(&var);
         }
 
         let mut stmt = cfg[block].stmt.clone();
@@ -135,15 +138,15 @@ impl MemToReg {
         // Introduce a new variable (and store it into `env) each times we store into a removed
         // stack slot. And replace each load from a removed stack slot by a move
         for instr in stmt.iter_mut() {
-            if let Instr::Load{addr: Lit::Var(addr), dest, ..} = instr
-                && self.removed.contains(addr) {
-                *instr = Instr::Move(*dest, Lit::Var(env[*addr]));
+            if let Instr::Load{addr: Lit::Stack(offset), dest, ..} = instr
+                && self.removed.contains(offset) {
+                *instr = Instr::Move(*dest, Lit::Var(env[offset]));
             }
 
-            if let Instr::Store{addr: Lit::Var(addr), val, ..} = instr
-                && self.removed.contains(addr) {
+            if let Instr::Store{addr: Lit::Stack(offset), val, ..} = instr
+                && self.removed.contains(offset) {
                 let new_dest = cfg.fresh_var();
-                env.insert(*addr, new_dest);
+                env.insert(*offset, new_dest);
                 *instr = Instr::Move(new_dest, val.clone());
             }
         }
@@ -152,14 +155,14 @@ impl MemToReg {
 
         // Rename the arguments of the new phi expressions that refer to this block
         for succ in cfg[block].succs() {
-            for (_, phi) in self.phis[succ].iter_mut() {
-                if let Instr::Phi(_, vars) = phi {
-                    for (src, label) in vars.iter_mut() {
-                        // If env doesn't contains src, then this phi instruction will be deleted
-                        // later cause all it's variable is not defined at idom(succ) (otherwise it
-                        // must be definde at all it's predecessors)
-                        if *label == block && env.contains_key(src.as_var().unwrap()) {
-                            *src = Lit::Var(env[src.as_var().unwrap()]);
+            for (_, (_, vars)) in self.phis[succ].iter_mut() {
+                for (src, label) in vars.iter_mut() {
+                    // If env doesn't contains src, then this phi instruction will be deleted
+                    // later cause all it's variable is not defined at idom(succ) (otherwise it
+                    // must be definde at all it's predecessors)
+                    if let Lit::Stack(offset) = src {
+                        if *label == block && env.contains_key(offset) {
+                            *src = Lit::Var(env[offset]);
                         }
                     }
                 }
@@ -187,7 +190,10 @@ impl MemToReg {
 
         for block in blocks {
             let mut stmt: Vec<Instr> =
-                self.phis[block].iter().map(|(_, phi)| phi.clone()).collect();
+                self.phis[block].iter()
+                .map(|(_, (dest, args))| {
+                    Instr::Phi(*dest, args.clone())
+                }).collect();
 
             stmt.extend(cfg[block].stmt.iter().cloned());
             cfg.set_block_stmt(block, stmt);

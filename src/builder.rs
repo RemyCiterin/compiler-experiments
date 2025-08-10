@@ -13,7 +13,7 @@ pub struct Builder {
     label: Label,
 
     /// Environment of local variables
-    env: HashMap<String, Var>,
+    env: HashMap<String, Lit>,
 
     /// Global variables as a set of strings that we can point to
     globals: HashSet<String>,
@@ -45,11 +45,13 @@ impl Builder {
 
         // We start by pushing arguments to the stack in case we dereference them
         for arg in args {
-            let id = cfg.fresh_arg();
             let slot = cfg.fresh_stack_var(4);
-            env.insert(arg, slot);
+            let slot = Lit::Stack( slot );
+            let id: Var = cfg.fresh_arg();
+            env.insert(arg, slot.clone());
 
-            stmt.push(Instr::Store{volatile: false, val: Lit::Var(id), addr: Lit::Var(slot)});
+            stmt.push(
+                Instr::Store{volatile: false, val: Lit::Var(id), addr: slot.clone()});
         }
 
         Builder {
@@ -74,7 +76,7 @@ impl Builder {
     /// Return the address of a variable (local or global) as a literal
     pub fn lookup(&mut self, s: String, begin: LineCol, end: LineCol)
         -> Result<Lit, BuilderError> {
-        if let Some(id) = self.env.get(&s) { return Ok(Lit::Var(*id)); }
+        if let Some(id) = self.env.get(&s) { return Ok(id.clone()); }
         if self.globals.contains(&s) {
             return Ok(Lit::Addr(s));
         }
@@ -169,8 +171,9 @@ impl Builder {
     pub fn gen_stmt(&mut self, stmt: Stmt) -> Result<(), BuilderError> {
         match *stmt.core {
             StmtCore::Decl{name: s} => {
-                let id = self.cfg.fresh_stack_var(4);
-                self.env.insert(s.clone(), id);
+                let slot = self.cfg.fresh_stack_var(4);
+
+                self.env.insert(s.clone(), Lit::Stack(slot));
 
                 Ok(())
             }

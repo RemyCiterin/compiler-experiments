@@ -25,15 +25,15 @@ pub fn optimize(table: &mut ssa::SymbolTable<ssa::Instr>) {
 
                 cfg.gc();
 
-                // let translator = codegen::Translator::new(cfg);
-                // let mut cfg = translator.translate(cfg);
+                let translator = codegen::Translator::new(cfg);
+                let mut cfg = translator.translate(cfg);
 
-                // let mut conv = out_of_ssa::Conventionalize::new(&cfg);
-                // conv.run(&mut cfg);
+                let mut conv = out_of_ssa::Conventionalize::new(&cfg);
+                conv.run(&mut cfg);
 
-                // out_of_ssa::out_of_ssa(&mut cfg);
+                out_of_ssa::out_of_ssa(&mut cfg);
 
-                // println!("cfg (ssa): \n{}", cfg);
+                println!("cfg (ssa): \n{}", cfg);
             }
             _ => {}
         }
@@ -53,7 +53,7 @@ fn main() {
 
     file.read_to_string(&mut program).unwrap();
 
-    let parsed = ast::customlang::decl(&program);
+    let parsed = parser::customlang::decl(&program);
 
     match &parsed {
         Err(peg::error::ParseError{location, expected}) => {

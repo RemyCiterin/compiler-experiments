@@ -31,6 +31,9 @@ pub enum Expr {
     /// Constant address
     Addr(String),
 
+    /// Local stack slot
+    Stack(Slot),
+
     /// Unary operation
     Unop(Unop, Value),
 
@@ -81,6 +84,7 @@ impl ValueTable {
             Lit::Int(i) => self.insert(Expr::Int(i), None),
             Lit::Addr(s) => self.insert(Expr::Addr(s), None),
             Lit::Var(v) => self.insert(Expr::Reg(v), Some(v)),
+            Lit::Stack(slot) => self.insert(Expr::Stack(slot), None),
         }
     }
 
@@ -102,11 +106,6 @@ impl ValueTable {
                 self.insert_with(Expr::Reg(dest), v);
             }
             _ => {}
-            //_ => {
-            //    if let Some(dest) = instr.destination() {
-            //        self.insert(Expr::Reg(dest), Some(dest));
-            //    }
-            //}
         }
     }
 
@@ -118,7 +117,6 @@ impl ValueTable {
                 }
             }
         }
-
     }
 
     /// `self.added` must be empty at input
@@ -151,10 +149,6 @@ impl ValueTable {
     pub fn run(&mut self, cfg: &mut Cfg<Instr>) {
         for &arg in cfg.args.iter() {
             self.insert(Expr::Reg(arg), Some(arg));
-        }
-
-        for &(slot, _) in cfg.stack.iter() {
-            self.insert(Expr::Reg(slot), Some(slot));
         }
 
         self.added.clear();

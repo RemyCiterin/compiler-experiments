@@ -21,6 +21,9 @@ pub struct Interpreter<'a>{
     /// Stack pointer
     sp: i32,
 
+    /// Base of the current stack frame
+    frame: HashMap<Slot, i32>,
+
     /// Number of executed instructions
     pub instret: usize,
 
@@ -76,6 +79,7 @@ impl<'a> Interpreter<'a> {
             stores: 0,
             instret: 0,
             sp: 0x100_0000,
+            frame: HashMap::new(),
             envs: vec![HashMap::new()],
             symbol: "main".to_string(),
         }
@@ -139,8 +143,10 @@ impl<'a> Interpreter<'a> {
             self.write_var(self.cfg().args[i], args[i]);
         }
 
+        let frame = std::mem::take(&mut self.frame);
         let result = self.interpret_function();
         self.symbol = symbol;
+        self.frame = frame;
         self.envs.pop();
 
         self.write_var(dest, result);
@@ -151,6 +157,7 @@ impl<'a> Interpreter<'a> {
             Lit::Int(i) => *i,
             Lit::Var(v) => self.read_var(*v).unwrap(),
             Lit::Addr(s) => self.symbols[s],
+            Lit::Stack(slot) => self.frame[slot]
         }
     }
 
@@ -194,10 +201,10 @@ impl<'a> Interpreter<'a> {
         self.memory.insert(addr / 4, val);
     }
 
-    pub fn push(&mut self, var: Var, size: usize) {
+    pub fn push(&mut self, slot: Slot, size: usize) {
         assert!(size % 4 == 0);
+        self.frame.insert(slot, self.sp);
         self.memory.insert(self.sp / 4, 0);
-        self.write_var(var, self.sp);
         self.sp += size as i32;
     }
 
@@ -206,8 +213,8 @@ impl<'a> Interpreter<'a> {
 
         // Push variables into the stack
         let sp = self.sp;
-        for (var, size) in self.cfg().stack.iter() {
-            self.push(*var, *size);
+        for (slot, size) in self.cfg().stack.iter() {
+            self.push(slot, *size);
         }
 
         for (var, _) in self.cfg().iter_vars() {

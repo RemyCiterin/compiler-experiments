@@ -2,6 +2,7 @@
 pub mod int_set;
 pub mod int_map;
 pub mod ast;
+pub mod parser;
 pub mod identifiers;
 pub mod union_find;
 pub mod codegen;

@@ -38,22 +38,6 @@ pub trait Arch {
     //fn encode_block(stmt: Box<Instr>, coloring: ) -> Vec<Self::Opcode>;
 }
 
-
-pub struct MachineInstr {
-    /// Name of the instruction
-    pub name: &'static str,
-
-    /// Does this instruction has side effects
-    pub has_side_effect: bool,
-
-    /// Arity of the instruction
-    pub arity: usize,
-
-    /// Does this instruction produce a result
-    pub has_output: bool,
-}
-
-
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum Reg {
     /// A physical register represented as an `usize`
@@ -116,6 +100,7 @@ pub enum RvInstr {
     Jump(Label),
     La(Reg, String),
     Li(Reg, i32),
+    Ls(Reg, Slot),
     RvCall(String),
     GenericCall(Reg, String, Vec<Reg>),
     Phi(Reg, Vec<(Reg, Label)>),
@@ -341,12 +326,14 @@ impl std::fmt::Display for RvInstr {
             Self::Unop(dest, unop, src, imm) =>
                 write!(f, "{unop} {dest}, {src}, {imm}"),
             Self::Branch(kind, x, y, l1, l2) =>
-                write!(f, "{kind} {x}, {y}, {l1}, {l2}"),
+                write!(f, "{kind} {x}, {y}, {l1}; jump {l2}"),
             Self::Jump(label) =>
                 write!(f, "jump {label}"),
             Self::Li(r, i) =>
                 write!(f, "li {r}, {i}"),
             Self::La(r, s) =>
+                write!(f, "la {r}, {s}"),
+            Self::Ls(r, s) =>
                 write!(f, "la {r}, {s}"),
             Self::RvCall(s) =>
                 write!(f, "call {s}"),
@@ -394,6 +381,7 @@ impl RvInstr {
             Self::Jump(_) => vec![],
             Self::Li(_, _) => vec![],
             Self::La(_, _) => vec![],
+            Self::Ls(_, _) => vec![],
             Self::Return(x) => vec![*x],
             Self::Load(_, x, _) => vec![*x],
             Self::Store(x, y, _) => vec![*x, *y],
@@ -417,6 +405,7 @@ impl RvInstr {
             Self::Jump(_) => vec![],
             Self::Li(_, _) => vec![],
             Self::La(_, _) => vec![],
+            Self::Ls(_, _) => vec![],
             Self::Return(x) => vec![x],
             Self::Load(_, x, _) => vec![x],
             Self::Store(x, y, _) => vec![x, y],
@@ -438,6 +427,7 @@ impl RvInstr {
             Self::Jump(_) => None,
             Self::Li(x, _) => Some(*x),
             Self::La(x, _) => Some(*x),
+            Self::Ls(x, _) => Some(*x),
             Self::Return(_) => None,
             Self::Load(x, _, _) => Some(*x),
             Self::Store(_, _, _) => None,
@@ -459,6 +449,7 @@ impl RvInstr {
             Self::Jump(_) => None,
             Self::Li(x, _) => Some(x),
             Self::La(x, _) => Some(x),
+            Self::Ls(x, _) => Some(x),
             Self::Return(_) => None,
             Self::Load(x, _, _) => Some(x),
             Self::Store(_, _, _) => None,
@@ -504,6 +495,7 @@ impl Instruction for RvInstr {
             Self::Jump(l) => vec![l],
             Self::Li(_, _) => vec![],
             Self::La(_, _) => vec![],
+            Self::Ls(_, _) => vec![],
             Self::Return(_) => vec![],
             Self::Load(_, _, _) => vec![],
             Self::Store(_, _, _) => vec![],
@@ -525,6 +517,7 @@ impl Instruction for RvInstr {
             Self::Jump(l) => vec![*l],
             Self::Li(_, _) => vec![],
             Self::La(_, _) => vec![],
+            Self::Ls(_, _) => vec![],
             Self::Return(_) => vec![],
             Self::Load(_, _, _) => vec![],
             Self::Store(_, _, _) => vec![],
@@ -546,6 +539,7 @@ impl Instruction for RvInstr {
             Self::Jump(_) => true,
             Self::Li(_, _) => false,
             Self::La(_, _) => false,
+            Self::Ls(_, _) => false,
             Self::Return(_) => true,
             Self::Load(_, _, _) => false,
             Self::Store(_, _, _) => false,
@@ -567,6 +561,7 @@ impl Instruction for RvInstr {
             Self::Jump(_) => true,
             Self::Li(_, _) => false,
             Self::La(_, _) => false,
+            Self::Ls(_, _) => false,
             Self::Return(_) => true,
             Self::Load(_, _, _) => true,
             Self::Store(_, _, _) => true,
@@ -581,6 +576,7 @@ impl crate::out_of_ssa::HasMove for RvInstr {
             Lit::Var(v) => RvInstr::Unop(Reg::Virt(dst), RvUnop::Add, Reg::Virt(v), 0),
             Lit::Addr(s) => RvInstr::La(Reg::Virt(dst), s),
             Lit::Int(i) => RvInstr::Li(Reg::Virt(dst), i),
+            Lit::Stack(s) => RvInstr::Ls(Reg::Virt(dst), s),
         }
     }
 }
@@ -613,11 +609,13 @@ pub struct Translator {
     new: Cfg<RvInstr>,
     labels: SecondaryMap<Label, Label>,
     vars: SparseSecondaryMap<Var, Var>,
+    slots: SparseSecondaryMap<Slot, Slot>,
 }
 
 impl Translator {
     pub fn new(old: &Cfg<Instr>) -> Self {
         let mut labels = SecondaryMap::new();
+        let mut slots = SparseSecondaryMap::new();
         let mut vars = SparseSecondaryMap::new();
         let mut new = Cfg::new(false, vec![]);
 
@@ -633,14 +631,13 @@ impl Translator {
             vars.insert(*v, new.fresh_arg());
         }
 
-        for (v, size) in old.stack.iter() {
-            vars.insert(*v, new.fresh_stack_var(*size));
+        for (slot, size) in old.stack.iter() {
+            slots.insert(slot, new.fresh_stack_var(*size));
         }
 
         for (v, kind) in old.iter_vars() {
             match kind {
                 VarKind::Arg => {}
-                VarKind::Stack => {}
                 _ => {
                     vars.insert(v, new.fresh_var());
                 }
@@ -649,6 +646,7 @@ impl Translator {
 
         Self {
             labels,
+            slots,
             vars,
             new,
         }
@@ -672,6 +670,11 @@ impl Translator {
             Lit::Int(i) => {
                 let id = self.new.fresh_var();
                 stmt.push(RvInstr::Li(Reg::Virt(id), i));
+                id
+            }
+            Lit::Stack(s) => {
+                let id = self.new.fresh_var();
+                stmt.push(RvInstr::Ls(Reg::Virt(id), self.slots[s]));
                 id
             }
             Lit::Var(v) => self.vars[v]
