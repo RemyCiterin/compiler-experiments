@@ -6,39 +6,8 @@ pub struct Conventionalize {
     copies: SecondaryMap<Label, Vec<(Var, Lit)>>,
 }
 
-pub trait HasMove: Instruction {
-    fn mv(dest: Var, src: Lit) -> Self;
-}
-
-/// HasPhi must be generate enough such that instructions from the general IR and the machine
-/// specific ISA can use it (even if they don't use Lit directly), this is why `from_phi` take a
-/// list of variables as arguments instead of literals
-pub trait HasPhi: Instruction {
-    fn to_phi(&self) -> Option<(Var, Vec<(Lit, Label)>)>;
-    fn from_phi(dest: Var, args: Vec<(Var, Label)>) -> Self;
-}
-
-impl HasMove for Instr {
-    fn mv(dest: Var, src: Lit) -> Self {
-        Instr::Move(dest, src)
-    }
-}
-
-impl HasPhi for Instr {
-    fn from_phi(dest: Var, args: Vec<(Var, Label)>) -> Self {
-        Instr::Phi(dest, args.into_iter().map(|(v,l)| (Lit::Var(v),l)).collect())
-    }
-
-    fn to_phi(&self) -> Option<(Var, Vec<(Lit, Label)>)> {
-        match self.clone() {
-            Instr::Phi(dest, args) => Some((dest, args)),
-            _ => None
-        }
-    }
-}
-
 impl Conventionalize {
-    pub fn new<I: Instruction>(cfg: &Cfg<I>) -> Self {
+    pub fn new(cfg: &Cfg) -> Self {
         let mut copies = SecondaryMap::new();
 
         for (b, _) in cfg.iter_blocks() {
@@ -50,22 +19,23 @@ impl Conventionalize {
 
     /// Conventionalize the ssa form: ensure that each phi expressions is of the form
     /// `Phi(x0, Var(x1), ... Var(xn))` where x0, x1, ..., x2 doesn't interfer with each other
-    pub fn run<I: HasPhi + HasMove>(&mut self, cfg: &mut Cfg<I>) {
+    pub fn run(&mut self, cfg: &mut Cfg) {
         let blocks: Vec<Label> = cfg.iter_blocks().map(|(b,_)| b).collect();
 
         for &block in blocks.iter() {
             let mut stmt = cfg[block].stmt.clone();
 
             for instr in stmt.iter_mut() {
-                if let Some((dest, args)) = instr.to_phi() {
-                    let mut new_vars: Vec<(Var, Label)> = vec![];
-                    for (old_lit, label) in args {
+
+                if let Some(phi) = instr.downcast_ref::<Phi>() {
+                    let mut new_vars: Vec<(Lit, Label)> = vec![];
+                    for (old_lit, label) in phi.args.iter() {
                         let new_var = cfg.fresh_var();
-                        self.copies[label].push((new_var, old_lit));
-                        new_vars.push((new_var, label));
+                        self.copies[*label].push((new_var, old_lit.clone()));
+                        new_vars.push((Lit::Var(new_var), *label));
                     }
 
-                    *instr = I::from_phi(dest, new_vars);
+                    *instr = mk_instr(Phi{dest: phi.dest, args: new_vars});
                 }
             }
 
@@ -79,12 +49,12 @@ impl Conventionalize {
             let moves =
                 crate::parallel_copies::copies_to_moves(|| cfg.fresh_var(), copies);
 
-            let mut body = vec![];
+            let mut body: Vec<Instr> = vec![];
 
             for instr in cfg[block].stmt.iter() {
                 if instr.exit_block() {
                     body.extend(
-                        moves.iter().map(|(v,l)| I::mv(*v,l.clone())));
+                        moves.iter().map(|(v,l)| mk_instr(GInstr::Move(*v,l.clone()))));
                 }
 
                 body.push(instr.clone());
@@ -95,7 +65,7 @@ impl Conventionalize {
     }
 }
 
-pub fn out_of_ssa<I: HasPhi + HasMove>(cfg: &mut Cfg<I>) {
+pub fn out_of_ssa(cfg: &mut Cfg) {
     cfg.end_ssa();
 
     let mut uf: UnionFind<Var> = UnionFind::new();
@@ -106,10 +76,10 @@ pub fn out_of_ssa<I: HasPhi + HasMove>(cfg: &mut Cfg<I>) {
 
     for (_, block) in cfg.iter_blocks() {
         for instr in block.stmt.iter() {
-            if let Some((dest, args)) = instr.to_phi() {
-                let root = uf.find(dest);
+            if let Some(phi) = instr.downcast_ref::<Phi>() {
+                let root = uf.find(phi.dest);
 
-                for (v, _) in args.iter() {
+                for (v, _) in phi.args.iter() {
                     uf.merge(root, uf.find(v.as_var().unwrap()));
                 }
             }
@@ -124,7 +94,7 @@ pub fn out_of_ssa<I: HasPhi + HasMove>(cfg: &mut Cfg<I>) {
         let mut i: usize = 0;
 
         while i < stmt.len() {
-            if let Some(_) = stmt[i].to_phi() {
+            if let Some(_) = stmt[i].downcast_ref::<Phi>() {
                 stmt.remove(i);
                 continue;
             }

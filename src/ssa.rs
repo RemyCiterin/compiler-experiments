@@ -1,9 +1,11 @@
+use downcast_rs::*;
+
 use slotmap::*;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
 use crate::ast::*;
 
-pub trait Instruction: Clone + Eq + Ord + std::fmt::Display + std::hash::Hash {
+pub trait Instruction : Downcast + std::fmt::Display + std::fmt::Debug {
     fn operands(&self) -> Vec<Var>;
     fn operands_mut(&mut self) -> Vec<&mut Var>;
     fn destination(&self) -> Option<Var>;
@@ -12,7 +14,24 @@ pub trait Instruction: Clone + Eq + Ord + std::fmt::Display + std::hash::Hash {
     fn labels_mut(&mut self) -> Vec<&mut Label>;
     fn exit_block(&self) -> bool;
     fn may_have_side_effect(&self) -> bool;
+
+    fn clone_dyn(&self) -> Box<dyn Instruction>;
 }
+
+impl_downcast!(Instruction);
+
+pub type Instr = Box<dyn Instruction>;
+
+pub fn mk_instr<I: Instruction>(i: I) -> Instr {
+    Box::new(i)
+}
+
+impl Clone for Instr {
+    fn clone(&self) -> Self {
+        self.clone_dyn()
+    }
+}
+
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum Lit {
@@ -50,44 +69,41 @@ impl Lit {
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
-pub enum GenericInstr<Destination, Operand> {
+pub enum GInstr {
     /// Binary operations
-    Binop(Destination, Binop, Operand, Operand),
+    Binop(Var, Binop, Lit, Lit),
 
     /// Unary operations
-    Unop(Destination, Unop, Operand),
+    Unop(Var, Unop, Lit),
 
     /// Return a value from a function call
-    Return(Operand),
+    Return(Lit),
 
     /// Move a value from one position to another
-    Move(Destination, Operand),
+    Move(Var, Lit),
 
     /// Load a value from a pointer
-    Load{dest: Destination, addr: Operand, volatile: bool},
+    Load{dest: Var, addr: Lit, volatile: bool},
 
     /// Store a value from a pointer
-    Store{val: Operand, addr: Operand, volatile: bool},
+    Store{val: Lit, addr: Lit, volatile: bool},
 
     /// Call a function with a given number of arguments
-    Call(Destination, String, Vec<Operand>),
+    Call(Var, String, Vec<Lit>),
 
     /// Jump to a label
     Jump(Label),
 
     /// Branch to a lable depending of a value
-    Branch(Operand, Label, Label),
-
-    /// Phi expression, contains the assignation for the predecessors in order
-    Phi(Destination, Vec<(Operand, Label)>),
+    Branch(Lit, Label, Label),
 }
 
-pub type Instr = GenericInstr<Var, Lit>;
 
-impl<Destination: Clone, Operand: Clone> GenericInstr<Destination, Operand> {
+
+impl GInstr {
     /// Return the list of operands the instruction depends on,
     /// including all the operands in the label arguments
-    pub fn literals(&self) -> Vec<Operand> {
+    pub fn literals(&self) -> Vec<Lit> {
         match self {
             Self::Binop(_, _, x, y)
                 | Self::Store{addr: x, val: y, ..}
@@ -101,14 +117,12 @@ impl<Destination: Clone, Operand: Clone> GenericInstr<Destination, Operand> {
             Self::Jump(_) => vec![],
             Self::Call(_, _, args) =>
                 args.iter().cloned().collect(),
-            Self::Phi(_, vars) =>
-                vars.iter().map(|(v, _)| v.clone()).collect()
         }
     }
 
     /// Return the list of operands the instruction depends on,
     /// including all the operands in the label arguments
-    pub fn literals_mut(&mut self) -> Vec<&mut Operand> {
+    pub fn literals_mut(&mut self) -> Vec<&mut Lit> {
         match self {
             Self::Binop(_, _, x, y)
                 | Self::Store{addr: x, val: y, ..}
@@ -122,13 +136,16 @@ impl<Destination: Clone, Operand: Clone> GenericInstr<Destination, Operand> {
             Self::Jump(_) => vec![],
             Self::Call(_, _, args) =>
                 args.iter_mut().collect(),
-            Self::Phi(_, vars) =>
-                vars.iter_mut().map(|(v, _)| v).collect()
         }
     }
 }
 
-impl Instruction for Instr {
+
+impl Instruction for GInstr {
+    fn clone_dyn(&self) -> Instr {
+        Box::new(self.clone())
+    }
+
     fn exit_block(&self) -> bool {
         match self {
             Self::Jump(..)
@@ -146,7 +163,6 @@ impl Instruction for Instr {
                 | Self::Move(ret, ..)
                 | Self::Load{dest:ret, ..}
                 | Self::Call(ret, ..)
-                | Self::Phi(ret, ..)
                 => Some(*ret),
             _ => None
         }
@@ -159,7 +175,6 @@ impl Instruction for Instr {
                 | Self::Move(ret, ..)
                 | Self::Load{dest: ret, ..}
                 | Self::Call(ret, ..)
-                | Self::Phi(ret, ..)
                 => Some(ret),
             _ => None
         }
@@ -204,6 +219,46 @@ impl Instruction for Instr {
 }
 
 
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub struct Phi{pub dest: Var, pub args: Vec<(Lit, Label)>}
+
+impl Phi {
+    pub fn literals(&self) -> Vec<Lit> {
+        self.args.iter().map(|(v,_)| v.clone()).collect()
+    }
+
+    pub fn literals_mut(&mut self) -> Vec<&mut Lit> {
+        self.args.iter_mut().map(|(v,_)| v).collect()
+    }
+}
+
+impl Instruction for Phi {
+    fn destination(&self) -> Option<Var> { Some(self.dest) }
+
+    fn destination_mut(&mut self) -> Option<&mut Var> { Some(&mut self.dest) }
+
+    fn operands(&self) -> Vec<Var> {
+        self.literals().into_iter().filter_map(|v| v.as_var()).collect()
+    }
+
+    fn operands_mut(&mut self) -> Vec<&mut Var> {
+        self.literals_mut().into_iter().filter_map(|v| v.as_var_mut()).collect()
+    }
+
+    fn labels(&self) -> Vec<Label> { vec![] }
+
+    fn labels_mut(&mut self) -> Vec<&mut Label> { vec![] }
+
+    fn exit_block(&self) -> bool { false }
+
+    fn may_have_side_effect(&self) -> bool { false }
+
+    fn clone_dyn(&self) -> Instr {
+        Box::new(self.clone())
+    }
+}
+
+
 new_key_type!{
     pub struct Var;
 }
@@ -217,12 +272,12 @@ new_key_type!{
 }
 
 
-pub struct Block<I: Instruction> {
-    pub stmt: Vec<I>,
+pub struct Block {
+    pub stmt: Vec<Instr>,
     pub ids: Vec<InstrId>,
 }
 
-impl<I: Instruction> Block<I> {
+impl Block {
     pub fn succs(&self) -> Vec<Label> {
         for instr in self.stmt.iter() {
             if instr.labels().is_empty() { continue; }
@@ -250,10 +305,10 @@ pub enum VarKind {
 
 /// A control flow graph, each control flow graph is specific to one function or procedure,
 /// it contains an entry point, a set of blocks, and a set of variables
-pub struct Cfg<I: Instruction> {
+pub struct Cfg {
     /// Associate for each label the definition of it's
     /// associated block
-    blocks: SlotMap<Label, Block<I>>,
+    blocks: SlotMap<Label, Block>,
 
     /// Entry of the control flow graph
     entry: Label,
@@ -269,7 +324,7 @@ pub struct Cfg<I: Instruction> {
 
     /// List all the instructions in a program, for each ID it contains
     /// it's instruction, the label of it's block, and it's previous/next instruction in the block
-    instructions: SlotMap<InstrId, (Label, I, Option<InstrId>, Option<InstrId>)>,
+    instructions: SlotMap<InstrId, (Label, Instr, Option<InstrId>, Option<InstrId>)>,
 
     /// A set of variables representing stack locations with a size and alignment constraint
     pub stack: Vec<(Var, usize)>,
@@ -278,15 +333,15 @@ pub struct Cfg<I: Instruction> {
     pub args: Vec<Var>,
 }
 
-impl<I: Instruction> std::ops::Index<Label> for Cfg<I> {
-    type Output = Block<I>;
+impl std::ops::Index<Label> for Cfg {
+    type Output = Block;
 
-    fn index(&self, name: Label) -> &Block<I> {
+    fn index(&self, name: Label) -> &Block {
         &self.blocks[name]
     }
 }
 
-impl<I: Instruction> std::ops::Index<Var> for Cfg<I> {
+impl std::ops::Index<Var> for Cfg {
     type Output = VarKind;
 
     fn index(&self, name: Var) -> &VarKind {
@@ -294,15 +349,15 @@ impl<I: Instruction> std::ops::Index<Var> for Cfg<I> {
     }
 }
 
-impl<I: Instruction> std::ops::Index<InstrId> for Cfg<I> {
-    type Output = I;
+impl std::ops::Index<InstrId> for Cfg {
+    type Output = Instr;
 
-    fn index(&self, name: InstrId) -> &I {
+    fn index(&self, name: InstrId) -> &Instr {
         &self.instructions[name].1
     }
 }
 
-impl<I: Instruction> Cfg<I> {
+impl Cfg {
     /// If ssa is set, then the SSA form will be checked during modification of the arguments
     /// and content of a block
     pub fn new(ssa: bool, args: Vec<Var>) -> Self {
@@ -365,7 +420,7 @@ impl<I: Instruction> Cfg<I> {
         order
     }
 
-    pub fn iter_blocks(&self) -> slotmap::basic::Iter<'_, Label, Block<I>> {
+    pub fn iter_blocks(&self) -> slotmap::basic::Iter<'_, Label, Block> {
         self.blocks.iter()
     }
 
@@ -374,7 +429,7 @@ impl<I: Instruction> Cfg<I> {
     }
 
     pub fn iter_instr(&self)
-        -> slotmap::basic::Iter<'_, InstrId, (Label, I, Option<InstrId>, Option<InstrId>)> {
+        -> slotmap::basic::Iter<'_, InstrId, (Label, Instr, Option<InstrId>, Option<InstrId>)> {
         self.instructions.iter()
     }
 
@@ -497,7 +552,7 @@ impl<I: Instruction> Cfg<I> {
     }
 
     /// Update the body of a block
-    pub fn set_block_stmt(&mut self, block: Label, stmt: Vec<I>) {
+    pub fn set_block_stmt(&mut self, block: Label, stmt: Vec<Instr>) {
         // Free all the instructions in the block
         for i in std::mem::take(&mut self.blocks[block].ids) {
             self.instructions.remove(i);
@@ -506,7 +561,9 @@ impl<I: Instruction> Cfg<I> {
         // Insert new instructions for the block
         let instrs: Vec<InstrId> =
             stmt.iter()
-            .map(|i| self.instructions.insert((block, i.clone(), None, None))).collect();
+            .map(|i| {
+                self.instructions.insert((block, i.clone(), None, None))
+            }).collect();
 
         // Compute the predecessors, successors of the added instructions
         for i in 0..stmt.len() {
@@ -585,18 +642,18 @@ pub enum Word {
     Int(i32),
 }
 
-pub enum Section<I: Instruction> {
-    Text(Cfg<I>),
+pub enum Section {
+    Text(Cfg),
     Data(Vec<Word>),
 }
 
-impl<I: Instruction> Section<I> {
-    pub fn as_text(&self) -> Option<&Cfg<I>> {
+impl Section {
+    pub fn as_text(&self) -> Option<&Cfg> {
         if let Self::Text(cfg) = self {return Some(cfg);}
         return None;
     }
 
-    pub fn as_text_mut(&mut self) -> Option<&mut Cfg<I>> {
+    pub fn as_text_mut(&mut self) -> Option<&mut Cfg> {
         if let Self::Text(cfg) = self {return Some(cfg);}
         return None;
     }
@@ -607,8 +664,8 @@ impl<I: Instruction> Section<I> {
     }
 }
 
-pub struct SymbolTable<I: Instruction> {
-    pub symbols: HashMap<String, Section<I>>,
+pub struct SymbolTable {
+    pub symbols: HashMap<String, Section>,
 }
 
 impl std::fmt::Display for Word {
@@ -620,7 +677,7 @@ impl std::fmt::Display for Word {
     }
 }
 
-impl<I: Instruction> std::fmt::Display for Section<I> {
+impl std::fmt::Display for Section {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Text(cfg) =>  write!(f, "{cfg}"),
@@ -636,7 +693,7 @@ impl<I: Instruction> std::fmt::Display for Section<I> {
     }
 }
 
-impl<I: Instruction> std::fmt::Display for SymbolTable<I> {
+impl std::fmt::Display for SymbolTable {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         for (symbol, section) in self.symbols.iter() {
             write!(f, ".globl {symbol}:\n{section}\n\n")?;
@@ -682,28 +739,38 @@ impl std::fmt::Display for Lit {
     }
 }
 
-impl std::fmt::Display for Instr {
+impl std::fmt::Display for Phi {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} := phi", self.dest)?;
+        for (var, label) in self.args.iter() {
+            write!(f, " ({}, {})", var, label)?;
+        }
+        Ok(())
+    }
+}
+
+impl std::fmt::Display for GInstr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Instr::Binop(dest, op, src1, src2) =>
+            Self::Binop(dest, op, src1, src2) =>
                 write!(f, "{} := {} {} {}", dest, src1, op, src2),
-            Instr::Unop(dest, op, src1) =>
+            Self::Unop(dest, op, src1) =>
                 write!(f, "{} := {} {}", dest, op, src1),
-            Instr::Load{dest, addr, volatile: true} =>
+            Self::Load{dest, addr, volatile: true} =>
                 write!(f, "{} := [volatile {}]", dest, addr),
-            Instr::Load{dest, addr, volatile: false} =>
+            Self::Load{dest, addr, volatile: false} =>
                 write!(f, "{} := [{}]", dest, addr),
-            Instr::Store{addr, val, ..} =>
+            Self::Store{addr, val, ..} =>
                 write!(f, "[{}] := {}", addr, val),
-            Instr::Move(dest, src1) =>
+            Self::Move(dest, src1) =>
                 write!(f, "{} := {}", dest, src1),
-            Instr::Branch(cond, l1, l2) =>
+            Self::Branch(cond, l1, l2) =>
                 write!(f, "branch {}, {}, {}", cond, l1, l2),
-            Instr::Jump(l) =>
+            Self::Jump(l) =>
                 write!(f, "jump {}", l),
-            Instr::Return(cond) =>
+            Self::Return(cond) =>
                 write!(f, "return {}", cond),
-            Instr::Call(dest, name, args) => {
+            Self::Call(dest, name, args) => {
                 write!(f, "{} := {}(", dest, name)?;
                 for (i, arg) in args.iter().enumerate() {
                     write!(f, "{}", arg)?;
@@ -712,18 +779,11 @@ impl std::fmt::Display for Instr {
                     }
                 } write!(f, ")")
             }
-            Instr::Phi(dest, args) => {
-                write!(f, "{} := phi", dest)?;
-                for (var, label) in args.iter() {
-                    write!(f, " ({}, {})", var, label)?;
-                }
-                Ok(())
-            }
         }
     }
 }
 
-impl<I: Instruction> std::fmt::Display for Cfg<I> {
+impl std::fmt::Display for Cfg {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "entry: {} args:", self.entry())?;
         for arg in self.args.iter() {

@@ -13,7 +13,7 @@ pub struct MemToReg {
     removed: HashSet<Var>,
 
     /// Necessary phi instruction per label/variable
-    phis: SecondaryMap<Label, SparseSecondaryMap<Var, Instr>>,
+    phis: SecondaryMap<Label, SparseSecondaryMap<Var, Phi>>,
 
     /// Current environment of variables in removed, as a mapping from stack slots to fresh
     /// variables
@@ -24,7 +24,7 @@ pub struct MemToReg {
 }
 
 impl MemToReg {
-    pub fn new(cfg: &Cfg<Instr>) -> Self {
+    pub fn new(cfg: &Cfg) -> Self {
         let mut removed = HashSet::new();
 
         for (v, kind) in cfg.iter_vars() {
@@ -48,12 +48,13 @@ impl MemToReg {
 
     /// Search for stack variables that are safe to remove: a stack variable is safe to remove iff
     /// we only use it to load/store from/to it in a non-volatile mode
-    pub fn search(&mut self, cfg: &Cfg<Instr>) {
+    pub fn search(&mut self, cfg: &Cfg) {
         for (_, block) in cfg.iter_blocks() {
             for instr in block.stmt.iter() {
+                let instr = instr.downcast_ref::<GInstr>().unwrap();
                 match instr {
-                    Instr::Load{volatile: false, ..} => {}
-                    Instr::Store{val, volatile: false, ..} => {
+                    GInstr::Load{volatile: false, ..} => {}
+                    GInstr::Store{val, volatile: false, ..} => {
                         if let Some(x) = val.as_var() {
                             self.removed.remove(&x);
                         }
@@ -71,7 +72,7 @@ impl MemToReg {
     /// Introduce the necessary phi expressions, note that some of those expressions are not
     /// necessary because the introduce a phi in a block for a variable that is introduced in this
     /// same block, so it's necessary to detect them later
-    pub fn insert_phis(&mut self, cfg: &Cfg<Instr>) {
+    pub fn insert_phis(&mut self, cfg: &Cfg) {
         // Insert phis each times we store into a removed stack variable
 
         let mut phis =
@@ -84,7 +85,8 @@ impl MemToReg {
 
         for (label, block) in cfg.iter_blocks() {
             for instr in block.stmt.iter() {
-                if let Instr::Store{addr: Lit::Var(addr), ..} = instr
+                let instr = instr.downcast_ref::<GInstr>().unwrap();
+                if let GInstr::Store{addr: Lit::Var(addr), ..} = instr
                     && self.removed.contains(addr) {
                     queue[*addr].push(label);
                 }
@@ -100,7 +102,7 @@ impl MemToReg {
                             .iter()
                             .map(|l|(Lit::Var(var),*l)).collect();
 
-                        phis[succ].insert(var, Instr::Phi(var, phi_args));
+                        phis[succ].insert(var, Phi{dest: var, args: phi_args});
                         dirty.push(succ);
                     }
                 }
@@ -110,7 +112,7 @@ impl MemToReg {
         self.phis = phis;
     }
 
-    pub fn renaming(&mut self, cfg: &mut Cfg<Instr>, block: Label) {
+    pub fn renaming(&mut self, cfg: &mut Cfg, block: Label) {
         let mut env = self.env.clone();
 
         let mut useless_phi: Vec<Var> = vec![];
@@ -135,16 +137,17 @@ impl MemToReg {
         // Introduce a new variable (and store it into `env) each times we store into a removed
         // stack slot. And replace each load from a removed stack slot by a move
         for instr in stmt.iter_mut() {
-            if let Instr::Load{addr: Lit::Var(addr), dest, ..} = instr
+            let instr = instr.downcast_mut::<GInstr>().unwrap();
+            if let GInstr::Load{addr: Lit::Var(addr), dest, ..} = instr
                 && self.removed.contains(addr) {
-                *instr = Instr::Move(*dest, Lit::Var(env[*addr]));
+                *instr = GInstr::Move(*dest, Lit::Var(env[*addr]));
             }
 
-            if let Instr::Store{addr: Lit::Var(addr), val, ..} = instr
+            if let GInstr::Store{addr: Lit::Var(addr), val, ..} = instr
                 && self.removed.contains(addr) {
                 let new_dest = cfg.fresh_var();
                 env.insert(*addr, new_dest);
-                *instr = Instr::Move(new_dest, val.clone());
+                *instr = GInstr::Move(new_dest, val.clone());
             }
         }
 
@@ -153,14 +156,12 @@ impl MemToReg {
         // Rename the arguments of the new phi expressions that refer to this block
         for succ in cfg[block].succs() {
             for (_, phi) in self.phis[succ].iter_mut() {
-                if let Instr::Phi(_, vars) = phi {
-                    for (src, label) in vars.iter_mut() {
-                        // If env doesn't contains src, then this phi instruction will be deleted
-                        // later cause all it's variable is not defined at idom(succ) (otherwise it
-                        // must be definde at all it's predecessors)
-                        if *label == block && env.contains_key(src.as_var().unwrap()) {
-                            *src = Lit::Var(env[src.as_var().unwrap()]);
-                        }
+                for (src, label) in phi.args.iter_mut() {
+                    // If env doesn't contains src, then this phi instruction will be deleted
+                    // later cause all it's variable is not defined at idom(succ) (otherwise it
+                    // must be definde at all it's predecessors)
+                    if *label == block && env.contains_key(src.as_var().unwrap()) {
+                        *src = Lit::Var(env[src.as_var().unwrap()]);
                     }
                 }
             }
@@ -178,7 +179,7 @@ impl MemToReg {
         self.env = env_save;
     }
 
-    pub fn run(&mut self, cfg: &mut Cfg<Instr>) {
+    pub fn run(&mut self, cfg: &mut Cfg) {
         self.search(cfg);
         self.insert_phis(cfg);
         self.renaming(cfg, cfg.entry());
@@ -187,7 +188,7 @@ impl MemToReg {
 
         for block in blocks {
             let mut stmt: Vec<Instr> =
-                self.phis[block].iter().map(|(_, phi)| phi.clone()).collect();
+                self.phis[block].iter().map(|(_, phi)| mk_instr(phi.clone())).collect();
 
             stmt.extend(cfg[block].stmt.iter().cloned());
             cfg.set_block_stmt(block, stmt);

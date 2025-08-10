@@ -16,7 +16,7 @@ impl std::ops::Index<Var> for InterferenceGraph {
 }
 
 impl InterferenceGraph {
-    pub fn new(cfg: &Cfg<Instr>) -> Self {
+    pub fn new(cfg: &Cfg) -> Self {
         let mut matrix = SparseSecondaryMap::new();
 
         for (var, _) in cfg.iter_vars() {
@@ -31,21 +31,22 @@ impl InterferenceGraph {
         self.matrix[y].insert(x);
     }
 
-    pub fn run(&mut self, cfg: &Cfg<Instr>, liveness: &Liveness) {
+    pub fn run(&mut self, cfg: &Cfg, liveness: &Liveness) {
         for (block, _) in cfg.iter_blocks() {
             let mut lives = liveness[block].outputs.clone();
 
             for instr in cfg[block].stmt.iter().rev() {
+                let instr = instr.downcast_ref::<GInstr>().unwrap();
                 // Loads/stores from/to a stack known offset doesn't need to be added to the
                 // interference graph
-                if let Instr::Load{addr: Lit::Var(addr), dest, ..} = instr
+                if let GInstr::Load{addr: Lit::Var(addr), dest, ..} = instr
                     && cfg[*addr] == VarKind::Stack {
                     lives.remove(&dest);
                     lives.iter().for_each(|x| self.add_conflict(*x, *dest));
                     continue;
                 }
 
-                if let Instr::Store{addr: Lit::Var(addr), val, ..} = instr
+                if let GInstr::Store{addr: Lit::Var(addr), val, ..} = instr
                     && cfg[*addr] == VarKind::Stack {
                     if let Some(x) = val.as_var() {
                         lives.insert(x);

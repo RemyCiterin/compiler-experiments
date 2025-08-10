@@ -3,93 +3,17 @@
 
 use crate::ssa::*;
 use crate::dominance::*;
-use std::collections::HashMap;
-use crate::liveness::*;
 use slotmap::*;
 
-/// Naive SSA form generation using liveness relation, it rename each variable at the entry of each
-/// block using a phi expression
-pub fn into_ssa(cfg: &mut Cfg<Instr>) {
-    // Used to compute the translation as ssa of the output variables of each block
-    let mut globals: HashMap<Label, HashMap<Var, Var>> = HashMap::new();
-
-    // Phi expressions to insert in each block
-    let mut phis: HashMap<Label, Vec<Instr>> = HashMap::new();
-
-    // Liveness analysis
-    let mut liveness = Liveness::new(cfg);
-    liveness.run(cfg);
-
-    let order = cfg.labels().clone();
-
-    // Compute phis and rename variables (except in phi expressions)
-    for &block in order.iter() {
-        // Start by creating a fresh variable for each live variable at input of the block
-        let mut map: HashMap<Var, Var> = HashMap::new();
-        let mut stmt = vec![];
-
-        for &var in liveness[block].inputs.iter() {
-            let v = cfg.fresh_var();
-            map.insert(var, v);
-
-            let phi_args = cfg
-                .preds(block)
-                .iter()
-                .map(|l| (Lit::Var(var), *l)).collect();
-
-            stmt.push(Instr::Phi(v, phi_args));
-        }
-
-        phis.insert(block, stmt);
-
-        // Now rename each variable of the block
-        let mut stmt = cfg[block].stmt.clone();
-
-        for instr in stmt.iter_mut() {
-            for x in instr.operands_mut() { *x = map[x]; }
-            if let Some(x) = instr.destination_mut() {
-                let y = cfg.fresh_var();
-                map.insert(*x, y);
-                *x = y;
-            }
-        }
-
-        globals.insert(block, map);
-        cfg.set_block_stmt(block, stmt);
-    }
-
-    // Rename phi variables and add phis to blocks
-    for &block in order.iter() {
-        let mut stmt = phis.remove(&block).unwrap();
-
-        for phi in stmt.iter_mut() {
-            match phi {
-                Instr::Phi(_, vars) => {
-                    for (v, l) in vars.iter_mut() {
-                        *v = Lit::Var(globals[l][&v.as_var().unwrap()]);
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        // Add phis expressions to each blocks
-        stmt.extend(cfg[block].stmt.iter().cloned());
-        cfg.set_block_stmt(block, stmt);
-    }
-
-    // Start to compute the block of definition of each variable
-    cfg.start_ssa();
-}
 
 pub struct IntoSsaTransform {
-    phis: SecondaryMap<Label, SparseSecondaryMap<Var, Instr>>,
+    phis: SecondaryMap<Label, SparseSecondaryMap<Var, Phi>>,
     env: SecondaryMap<Var, Var>,
     dom: Dominance,
 }
 
 impl IntoSsaTransform {
-    pub fn new(cfg: &Cfg<Instr>) -> Self {
+    pub fn new(cfg: &Cfg) -> Self {
         let mut phis = SecondaryMap::new();
         let mut env = SecondaryMap::new();
         let mut dom = Dominance::new(cfg);
@@ -112,7 +36,7 @@ impl IntoSsaTransform {
 
     /// For each update of a variable `v` in a block `b`, insert the instruction
     /// `v := phi (v, ..., v)` at the dominance frontier of `b`
-    pub fn insert_phis(&mut self, cfg: &Cfg<Instr>) {
+    pub fn insert_phis(&mut self, cfg: &Cfg) {
         let mut phis =
             std::mem::take(&mut self.phis);
 
@@ -137,7 +61,7 @@ impl IntoSsaTransform {
                             cfg.preds(succ)
                             .iter()
                             .map(|l| (Lit::Var(var), *l)).collect();
-                        phis[succ].insert(var, Instr::Phi(var, phi_args));
+                        phis[succ].insert(var, Phi{dest: var, args: phi_args});
                         dirty.push(succ);
                     }
                 }
@@ -147,7 +71,7 @@ impl IntoSsaTransform {
         self.phis = phis;
     }
 
-    pub fn renaming(&mut self, cfg: &mut Cfg<Instr>, block: Label) {
+    pub fn renaming(&mut self, cfg: &mut Cfg, block: Label) {
         let mut env = self.env.clone();
 
         let mut useless_phi: Vec<Var> = vec![];
@@ -187,14 +111,12 @@ impl IntoSsaTransform {
 
         for succ in cfg[block].succs() {
             for (_, phi) in self.phis[succ].iter_mut() {
-                if let Instr::Phi(_, vars) = phi {
-                    for (src, label) in vars.iter_mut() {
-                        // If env doesn't contains src, then this phi instruction will be deleted
-                        // later cause all it's variable is not defined at idom(succ) (otherwise it
-                        // must be definde at all it's predecessors)
-                        if *label == block && env.contains_key(src.as_var().unwrap()) {
-                            *src = Lit::Var(env[src.as_var().unwrap()]);
-                        }
+                for (src, label) in phi.args.iter_mut() {
+                    // If env doesn't contains src, then this phi instruction will be deleted
+                    // later cause all it's variable is not defined at idom(succ) (otherwise it
+                    // must be definde at all it's predecessors)
+                    if *label == block && env.contains_key(src.as_var().unwrap()) {
+                        *src = Lit::Var(env[src.as_var().unwrap()]);
                     }
                 }
             }
@@ -211,7 +133,7 @@ impl IntoSsaTransform {
         self.env = env_save;
     }
 
-    pub fn run(&mut self, cfg: &mut Cfg<Instr>) {
+    pub fn run(&mut self, cfg: &mut Cfg) {
         self.insert_phis(cfg);
         self.renaming(cfg, cfg.entry());
 
@@ -219,7 +141,7 @@ impl IntoSsaTransform {
 
         for block in blocks {
             let mut stmt: Vec<Instr> =
-                self.phis[block].iter().map(|(_, phi)| phi.clone()).collect();
+                self.phis[block].iter().map(|(_, phi)| mk_instr(phi.clone())).collect();
 
             stmt.extend(cfg[block].stmt.iter().cloned());
             cfg.set_block_stmt(block, stmt);

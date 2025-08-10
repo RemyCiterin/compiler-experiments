@@ -8,7 +8,7 @@ pub struct Simplifier {
 }
 
 impl Simplifier {
-    pub fn new(cfg: &Cfg<Instr>) -> Self {
+    pub fn new(cfg: &Cfg) -> Self {
         // This simplification phase use an union find to simulate the fact that a variable has
         // been replaced by another
         let mut uf = UnionFind::new();
@@ -28,7 +28,7 @@ impl Simplifier {
         lit.when_var(|x| self.uf.find(x))
     }
 
-    fn search(&mut self, preorder: &Vec<Label>, cfg: &mut Cfg<Instr>) -> bool {
+    fn search(&mut self, preorder: &Vec<Label>, cfg: &mut Cfg) -> bool {
         let mut progress = false;
 
         // Use preorder (reverse post-order) to minimize the number of passes
@@ -37,11 +37,12 @@ impl Simplifier {
 
             for instr in stmt.iter_mut() {
                 // Look if we can keep this phi expression if not already removed
-                if let Instr::Phi(x, args) = instr && self.keep_var(*x) {
+                //if let GenericInstr::Phi(x, args) = instr && self.keep_var(*x) {
+                if let Some(phi) = instr.downcast_mut::<Phi>() && self.keep_var(phi.dest) {
                     let args: std::collections::BTreeSet<Lit> =
-                        args.iter()
+                        phi.args.iter()
                         .map(|(v,_)| self.find(v.clone()))
-                        .filter(|v| v != &Lit::Var(*x))
+                        .filter(|v| v != &Lit::Var(phi.dest))
                         .collect();
 
                     // If only one literal (except `x`) is used in the phi expression,
@@ -54,11 +55,11 @@ impl Simplifier {
                         let lit = args.first().unwrap().clone();
 
                         if let Lit::Var(new_root) = lit {
-                            self.uf.merge(new_root, *x);
-                            self.removed.push(*x);
+                            self.uf.merge(new_root, phi.dest);
+                            self.removed.push(phi.dest);
                             progress = true;
                         } else {
-                            *instr = Instr::Move(*x, lit);
+                            *instr = mk_instr(GInstr::Move(phi.dest, lit));
                         }
                     }
                 }
@@ -70,7 +71,7 @@ impl Simplifier {
         return progress;
     }
 
-    pub fn run(&mut self, cfg: &mut Cfg<Instr>) {
+    pub fn run(&mut self, cfg: &mut Cfg) {
         let preorder = cfg.preorder();
 
         loop {

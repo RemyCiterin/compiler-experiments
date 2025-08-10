@@ -4,7 +4,7 @@ use std::io::prelude::*;
 
 use builder;
 
-pub fn optimize(table: &mut ssa::SymbolTable<ssa::Instr>) {
+pub fn optimize(table: &mut ssa::SymbolTable) {
     for (_, section) in table.symbols.iter_mut() {
         match section {
             ssa::Section::Text(cfg) => {
@@ -20,8 +20,8 @@ pub fn optimize(table: &mut ssa::SymbolTable<ssa::Instr>) {
                 let mut gvn = gvn::ValueTable::new();
                 gvn.run(cfg);
 
-                let mut copy = copy_prop::CopyProp::new(&cfg);
-                copy.run(cfg);
+                //let mut copy = copy_prop::CopyProp::new(&cfg);
+                //copy.run(cfg);
 
                 cfg.gc();
 

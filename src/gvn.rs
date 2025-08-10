@@ -85,50 +85,46 @@ impl ValueTable {
     }
 
     pub fn insert_instr(&mut self, instr: Instr) {
-        match instr {
-            Instr::Binop(dest, binop, lit1, lit2) => {
-                let v1 = self.eval_lit(lit1);
-                let v2 = self.eval_lit(lit2);
-                let v = self.insert(Expr::Binop(binop, v1, v2), Some(dest));
-                self.insert_with(Expr::Reg(dest), v);
+        if let Ok(instr) = instr.downcast::<GInstr>() {
+            match *instr {
+                GInstr::Binop(dest, binop, lit1, lit2) => {
+                    let v1 = self.eval_lit(lit1);
+                    let v2 = self.eval_lit(lit2);
+                    let v = self.insert(Expr::Binop(binop, v1, v2), Some(dest));
+                    self.insert_with(Expr::Reg(dest), v);
+                }
+                GInstr::Unop(dest, unop, lit) => {
+                    let v1 = self.eval_lit(lit);
+                    let v = self.insert(Expr::Unop(unop, v1), Some(dest));
+                    self.insert_with(Expr::Reg(dest), v);
+                }
+                GInstr::Move(dest, lit) => {
+                    let v = self.eval_lit(lit);
+                    self.insert_with(Expr::Reg(dest), v);
+                }
+                _ => {}
             }
-            Instr::Unop(dest, unop, lit) => {
-                let v1 = self.eval_lit(lit);
-                let v = self.insert(Expr::Unop(unop, v1), Some(dest));
-                self.insert_with(Expr::Reg(dest), v);
-            }
-            Instr::Move(dest, lit) => {
-                let v = self.eval_lit(lit);
-                self.insert_with(Expr::Reg(dest), v);
-            }
-            _ => {}
-            //_ => {
-            //    if let Some(dest) = instr.destination() {
-            //        self.insert(Expr::Reg(dest), Some(dest));
-            //    }
-            //}
         }
     }
 
-    pub fn update_operand(&self, lit: &mut Lit) {
-        if let Lit::Var(var) = lit {
-            if let Some(value) = self.exprs.get(&Expr::Reg(*var)) {
-                if let Some(copy) = self.values[*value] {
-                    *lit = Lit::Var(copy);
-                }
+    pub fn new_operand(&self, var: Var) -> Var {
+        if let Some(value) = self.exprs.get(&Expr::Reg(var)) {
+            if let Some(copy) = self.values[*value] {
+                return copy;
             }
         }
 
+        var
     }
 
     /// `self.added` must be empty at input
-    pub fn run_on_block(&mut self, cfg: &mut Cfg<Instr>, dom: &Dominance, block: Label) {
+    pub fn run_on_block(&mut self, cfg: &mut Cfg, dom: &Dominance, block: Label) {
         assert!(self.added.len() == 0);
 
         let mut stmt = vec![];
         for mut instr in cfg[block].stmt.clone() {
-            for lit in instr.literals_mut() {
-                self.update_operand(lit);
+            for var in instr.operands_mut() {
+                *var = self.new_operand(*var);
             }
 
             self.insert_instr(instr.clone());
@@ -148,7 +144,7 @@ impl ValueTable {
         }
     }
 
-    pub fn run(&mut self, cfg: &mut Cfg<Instr>) {
+    pub fn run(&mut self, cfg: &mut Cfg) {
         for &arg in cfg.args.iter() {
             self.insert(Expr::Reg(arg), Some(arg));
         }

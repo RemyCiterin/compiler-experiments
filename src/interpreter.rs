@@ -4,7 +4,7 @@ use crate::ssa::*;
 use crate::ast::*;
 
 pub struct Interpreter<'a>{
-    table: &'a SymbolTable<Instr>,
+    table: &'a SymbolTable,
 
     /// Associate a pointer to each symbol
     symbols: HashMap<String, i32>,
@@ -34,7 +34,7 @@ pub struct Interpreter<'a>{
 }
 
 impl<'a> Interpreter<'a> {
-    pub fn new(table: &'a SymbolTable<Instr>) -> Self {
+    pub fn new(table: &'a SymbolTable) -> Self {
         let mut symbols: HashMap<String, i32> = HashMap::new();
         let mut memory: HashMap<i32, i32> = HashMap::new();
 
@@ -81,7 +81,7 @@ impl<'a> Interpreter<'a> {
         }
     }
 
-    pub fn cfg(&self) -> &'a Cfg<Instr> {
+    pub fn cfg(&self) -> &'a Cfg {
         self.table.symbols[&self.symbol].as_text().unwrap()
     }
 
@@ -222,52 +222,54 @@ impl<'a> Interpreter<'a> {
         loop {
             for instr in self.cfg()[label].stmt.iter() {
                 self.instret += 1;
-                match instr {
-                    Instr::Phi(dest, args) => {
-                        let (l, _) =
-                            args.iter().rfind(|(_, l)| *l == prev_label).unwrap();
-                        self.write_var(*dest, self.lit(l))
+
+                if let Some(instr) = instr.downcast_ref::<GInstr>() {
+                    match instr {
+                        GInstr::Binop(dest, binop, l1, l2) => {
+                            self.binop(*dest, *binop, self.lit(l1), self.lit(l2));
+                        }
+                        GInstr::Unop(dest, unop, l) => {
+                            self.unop(*dest, *unop, self.lit(l));
+                        }
+                        GInstr::Move(dest, l) => {
+                            self.write_var(*dest, self.lit(l));
+                        }
+                        GInstr::Call(dest, name, args) => {
+                            self.call(
+                                *dest,
+                                name.clone(),
+                                args.iter().map(|x|self.lit(x)).collect()
+                             );
+                        }
+                        GInstr::Return(l) => {
+                            self.sp = sp;
+                            return self.lit(l)
+                        },
+                        GInstr::Jump(l) => {
+                            prev_label = label;
+                            label = *l;
+                            continue;
+                        }
+                        GInstr::Branch(cond, l1, l2) => {
+                            prev_label = label;
+                            label = if self.lit(cond) != 0 {*l1} else {*l2};
+                            continue;
+                        }
+                        GInstr::Load{dest, addr, ..} => {
+                            let val = self.load(self.lit(addr));
+                            self.write_var(*dest, val);
+                            self.loads += 1;
+                        }
+                        GInstr::Store{val, addr, ..} => {
+                            self.store(self.lit(addr), self.lit(val));
+                            self.stores += 1;
+                        }
                     }
-                    Instr::Binop(dest, binop, l1, l2) => {
-                        self.binop(*dest, *binop, self.lit(l1), self.lit(l2));
-                    }
-                    Instr::Unop(dest, unop, l) => {
-                        self.unop(*dest, *unop, self.lit(l));
-                    }
-                    Instr::Move(dest, l) => {
-                        self.write_var(*dest, self.lit(l));
-                    }
-                    Instr::Call(dest, name, args) => {
-                        self.call(
-                            *dest,
-                            name.clone(),
-                            args.iter().map(|x|self.lit(x)).collect()
-                         );
-                    }
-                    Instr::Return(l) => {
-                        self.sp = sp;
-                        return self.lit(l)
-                    },
-                    Instr::Jump(l) => {
-                        prev_label = label;
-                        label = *l;
-                        continue;
-                    }
-                    Instr::Branch(cond, l1, l2) => {
-                        prev_label = label;
-                        label = if self.lit(cond) != 0 {*l1} else {*l2};
-                        continue;
-                    }
-                    Instr::Load{dest, addr, ..} => {
-                        let val = self.load(self.lit(addr));
-                        self.write_var(*dest, val);
-                        self.loads += 1;
-                    }
-                    Instr::Store{val, addr, ..} => {
-                        self.store(self.lit(addr), self.lit(val));
-                        self.stores += 1;
-                    }
-                }
+                } else if let Some(phi) = instr.downcast_ref::<Phi>() {
+                    let (l, _) =
+                        phi.args.iter().rfind(|(_, l)| *l == prev_label).unwrap();
+                    self.write_var(phi.dest, self.lit(l))
+                } else { unreachable!() }
             }
         }
     }

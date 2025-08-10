@@ -4,10 +4,10 @@ use std::collections::{HashMap, HashSet};
 
 pub struct Builder {
     /// Output control flow graph
-    cfg: Cfg<Instr>,
+    cfg: Cfg,
 
     /// Instructions of the block we are currently building
-    stmt: Vec<Instr>,
+    stmt: Vec<GInstr>,
 
     /// Label of the block we are currently building
     label: Label,
@@ -38,7 +38,7 @@ pub fn show_builder_error(program: &str, err: BuilderError) {
 impl Builder {
     pub fn new(args: Vec<String>, globals: HashSet<String>) -> Self {
         let mut cfg = Cfg::new(false, vec![]);
-        let mut stmt: Vec<Instr> = vec![];
+        let mut stmt: Vec<GInstr> = vec![];
         let label = cfg.entry();
 
         let mut env = HashMap::new();
@@ -49,7 +49,7 @@ impl Builder {
             let slot = cfg.fresh_stack_var(4);
             env.insert(arg, slot);
 
-            stmt.push(Instr::Store{volatile: false, val: Lit::Var(id), addr: Lit::Var(slot)});
+            stmt.push(GInstr::Store{volatile: false, val: Lit::Var(id), addr: Lit::Var(slot)});
         }
 
         Builder {
@@ -64,9 +64,9 @@ impl Builder {
     }
 
     /// Return the current control flow graph
-    pub fn cfg(mut self) -> Cfg<Instr> {
+    pub fn cfg(mut self) -> Cfg {
         let id = self.cfg.fresh_var();
-        self.stmt.push(Instr::Move(id, Lit::Int(0)));
+        self.stmt.push(GInstr::Move(id, Lit::Int(0)));
         self.gen_return(id);
         self.cfg
     }
@@ -104,44 +104,44 @@ impl Builder {
                 let mut ids: Vec<Lit> = vec![];
                 for arg in args { ids.push(Lit::Var(self.gen_rvalue(arg)?)); }
                 let id: Var = self.cfg.fresh_var();
-                self.stmt.push(Instr::Call(id, name, ids));
+                self.stmt.push(GInstr::Call(id, name, ids));
                 Ok(id)
             }
             RValueCore::Constant{value} => {
                 let id: Var = self.cfg.fresh_var();
-                self.stmt.push(Instr::Move(id, Lit::Int(value)));
+                self.stmt.push(GInstr::Move(id, Lit::Int(value)));
                 Ok(id)
             }
             RValueCore::LValue{lvalue} => {
                 let x = self.cfg.fresh_var();
                 let addr = self.gen_lvalue(lvalue)?;
                 self.stmt.push(
-                    Instr::Load{dest: x, addr, volatile: false});
+                    GInstr::Load{dest: x, addr, volatile: false});
                 Ok(x)
             }
             RValueCore::Binop{binop, lhs, rhs} => {
                 let l: Var = self.gen_rvalue(lhs)?;
                 let r: Var  = self.gen_rvalue(rhs)?;
                 let id: Var = self.cfg.fresh_var();
-                self.stmt.push(Instr::Binop(id, binop, Lit::Var(l), Lit::Var(r)));
+                self.stmt.push(GInstr::Binop(id, binop, Lit::Var(l), Lit::Var(r)));
                 Ok(id)
             }
             RValueCore::Unop{unop,arg} => {
                 let y: Var = self.gen_rvalue(arg)?;
                 let id: Var = self.cfg.fresh_var();
-                self.stmt.push(Instr::Unop(id, unop, Lit::Var(y)));
+                self.stmt.push(GInstr::Unop(id, unop, Lit::Var(y)));
                 Ok(id)
             }
             RValueCore::Ref{lvalue} => {
                 let id = self.cfg.fresh_var();
                 let lit = self.gen_lvalue(lvalue)?;
-                self.stmt.push(Instr::Move(id, lit));
+                self.stmt.push(GInstr::Move(id, lit));
                 Ok(id)
             }
             //RValueCore::Deref(x) => {
             //    let y: Var = self.gen_rvalue(x)?;
             //    let id: Var = self.cfg.fresh_var();
-            //    self.stmt.push(Instr::Load{dest: id, addr: Lit::Var(y), volatile: false});
+            //    self.stmt.push(GInstr::Load{dest: id, addr: Lit::Var(y), volatile: false});
             //    Ok(id)
             //}
         }
@@ -149,20 +149,26 @@ impl Builder {
 
     /// End a block by generating a branch instruction
     pub fn gen_branch(&mut self, cond: Var, l1: Label, l2: Label) {
-        self.stmt.push(Instr::Branch(Lit::Var(cond), l1, l2));
-        self.cfg.set_block_stmt(self.label, std::mem::take(&mut self.stmt));
+        self.stmt.push(GInstr::Branch(Lit::Var(cond), l1, l2));
+
+        let stmt = std::mem::take(&mut self.stmt);
+        self.cfg.set_block_stmt(self.label, stmt.into_iter().map(|x| mk_instr(x)).collect());
     }
 
     /// End a block by generating a jump instruction
     pub fn gen_jump(&mut self, label: Label) {
-        self.stmt.push(Instr::Jump(label));
-        self.cfg.set_block_stmt(self.label, std::mem::take(&mut self.stmt));
+        self.stmt.push(GInstr::Jump(label));
+
+        let stmt = std::mem::take(&mut self.stmt);
+        self.cfg.set_block_stmt(self.label, stmt.into_iter().map(|x| mk_instr(x)).collect());
     }
 
     /// End a block by generating a return instruction
     pub fn gen_return(&mut self, id: Var) {
-        self.stmt.push(Instr::Return(Lit::Var(id)));
-        self.cfg.set_block_stmt(self.label, std::mem::take(&mut self.stmt));
+        self.stmt.push(GInstr::Return(Lit::Var(id)));
+
+        let stmt = std::mem::take(&mut self.stmt);
+        self.cfg.set_block_stmt(self.label, stmt.into_iter().map(|x| mk_instr(x)).collect());
     }
 
     /// Generate the instructions/block for a given statement
@@ -244,7 +250,7 @@ impl Builder {
                 let addr = self.gen_lvalue(lvalue)?;
 
                 self.stmt.push(
-                    Instr::Store{addr, val: Lit::Var(id), volatile: false});
+                    GInstr::Store{addr, val: Lit::Var(id), volatile: false});
                 Ok(())
             }
             StmtCore::Break{} => {
@@ -311,7 +317,7 @@ fn get_symbols(program: Decl, symbols: &mut HashSet<String>) -> Result<(), Build
     Ok(())
 }
 
-fn fill_table(program: Decl, symbols: &HashSet<String>, table: &mut SymbolTable<Instr>)
+fn fill_table(program: Decl, symbols: &HashSet<String>, table: &mut SymbolTable)
     -> Result<(), BuilderError> {
 
     match *program.core {
@@ -338,7 +344,7 @@ fn fill_table(program: Decl, symbols: &HashSet<String>, table: &mut SymbolTable<
     Ok(())
 }
 
-pub fn build(program: Decl) -> Result<SymbolTable<Instr>, BuilderError> {
+pub fn build(program: Decl) -> Result<SymbolTable, BuilderError> {
     let mut table = SymbolTable{ symbols: HashMap::new() };
 
     let mut symbols = HashSet::new();
