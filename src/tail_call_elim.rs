@@ -1,3 +1,30 @@
+//! A very naive tail call elimination algorithm, works if the oroginal program contains a
+//! `return self(...)` statement with no stack "irreducible" variables, as example the
+//! following function is elligible to tail call elimination:
+//!
+//! ```b
+//! tail_facto(acc, x) {
+//!     if (x == 0) return acc;
+//!     else return tail_facto(acc*x, x-1);
+//! }
+//! ```
+//!
+//! but this function is not:
+//!
+//! ```b
+//! foo(c, x) {
+//!     if (c) {
+//!         bar(&x);
+//!     } else {
+//!         return foo(!c, x);
+//!     }
+//! }
+//! ```
+//!
+//! because the stack slot `&x` will not be removed by the compiler, so after calling `mem_to_reg`
+//! the program will still contain a stack slot for it, even if the recursive call doesn't depend
+//! on it.
+
 use crate::ssa::*;
 use slotmap::*;
 

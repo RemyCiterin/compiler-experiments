@@ -140,12 +140,6 @@ impl Builder {
                 self.stmt.push(Instr::Move(id, lit));
                 Ok(id)
             }
-            //RValueCore::Deref(x) => {
-            //    let y: Var = self.gen_rvalue(x)?;
-            //    let id: Var = self.cfg.fresh_var();
-            //    self.stmt.push(Instr::Load{dest: id, addr: Lit::Var(y), volatile: false});
-            //    Ok(id)
-            //}
         }
     }
 

@@ -2,7 +2,7 @@ use crate::dominance::*;
 use crate::ssa::*;
 use slotmap::*;
 
-use std::collections::*;
+use crate::persistent_hash_map::*;
 
 use crate::ast::{Binop, Unop};
 
@@ -23,10 +23,23 @@ impl std::fmt::Display for Value {
     }
 }
 
+pub fn commutative(binop: Binop) -> bool {
+    match binop {
+        Binop::And
+            | Binop::Or
+            | Binop::Xor
+            | Binop::Add
+            | Binop::Equal
+            | Binop::NotEqual
+            => true,
+        _ => false
+    }
+}
+
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum Expr {
+pub enum GenericExpr<Int, V> {
     /// Constant integer
-    Int(i32),
+    Int(Int),
 
     /// Constant address
     Addr(String),
@@ -35,127 +48,217 @@ pub enum Expr {
     Stack(Slot),
 
     /// Unary operation
-    Unop(Unop, Value),
+    Unop(Unop, V),
 
     /// Binary operation
-    Binop(Binop, Value, Value),
+    Binop(Binop, V, V),
+}
 
-    /// A blackbox variable
-    Reg(Var),
+pub type Expr = GenericExpr<i32, Value>;
+
+pub fn eval_unop(unop: Unop, e: i32) -> i32 {
+    match unop {
+        Unop::Neg => e.wrapping_neg(),
+        Unop::Not => !e,
+    }
+}
+
+pub fn eval_binop(binop: Binop, lhs: i32, rhs: i32) -> i32 {
+    match binop {
+        Binop::And => lhs & rhs,
+        Binop::Or => lhs | rhs,
+        Binop::Xor => lhs ^ rhs,
+        Binop::Add => lhs.wrapping_add(rhs),
+        Binop::Sub => lhs.wrapping_sub(rhs),
+        Binop::Sll => lhs << rhs,
+        Binop::Sra => lhs >> rhs,
+        Binop::Srl => ((lhs as u32) >> (rhs as u32)) as i32,
+        Binop::Equal => (lhs == rhs) as i32,
+        Binop::NotEqual => (lhs != rhs) as i32,
+        Binop::LessThan => (lhs < rhs) as i32,
+        Binop::LessEqual => (lhs <= rhs) as i32,
+        Binop::ULessThan => ((lhs as u32) < (rhs as u32)) as i32,
+        Binop::ULessEqual => ((lhs as u32) <= (rhs as u32)) as i32,
+    }
+}
+
+impl Expr {
+    pub fn canon(self) -> Self {
+        match self {
+            Self::Binop(binop, v1, v2) =>
+                if commutative(binop) {
+                    Self::Binop(binop, std::cmp::min(v1,v2), std::cmp::max(v1,v2))
+                } else {
+                    Self::Binop(binop, v1, v2)
+                }
+            _ => self,
+        }
+    }
+
+    pub fn as_instr(&self, map: &SlotMap<Value, Lit>, dest: Var) -> Instr {
+        match self {
+            Self::Int(i) => Instr::Move(dest, Lit::Int(*i)),
+            Self::Addr(a) => Instr::Move(dest, Lit::Addr(a.clone())),
+            Self::Stack(s) => Instr::Move(dest, Lit::Stack(*s)),
+            Self::Unop(unop, var) => Instr::Unop(dest, *unop, map[*var].clone()),
+            Self::Binop(binop, lhs, rhs) =>
+                Instr::Binop(dest, *binop, map[*lhs].clone(), map[*rhs].clone()),
+
+        }
+    }
 }
 
 pub struct ValueTable {
     /// Associate an expression and a variable to each value
-    values: SlotMap<Value, Option<Var>>,
+    values: SlotMap<Value, Lit>,
 
     /// Associate a value to each known expression
-    exprs: HashMap<Expr, Value>,
+    exprs: PHashMap<Expr, Value>,
 
-    /// Added expressions, for backtracking
-    added: Vec<Expr>,
+    /// A map from variables to values
+    vars: PHashMap<Var, Value>,
 }
 
 impl ValueTable {
     pub fn new() -> Self {
         Self {
             values: SlotMap::with_key(),
-            exprs: HashMap::new(),
-            added: Vec::new(),
+            exprs: PHashMap::new(),
+            vars: PHashMap::new(),
         }
     }
 
-    pub fn insert(&mut self, expr: Expr, var: Option<Var>) -> Value {
+    pub fn insert(&mut self, expr: Expr, lit: Lit) -> Value {
         if let Some(val) = self.exprs.get(&expr) { return *val; }
 
-        let value = self.values.insert(var);
+        let value = self.values.insert(lit);
         self.exprs.insert(expr.clone(), value);
-        self.added.push(expr);
         value
     }
 
     pub fn insert_with(&mut self, expr: Expr, value: Value) {
         if let Some(val) = self.exprs.get(&expr) { assert!(*val == value); }
         self.exprs.insert(expr.clone(), value);
-        self.added.push(expr);
     }
 
     pub fn eval_lit(&mut self, lit: Lit) -> Value {
         match lit {
-            Lit::Int(i) => self.insert(Expr::Int(i), None),
-            Lit::Addr(s) => self.insert(Expr::Addr(s), None),
-            Lit::Var(v) => self.insert(Expr::Reg(v), Some(v)),
-            Lit::Stack(slot) => self.insert(Expr::Stack(slot), None),
+            Lit::Int(i) => self.insert(Expr::Int(i), Lit::Int(i)),
+            Lit::Addr(s) => self.insert(Expr::Addr(s.clone()), Lit::Addr(s)),
+            Lit::Stack(slot) => self.insert(Expr::Stack(slot), Lit::Stack(slot)),
+            Lit::Var(v) => {
+                let val = self.values.insert(Lit::Var(v));
+                self.vars.insert(v, val);
+                val
+            },
         }
     }
 
-    pub fn insert_instr(&mut self, instr: Instr) {
-        match instr {
+    pub fn insert_instr(&mut self, instr: Instr) -> Vec<Instr> {
+        match &instr {
+            Instr::Binop(dest, binop, Lit::Int(i1), Lit::Int(i2)) => {
+                let result = eval_binop(*binop, *i1, *i2);
+                let v = self.insert(Expr::Int(result), Lit::Var(*dest));
+                self.vars.insert(*dest, v);
+                vec![Instr::Move(*dest, Lit::Int(result))]
+            }
+            Instr::Unop(dest, unop, Lit::Int(i)) => {
+                let result = eval_unop(*unop, *i);
+                let v = self.insert(Expr::Int(result), Lit::Var(*dest));
+                self.vars.insert(*dest, v);
+                vec![Instr::Move(*dest, Lit::Int(result))]
+            }
             Instr::Binop(dest, binop, lit1, lit2) => {
-                let v1 = self.eval_lit(lit1);
-                let v2 = self.eval_lit(lit2);
-                let v = self.insert(Expr::Binop(binop, v1, v2), Some(dest));
-                self.insert_with(Expr::Reg(dest), v);
+                let v1 = self.eval_lit(lit1.clone());
+                let v2 = self.eval_lit(lit2.clone());
+                let v = self.insert(Expr::Binop(*binop, v1, v2).canon(), Lit::Var(*dest));
+                self.vars.insert(*dest, v);
+                vec![instr]
             }
             Instr::Unop(dest, unop, lit) => {
-                let v1 = self.eval_lit(lit);
-                let v = self.insert(Expr::Unop(unop, v1), Some(dest));
-                self.insert_with(Expr::Reg(dest), v);
+                let v1 = self.eval_lit(lit.clone());
+                let v = self.insert(Expr::Unop(*unop, v1).canon(), Lit::Var(*dest));
+                self.vars.insert(*dest, v);
+                vec![instr]
             }
             Instr::Move(dest, lit) => {
-                let v = self.eval_lit(lit);
-                self.insert_with(Expr::Reg(dest), v);
+                let v = self.eval_lit(lit.clone());
+                self.vars.insert(*dest, v);
+                vec![instr]
             }
-            _ => {}
+            _ => vec![instr],
         }
     }
 
-    pub fn update_operand(&self, lit: &mut Lit) {
+    pub fn update_operand(&self, lit: &Lit) -> Lit {
         if let Lit::Var(var) = lit {
-            if let Some(value) = self.exprs.get(&Expr::Reg(*var)) {
-                if let Some(copy) = self.values[*value] {
-                    *lit = Lit::Var(copy);
-                }
+            if let Some(value) = self.vars.get(&var) {
+                return self.values[*value].clone()
             }
         }
+
+        return lit.clone();
     }
 
     /// `self.added` must be empty at input
     pub fn run_on_block(&mut self, cfg: &mut Cfg<Instr>, dom: &Dominance, block: Label) {
-        assert!(self.added.len() == 0);
-
         let mut stmt = vec![];
+
         for mut instr in cfg[block].stmt.clone() {
             for lit in instr.literals_mut() {
-                self.update_operand(lit);
+                *lit = self.update_operand(lit);
             }
 
-            self.insert_instr(instr.clone());
-            stmt.push(instr);
+            stmt.extend(self.insert_instr(instr));
         }
 
         cfg.set_block_stmt(block, stmt);
 
-        let added = std::mem::take(&mut self.added);
+        self.vars.push();
+        self.exprs.push();
 
         for &child in dom.childrens(block).iter() {
             self.run_on_block(cfg, dom, child);
         }
 
-        for expr in added {
-            self.exprs.remove(&expr);
-        }
+        self.exprs.pop();
+        self.vars.pop();
     }
 
     pub fn run(&mut self, cfg: &mut Cfg<Instr>) {
         for &arg in cfg.args.iter() {
-            self.insert(Expr::Reg(arg), Some(arg));
+            let val = self.values.insert(Lit::Var(arg));
+            self.vars.insert(arg, val);
         }
 
-        self.added.clear();
+        self.exprs.push();
+        self.vars.push();
 
         let mut dom = Dominance::new(cfg);
         dom.run(cfg);
 
         self.run_on_block(cfg, &dom, cfg.entry());
+
+        elim_unused_instructions(cfg);
+    }
+}
+
+pub fn elim_unused_instructions<I: Instruction>(cfg: &mut Cfg<I>) {
+    let graph = cfg.ssa_graph();
+
+    for label in cfg.labels() {
+        let mut stmt = vec![];
+
+        for instr in cfg[label].stmt.iter().cloned() {
+            let used =
+                if let Some(dest) = instr.destination() { graph[dest].len() > 0 }
+                else {false};
+
+            if used || instr.may_have_side_effect() {
+                stmt.push(instr);
+            }
+        }
+
+        cfg.set_block_stmt(label, stmt);
     }
 }

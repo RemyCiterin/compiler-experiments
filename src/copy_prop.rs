@@ -143,8 +143,8 @@ impl CopyProp {
     /// if we try to copy from an already analysed variable
     pub fn copy(&self, v: Var) -> Lattice {
         match &self.lattice[v] {
-            Lattice::Stack(offset) => Lattice::Stack(*offset),
             Lattice::Addr(s) => Lattice::Addr(s.clone()),
+            Lattice::Stack(s) => Lattice::Stack(*s),
             Lattice::Copy(x) => Lattice::Copy(*x),
             Lattice::Int(i) => Lattice::Int(*i),
             _ => Lattice::Copy(v),
@@ -234,7 +234,7 @@ impl CopyProp {
                 for lit in instr.literals_mut() {
                     if let Lit::Var(x) = lit.clone() {
                         match self.lattice[x].clone() {
-                            Lattice::Stack(offset) => *lit = Lit::Stack(offset),
+                            Lattice::Stack(s) => *lit = Lit::Stack(s),
                             Lattice::Addr(s) => *lit = Lit::Addr(s),
                             Lattice::Int(i) => *lit = Lit::Int(i),
                             Lattice::Copy(v) => *lit = Lit::Var(v),

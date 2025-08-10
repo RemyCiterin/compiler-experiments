@@ -32,9 +32,9 @@ pub fn optimize(table: &mut ssa::SymbolTable<ssa::Instr>) {
                 let mut copy = copy_prop::CopyProp::new(&cfg);
                 copy.run(cfg);
 
-                // Taill call elimination may introduce useless copies so we perform another
-                // simplification pass here
+                // Taill call elimination may introduce useless moves, so we propagate copies again
                 tail_call_elim::tail_call_elim(name, cfg);
+
                 let mut copy = copy_prop::CopyProp::new(&cfg);
                 copy.run(cfg);
 
