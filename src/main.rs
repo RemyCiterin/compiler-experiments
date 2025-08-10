@@ -4,13 +4,22 @@ use std::io::prelude::*;
 
 use builder;
 
-pub fn optimize(table: &mut ssa::SymbolTable<ssa::Instr>) {
+pub fn into_ssa(table: &mut ssa::SymbolTable<ssa::Instr>) {
     for (_, section) in table.symbols.iter_mut() {
         match section {
             ssa::Section::Text(cfg) => {
                 let mut to_ssa = into_ssa::IntoSsaTransform::new(&cfg);
                 to_ssa.run(cfg);
+            }
+            _ => {}
+        }
+    }
+}
 
+pub fn optimize(table: &mut ssa::SymbolTable<ssa::Instr>) {
+    for (name, section) in table.symbols.iter_mut() {
+        match section {
+            ssa::Section::Text(cfg) => {
                 let mut mem2reg = mem_to_reg::MemToReg::new(&cfg);
                 mem2reg.run(cfg);
 
@@ -23,17 +32,23 @@ pub fn optimize(table: &mut ssa::SymbolTable<ssa::Instr>) {
                 let mut copy = copy_prop::CopyProp::new(&cfg);
                 copy.run(cfg);
 
+                // Taill call elimination may introduce useless copies so we perform another
+                // simplification pass here
+                tail_call_elim::tail_call_elim(name, cfg);
+                let mut copy = copy_prop::CopyProp::new(&cfg);
+                copy.run(cfg);
+
                 cfg.gc();
 
-                let translator = codegen::Translator::new(cfg);
-                let mut cfg = translator.translate(cfg);
+                //let translator = codegen::Translator::new(cfg);
+                //let mut cfg = translator.translate(cfg);
 
-                let mut conv = out_of_ssa::Conventionalize::new(&cfg);
-                conv.run(&mut cfg);
+                //let mut conv = out_of_ssa::Conventionalize::new(&cfg);
+                //conv.run(&mut cfg);
 
-                out_of_ssa::out_of_ssa(&mut cfg);
+                //out_of_ssa::out_of_ssa(&mut cfg);
 
-                println!("cfg (ssa): \n{}", cfg);
+                //println!("cfg (ssa): \n{}", cfg);
             }
             _ => {}
         }
@@ -75,6 +90,7 @@ fn main() {
 
     println!("{program}");
     //println!("{table}");
+    into_ssa(&mut table);
     optimize(&mut table);
 
     println!("{table}");
@@ -84,29 +100,4 @@ fn main() {
 
     println!("instret: {} loads: {} stores: {} calls: {}",
         interp.instret, interp.loads, interp.stores, interp.calls);
-
-    //println!("{}", fibo(50));
-
-    //  let program: &str = "
-    //  let x = 2;
-    //  let y = 4;
-    //  while x != 3 {
-    //      if x == 2 {
-    //          x = 1;
-    //      } else {
-    //          x = 3;
-    //      }
-    //  }
-
-    //  x = 42;
-
-    //  while x != 0 {
-    //      x = x - 1;
-    //  }
-
-    //  x = x + y;
-    //  return x;
-    //  ";
-
-    //  test_ssa(program);
 }

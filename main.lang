@@ -79,7 +79,12 @@ def fibo(x) {
 
 var hello_world = "hello world\n";
 
+def foo(x) {*x = 53;}
+
 def main() {
+  let x = 0;
+  foo(&x);
+  print_i32(x);
   fibo_mem(buf, 100);
 
   print_i32(buf[20]);

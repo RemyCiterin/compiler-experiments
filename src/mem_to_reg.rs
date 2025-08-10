@@ -27,11 +27,6 @@ impl MemToReg {
     pub fn new(cfg: &Cfg<Instr>) -> Self {
         let mut removed = HashSet::new();
 
-        //for (v, kind) in cfg.iter_vars() {
-        //    if *kind == VarKind::Stack {
-        //        removed.insert(v);
-        //    }
-        //}
         for (slot, _) in cfg.stack.iter() {
             removed.insert(slot);
         }
@@ -64,7 +59,7 @@ impl MemToReg {
                     _ => {
                         for x in instr.literals() {
                             match x {
-                                Lit::Stack(offset) => _ = self.removed.remove(&offset),
+                                Lit::Stack(s) => _ = self.removed.remove(&s),
                                 _ => {}
                             }
                         }
@@ -90,9 +85,9 @@ impl MemToReg {
 
         for (label, block) in cfg.iter_blocks() {
             for instr in block.stmt.iter() {
-                if let Instr::Store{addr: Lit::Stack(offset), ..} = instr
-                    && self.removed.contains(offset) {
-                    queue.get_mut(offset).unwrap().push(label);
+                if let Instr::Store{addr: Lit::Stack(s), ..} = instr
+                    && self.removed.contains(s) {
+                    queue.get_mut(s).unwrap().push(label);
                 }
             }
         }
@@ -138,15 +133,15 @@ impl MemToReg {
         // Introduce a new variable (and store it into `env) each times we store into a removed
         // stack slot. And replace each load from a removed stack slot by a move
         for instr in stmt.iter_mut() {
-            if let Instr::Load{addr: Lit::Stack(offset), dest, ..} = instr
-                && self.removed.contains(offset) {
-                *instr = Instr::Move(*dest, Lit::Var(env[offset]));
+            if let Instr::Load{addr: Lit::Stack(s), dest, ..} = instr
+                && self.removed.contains(s) {
+                *instr = Instr::Move(*dest, Lit::Var(env[s]));
             }
 
-            if let Instr::Store{addr: Lit::Stack(offset), val, ..} = instr
-                && self.removed.contains(offset) {
+            if let Instr::Store{addr: Lit::Stack(slot), val, ..} = instr
+                && self.removed.contains(slot) {
                 let new_dest = cfg.fresh_var();
-                env.insert(*offset, new_dest);
+                env.insert(*slot, new_dest);
                 *instr = Instr::Move(new_dest, val.clone());
             }
         }
@@ -160,9 +155,9 @@ impl MemToReg {
                     // If env doesn't contains src, then this phi instruction will be deleted
                     // later cause all it's variable is not defined at idom(succ) (otherwise it
                     // must be definde at all it's predecessors)
-                    if let Lit::Stack(offset) = src {
-                        if *label == block && env.contains_key(offset) {
-                            *src = Lit::Var(env[offset]);
+                    if let Lit::Stack(slot) = src {
+                        if *label == block && env.contains_key(slot) {
+                            *src = Lit::Var(env[slot]);
                         }
                     }
                 }
@@ -197,6 +192,10 @@ impl MemToReg {
 
             stmt.extend(cfg[block].stmt.iter().cloned());
             cfg.set_block_stmt(block, stmt);
+        }
+
+        for slot in self.removed.iter() {
+            cfg.remove_slot(*slot);
         }
     }
 }

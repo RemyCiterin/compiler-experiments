@@ -220,6 +220,7 @@ pub fn parse_string(s: &str) -> String {
         if i+1 < bytes.len() && bytes[i] == b'\\' {
             match bytes[i+1] {
                 b'n' => result.push(b'\n'),
+                b'r' => result.push(b'\r'),
                 b'\\' => result.push(b'\\'),
                 b't' => result.push(b'\t'),
                 _ => panic!(),

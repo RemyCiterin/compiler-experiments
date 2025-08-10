@@ -468,6 +468,11 @@ impl<I: Instruction> Cfg<I> {
         self.vars.remove(var);
     }
 
+    /// Garbadge collect a stack slot
+    pub fn remove_slot(&mut self, slot: Slot) {
+        self.stack.remove(slot);
+    }
+
     pub fn remove_block(&mut self, block: Label) {
         self.set_block_stmt(block, vec![]);
         self.blocks.remove(block);

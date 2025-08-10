@@ -20,3 +20,4 @@ pub mod out_of_ssa;
 pub mod copy_prop;
 pub mod interpreter;
 pub mod parallel_copies;
+pub mod tail_call_elim;
