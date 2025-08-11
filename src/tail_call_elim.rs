@@ -31,11 +31,13 @@ use slotmap::*;
 pub fn tail_call_elim(name: &str, cfg: &mut Cfg<Instr>) {
     let mut tail_calls: Vec<InstrId> = vec![];
 
-    for (_, block) in cfg.iter_blocks() {
+    for (label, block) in cfg.iter_blocks() {
         let mut candidate: Option<InstrId> = None;
         let mut found: Option<Var> = None;
 
-        for &id in block.ids.iter() {
+        for pos in 0..block.stmt.len() {
+            let id = (label, pos);
+
             if let Instr::Call(dest, func, args) = &cfg[id] {
                 if args.len() == cfg.args.len() && func == name {
                     candidate = Some(id);
@@ -80,15 +82,14 @@ fn do_tail_elim(calls: Vec<InstrId>, cfg: &mut Cfg<Instr>) {
         let mut found: Option<Var> = None;
 
         let body = cfg[label].stmt.clone();
-        let ids = cfg[label].ids.clone();
-        for (instr, id) in body.into_iter().zip(ids.into_iter()) {
+        for (pos, instr) in body.into_iter().enumerate() {
             if let Some(id) = found {
                 assert!(instr == Instr::Return(Lit::Var(id)));
                 continue;
             }
 
 
-            if id == call {
+            if (label, pos) == call {
                 let Instr::Call(dest, _, args) = instr else { panic!() };
                 found = Some(dest);
 

@@ -219,14 +219,10 @@ new_key_type!{
     pub struct Label;
 }
 
-new_key_type!{
-    pub struct InstrId;
-}
-
+pub type InstrId = (Label, usize);
 
 pub struct Block<I: Instruction> {
     pub stmt: Vec<I>,
-    pub ids: Vec<InstrId>,
 }
 
 impl<I: Instruction> Block<I> {
@@ -243,7 +239,7 @@ impl<I: Instruction> Block<I> {
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum VarKind {
     /// A local variable defined by a given instruction
-    Local(InstrId),
+    Local(Label, usize),
 
     /// A function argument passed directly
     Arg,
@@ -271,10 +267,6 @@ pub struct Cfg<I: Instruction> {
     /// If true, then the graph is expected to be in SSA form
     ssa: bool,
 
-    /// List all the instructions in a program, for each ID it contains
-    /// it's instruction, the label of it's block, and it's previous/next instruction in the block
-    instructions: SlotMap<InstrId, (Label, I, Option<InstrId>, Option<InstrId>)>,
-
     /// A set of variables representing stack locations with a size and alignment constraint
     pub stack: SlotMap<Slot, usize>,
 
@@ -301,8 +293,8 @@ impl<I: Instruction> std::ops::Index<Var> for Cfg<I> {
 impl<I: Instruction> std::ops::Index<InstrId> for Cfg<I> {
     type Output = I;
 
-    fn index(&self, name: InstrId) -> &I {
-        &self.instructions[name].1
+    fn index(&self, (blk, pos): InstrId) -> &I {
+        &self[blk].stmt[pos]
     }
 }
 
@@ -313,7 +305,7 @@ impl<I: Instruction> Cfg<I> {
         let mut blocks =
             SlotMap::with_key();
         let entry =
-            blocks.insert(Block{stmt: vec![], ids: vec![]});
+            blocks.insert(Block{stmt: vec![]});
         let mut preds = SecondaryMap::new();
         preds.insert(entry, BTreeSet::new());
         Self {
@@ -324,7 +316,6 @@ impl<I: Instruction> Cfg<I> {
             blocks,
             vars: SlotMap::with_key(),
             stack: SlotMap::with_key(),
-            instructions: SlotMap::with_key(),
         }
     }
 
@@ -377,24 +368,23 @@ impl<I: Instruction> Cfg<I> {
         self.vars.iter()
     }
 
-    pub fn iter_instr(&self)
-        -> slotmap::basic::Iter<'_, InstrId, (Label, I, Option<InstrId>, Option<InstrId>)> {
-        self.instructions.iter()
-    }
-
     /// Return the predecessor of an instruction in it's block
-    pub fn prev_instr(&self, instr: InstrId) -> Option<InstrId> {
-        self.instructions[instr].2
+    pub fn prev_instr(&self, (blk, pos): InstrId) -> Option<InstrId> {
+
+        if pos != 0 { Some((blk, pos-1)) }
+        else { None }
     }
 
     /// Return the successor of an instruction in it's block
-    pub fn next_instr(&self, instr: InstrId) -> Option<InstrId> {
-        self.instructions[instr].3
+    pub fn next_instr(&self, (blk, pos): InstrId) -> Option<InstrId> {
+
+        if pos + 1 < self[blk].stmt.len() { Some((blk, pos+1)) }
+        else { None }
     }
 
     /// Return the label of an instruction
-    pub fn label_instr(&self, instr: InstrId) -> Label {
-        self.instructions[instr].0
+    pub fn label_instr(&self, (blk, _): InstrId) -> Label {
+        blk
     }
 
     /// Return the list of labels in a control flow graph
@@ -431,11 +421,11 @@ impl<I: Instruction> Cfg<I> {
             *kind = VarKind::Undef;
         }
 
-        for (_, block) in self.blocks.iter() {
-            for (instr, id) in block.stmt.iter().zip(block.ids.iter()) {
+        for (label, block) in self.blocks.iter() {
+            for (id, instr) in block.stmt.iter().enumerate() {
                 if let Some(x) = instr.destination() {
                     assert!(vars[x] == VarKind::Undef);
-                    vars[x] = VarKind::Local(*id);
+                    vars[x] = VarKind::Local(label, id);
                 }
             }
         }
@@ -445,11 +435,6 @@ impl<I: Instruction> Cfg<I> {
             vars[x] = VarKind::Arg;
         }
 
-        //  for (x, _) in self.stack.iter() {
-        //      assert!(vars[*x] == VarKind::Undef);
-        //      vars[*x] = VarKind::Stack;
-        //  }
-
         self.vars = vars;
         self.ssa = true;
     }
@@ -457,7 +442,7 @@ impl<I: Instruction> Cfg<I> {
     /// Generate a fresh block and return it's associated label
     pub fn fresh_label(&mut self) -> Label {
         let new =
-            self.blocks.insert(Block{stmt: vec![], ids: vec![]});
+            self.blocks.insert(Block{stmt: vec![]});
         self.preds.insert(new, BTreeSet::new());
         new
     }
@@ -503,26 +488,22 @@ impl<I: Instruction> Cfg<I> {
         }
     }
 
+    fn clear_preds(&mut self, block: Label) {
+        for succ in self[block].succs() {
+            if self.preds.contains_key(succ) {
+                self.preds[succ].remove(&block);
+            }
+        }
+    }
+
+    fn set_preds(&mut self, block: Label) {
+        for succ in self[block].succs() {
+            self.preds[succ].insert(block);
+        }
+    }
+
     /// Update the body of a block
     pub fn set_block_stmt(&mut self, block: Label, stmt: Vec<I>) {
-        // Free all the instructions in the block
-        for i in std::mem::take(&mut self.blocks[block].ids) {
-            self.instructions.remove(i);
-        }
-
-        // Insert new instructions for the block
-        let instrs: Vec<InstrId> =
-            stmt.iter()
-            .map(|i| self.instructions.insert((block, i.clone(), None, None))).collect();
-
-        // Compute the predecessors, successors of the added instructions
-        for i in 0..stmt.len() {
-            let prev = if i != 0 {Some(instrs[i-1])} else {None};
-            let next = if i != stmt.len() - 1 {Some(instrs[i+1])} else {None};
-            self.instructions[instrs[i]].2 = prev;
-            self.instructions[instrs[i]].3 = next;
-        }
-
         if self.ssa {
             let mut vars = std::mem::take(&mut self.vars);
 
@@ -533,10 +514,10 @@ impl<I: Instruction> Cfg<I> {
                 }
             }
 
-            for (instr, id) in stmt.iter().zip(instrs.iter()) {
+            for (pos, instr) in stmt.iter().enumerate() {
                 if let Some(x) = instr.destination() {
                     assert!(vars[x] == VarKind::Undef);
-                    vars[x] = VarKind::Local(*id);
+                    vars[x] = VarKind::Local(block, pos);
                 }
             }
 
@@ -549,20 +530,68 @@ impl<I: Instruction> Cfg<I> {
             assert!(last == instr.exit_block());
         }
 
-        // Remove the block from the predecessors of it's old successors
-        for succ in self[block].succs() {
-            if self.preds.contains_key(succ) {
-                self.preds[succ].remove(&block);
+
+        self.clear_preds(block);
+        self.blocks[block].stmt = stmt;
+        self.set_preds(block);
+    }
+
+    pub fn remove_instr(&mut self, blk: Label, pos: usize) {
+        if self.ssa {
+            if let Some(x) = self[blk].stmt[pos].destination() {
+                assert!(matches!(self.vars[x], VarKind::Local(_, _)));
+                self.vars[x] = VarKind::Undef;
+            }
+
+            for (instr, pos) in self.blocks[blk].stmt[pos..].iter().zip(pos..) {
+                if let Some(dest) = instr.destination() {
+                    self.vars[dest] = VarKind::Local(blk, pos-1);
+                }
             }
         }
 
-        self.blocks[block].stmt = stmt;
-        self.blocks[block].ids = instrs;
+        self.clear_preds(blk);
+        self.blocks[blk].stmt.remove(pos);
+        self.set_preds(blk);
+    }
 
-        // Add the block as predecessor of it successors
-        for succ in self[block].succs() {
-            self.preds[succ].insert(block);
+    pub fn set_instr(&mut self, blk: Label, pos: usize, instr: I) {
+        if self.ssa {
+            if let Some(x) = self[blk].stmt[pos].destination() {
+                assert!(matches!(self.vars[x], VarKind::Local(..)));
+                self.vars[x] = VarKind::Undef;
+            }
+
+            if let Some(x) = instr.destination() {
+                assert!(self.vars[x] == VarKind::Undef);
+                self.vars[x] = VarKind::Local(blk, pos);
+            }
         }
+
+        self.clear_preds(blk);
+        self.blocks[blk].stmt[pos] = instr;
+        self.set_preds(blk);
+    }
+
+    pub fn insert_instr(&mut self, blk: Label, pos: usize, instr: I) {
+        if self.ssa {
+            if let Some(x) = instr.destination() {
+                assert!(self.vars[x] == VarKind::Undef);
+                self.vars[x] = VarKind::Local(blk, pos);
+            }
+
+            for (instr, pos) in self.blocks[blk].stmt[pos..].iter().zip(pos..) {
+                if let Some(dest) = instr.destination() {
+                    self.vars[dest] = VarKind::Local(blk, pos+1);
+                }
+            }
+        }
+
+        for succ in instr.labels() {
+            self.preds[succ].insert(blk);
+        }
+
+        self.blocks[blk].stmt.insert(pos, instr);
     }
 
     pub fn ssa(&self) -> bool { self.ssa }
@@ -575,10 +604,10 @@ impl<I: Instruction> Cfg<I> {
             graph.insert(var, BTreeSet::new());
         }
 
-        for (_, block) in self.iter_blocks() {
-            for (instr, id) in block.stmt.iter().zip(block.ids.iter().cloned()) {
+        for (label, block) in self.iter_blocks() {
+            for (pos, instr) in block.stmt.iter().enumerate() {
                 for op in instr.operands() {
-                    graph[op].insert(id);
+                    graph[op].insert((label, pos));
                 }
             }
         }

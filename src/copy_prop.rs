@@ -102,8 +102,8 @@ impl CopyProp {
         if self.visited.contains(&block) { return; }
         self.visited.insert(block);
 
-        for id in cfg[block].ids.iter() {
-            self.visit_instr(cfg, *id);
+        for id in 0..cfg[block].stmt.len() {
+            self.visit_instr(cfg, (block, id));
         }
     }
 
