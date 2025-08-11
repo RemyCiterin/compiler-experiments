@@ -47,8 +47,8 @@ impl std::fmt::Display for Expr {
             Self::Int(i) => write!(f, "{i}"),
             Self::Addr(a) => write!(f, "{a}"),
             Self::Stack(s) => write!(f, "{s}"),
-            Self::Unop(unop, v) => write!(f, "{unop}{v}"),
-            Self::Binop(binop, v1, v2) => write!(f, "{v1} {binop} {v2}"),
+            Self::Unop(unop, v) => write!(f, "({unop} {v})"),
+            Self::Binop(binop, v1, v2) => write!(f, "({binop} {v1} {v2})"),
         }
     }
 }
