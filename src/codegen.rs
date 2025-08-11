@@ -616,7 +616,7 @@ impl Translator {
         let mut labels = SecondaryMap::new();
         let mut slots = SparseSecondaryMap::new();
         let mut vars = SparseSecondaryMap::new();
-        let mut new = Cfg::new(false, vec![]);
+        let mut new = Cfg::new(false);
 
         for (b, _) in old.iter_blocks() {
             if b == old.entry() {

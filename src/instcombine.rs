@@ -7,6 +7,42 @@ use crate::*;
 
 use std::collections::{BTreeSet, HashMap};
 
+/// Combine instructions in a control flow graph, using a user-given single-instruction
+/// simplification function, it maintains a worklist of the next instructions to explore, this pass
+/// doesn't perform dead-code elimination, so we must call one such pass after this one.
+///
+/// As example with a very simple simplification function:
+///
+/// ```
+/// fn simplify(cfg: &Cfg<Instr>, instr: &mut Instr) {
+///     let pat = pattern!( ( Sub 0 0 ) );
+///     if let Some(_) = search_pattern(pat, cfg, &instr) {
+///         *instr = Instr::Move(instr.destination().unwrap(), Lit::Int(0));
+///     }
+/// }
+///
+/// let mut cfg = Cfg::new(true);
+/// let v0 = cfg.fresh_arg();
+/// let v1 = cfg.fresh_var();
+///
+/// let entry = vec![
+///     Instr::Binop(v1, Binop::Sub, v0, v0),
+///     Instr::Return(v1),
+/// ];
+///
+/// cfg.set_block_stmt(cfg.entry(), entry);
+///
+/// let mut combine = InstCombine::new(&cfg);
+/// combine.run(&mut cfg, |cfg,ins| simplify(cfg,ins));
+/// ```
+///
+/// The simplification pass must result in the following entry block:
+/// ```
+/// vec![
+///     Instr::Move(v1, Lit::Int(0)),
+///     Instr::Return(v1),
+/// ]
+/// ```
 pub struct InstCombine {
     /// SSA graph of the current RTL representation
     graph: SparseSecondaryMap<Var, BTreeSet<InstrId>>,
@@ -66,43 +102,53 @@ impl InstCombine {
     }
 }
 
-/// A type of pattern to detect a pattern in a control from graph:
-/// let `instr` and instruction in a control flow graph `cfg`, then we can construct a pattern as a
-/// s-expression to detect if `instr` match the pattern in the context f the cfg, this pattern can
-/// use operations like:
-///     - a binop with a pattern of the form `(binop p1 p2)`
-///     - an unop with a pattern of the form `(unop p)`
-///     - a literal of any kind with `i` where `i` is an integer representing a variable in the
-///     pattern, then it is possible to extract the value of `i` in the current expression using
-///     the field `lits` in the resulting `Occurence` map
-///     - an integer variable represented using `(int i)` where `i` is an integer representing a
-///     variable in the pattern, then it is possible to extract the value of `i` in the current
-///     expression using the field `ints` in the resulting `Occurence` map
-///     - an integer constant using `(cst i)`
-///     - a stack slot variable using `(slot i)` (we get `i` using the `slots` field)
-///     - a symbol address variable using `(addr i)` (we get `i` using the `addrs` field)
-///
-/// As example with the pattern `pattern!( ( Sub (cst 0) (Add (int 0) 0) ) )` and the following
-/// C.F.G.:
-///     ```asm
-///         v0 := ...
-///         v1 := 7 + v0
-///         v2 := 0 - v1
-///     ```
-/// `search_pattern(p, &cfg, &Instr::Binop(_, Binop::Sub, Lit::Int(0), Lit::Var(v0)))` must return
-/// the following occurence map:
-/// ```rust
-/// Some(Occurence{ lits: { 0 : v0 }, ints: { 0: 7 }, slots: {}, addrs: {} })
+/// A type to "pattern-match" a control from graph. Those patterns ca be built using a
+/// language of s-expressions with rust macros:
+/// ```
+/// sexpr =
+///     variable
+///     | (cst constant)
+///     | (int variable)
+///     | (addr variable)
+///     | (slot variable)
+///     | (unop sexpr)
+///     | (binop sexpr sexpr)
+/// variable = 0,1,2...
+/// constant = ...-2,-1,0,1,2,...
+/// binop = And | Add | Xor | Or ...
+/// unop = Neg | Not
 /// ```
 ///
+/// We can test it using the following program:
+/// ```
+/// let mut cfg = Cfg::new(true);
+/// let v0 = cfg.fresh_arg();
+/// let v1 = cfg.fresh_var();
+/// let v2 = cfg.fresh_var();
+///
+/// let entry = vec![
+///     Instr::Binop(v1, Binop::Add, Lit::Int(7), Lit::Var(v0)),
+///     Instr::Return(Lit::Int(0)),
+/// ];
+///
+/// cfg.set_block_stmt(cfg.entry(), entry);
+///
+/// let p = pattern!( ( Sub (cst 0) (Add (int 0) 0) ) );
+/// let res = search_pattern(p, &cfg, &Instr::Binop(v2, Binop::Sub, Lit::Int(0), Lit::Var(v1)));
+///
+/// let Some(occ) = res else { unreachable!() };
+///
+/// assert!( occ.lits[&0] == Lit::Var(v0) );
+/// assert!( occ.ints[&0] == 7 );
+/// ```
 pub enum Pattern {
-    /// An variable of kind integer
+    /// An variable of kind `integer`
     Int(usize),
 
-    /// An variable of kind address
+    /// An variable of kind `address`
     Addr(usize),
 
-    /// A variable of kind stack slot
+    /// A variable of kind `stack slot`
     Stack(usize),
 
     /// An unary operation
@@ -139,6 +185,7 @@ macro_rules! pattern {
     ( $i:literal ) => { crate::instcombine::Pattern::Leaf( $i ) };
 }
 
+/// A map from variables in a pattern to their concrete value if the C.F.G. in case of a match
 pub struct Occurence {
     pub lits: HashMap<usize, Lit>,
     pub ints: HashMap<usize, i32>,
@@ -146,6 +193,8 @@ pub struct Occurence {
     pub addrs: HashMap<usize, String>,
 }
 
+/// Search a given pattern in a control flow graph, and return it's occurence (map from variables
+/// to concrete values) in case of a match
 pub fn search_pattern(pat: Pattern, cfg: &Cfg<Instr>, instr: &Instr) -> Option<Occurence> {
     let mut occ = Occurence::new();
     if occ.search_instr(cfg, &pat, instr) {
@@ -165,6 +214,8 @@ impl Occurence {
         }
     }
 
+    /// Try to match a literal with a given pattern, propagate the search in the control flow graph
+    /// if the literal is a variable, and the pattern is a node
     pub fn search_lit(&mut self, cfg: &Cfg<Instr>, pattern: &Pattern, lit: &Lit) -> bool {
         match (pattern, lit) {
             (Pattern::Const(c), Lit::Int(x)) => {
@@ -199,6 +250,7 @@ impl Occurence {
         }
     }
 
+    /// Try to match a pattern with an instruction
     pub fn search_instr(&mut self, cfg: &Cfg<Instr>, pattern: &Pattern, instr: &Instr) -> bool {
         match (pattern, instr) {
             //(_, Instr::Move(_, lit)) => self.search_lit(cfg, pattern, lit),

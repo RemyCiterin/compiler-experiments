@@ -37,7 +37,7 @@ pub fn show_builder_error(program: &str, err: BuilderError) {
 
 impl Builder {
     pub fn new(args: Vec<String>, globals: HashSet<String>) -> Self {
-        let mut cfg = Cfg::new(false, vec![]);
+        let mut cfg = Cfg::new(false);
         let mut stmt: Vec<Instr> = vec![];
         let label = cfg.entry();
 

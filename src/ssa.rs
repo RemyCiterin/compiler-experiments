@@ -301,7 +301,7 @@ impl<I: Instruction> std::ops::Index<InstrId> for Cfg<I> {
 impl<I: Instruction> Cfg<I> {
     /// If ssa is set, then the SSA form will be checked during modification of the arguments
     /// and content of a block
-    pub fn new(ssa: bool, args: Vec<Var>) -> Self {
+    pub fn new(ssa: bool) -> Self {
         let mut blocks =
             SlotMap::with_key();
         let entry =
@@ -311,9 +311,9 @@ impl<I: Instruction> Cfg<I> {
         Self {
             ssa,
             entry,
-            args,
             preds,
             blocks,
+            args: vec![],
             vars: SlotMap::with_key(),
             stack: SlotMap::with_key(),
         }
