@@ -49,6 +49,11 @@ pub enum Binop {
     ULessEqual
 }
 
+#[macro_export]
+macro_rules! binop {
+    ($i:ident) => { crate::ast::Binop::$i };
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
 pub enum Unop {
     /// Bitwise not
@@ -56,6 +61,11 @@ pub enum Unop {
 
     /// Negation operator
     Neg
+}
+
+#[macro_export]
+macro_rules! unop {
+    ($i:ident) => { crate::ast::Unop::$i };
 }
 
 impl Unop{
