@@ -22,3 +22,4 @@ pub mod interpreter;
 pub mod parallel_copies;
 pub mod tail_call_elim;
 pub mod persistent_hash_map;
+pub mod rtl;

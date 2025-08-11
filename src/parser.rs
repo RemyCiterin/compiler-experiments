@@ -36,10 +36,20 @@ peg::parser!(pub grammar customlang() for str {
             let end = y.end;
             RValue::binop(Binop::LessThan, x, y, begin, end)
         }
+        x:(@) _ ">" _ y:@ {
+            let begin = x.begin;
+            let end = y.end;
+            RValue::binop(Binop::LessThan, y, x, begin, end)
+        }
         x:(@) _ "<=" _ y:@ {
             let begin = x.begin;
             let end = y.end;
             RValue::binop(Binop::LessEqual, x, y, begin, end)
+        }
+        x:(@) _ ">=" _ y:@ {
+            let begin = x.begin;
+            let end = y.end;
+            RValue::binop(Binop::LessEqual, y, x, begin, end)
         }
         x:(@) _ "+" _ y:@ {
             let begin = x.begin;

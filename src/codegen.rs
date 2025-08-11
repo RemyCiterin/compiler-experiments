@@ -110,7 +110,6 @@ pub enum RvInstr {
     Ret,
 }
 
-
 pub fn check_riscv_immediate(imm: i16) -> bool {
     imm >= -2048 && imm <= 2047
 }

@@ -3,6 +3,52 @@ use std::collections::HashMap;
 use crate::ssa::*;
 use crate::ast::*;
 
+pub struct Statistics {
+    /// Number of instructions
+    pub instret: usize,
+
+    /// Number of loads
+    pub loads: usize,
+
+    /// Number of stores
+    pub stores: usize,
+
+    /// Number of shitf operations
+    pub shifts: usize,
+
+    /// Number of call operations
+    pub calls: usize,
+
+    /// Number of branch operations
+    pub branches: usize,
+
+    /// Number of non-move/phi/return/jump instructions
+    pub non_trivial: usize,
+}
+
+impl std::fmt::Display for Statistics {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+"Statistics:
+    instret: {}
+    non trivial ops: {} (including {} bit shifts)
+    memop: {} (including {} loads and {} stores)
+    conditional jump: {}
+    function calls: {}",
+            self.instret,
+            self.non_trivial,
+            self.shifts,
+            self.loads + self.stores,
+            self.loads,
+            self.stores,
+            self.branches,
+            self.calls,
+        )
+
+    }
+}
+
 pub struct Interpreter<'a>{
     table: &'a SymbolTable<Instr>,
 
@@ -24,16 +70,8 @@ pub struct Interpreter<'a>{
     /// Base of the current stack frame
     frame: HashMap<Slot, i32>,
 
-    /// Number of executed instructions
-    pub instret: usize,
-
-    /// Number of executed load instructions
-    pub loads: usize,
-
-    /// Number of executed store instructions
-    pub stores: usize,
-
-    pub calls: usize,
+    /// Execution statistics
+    pub stats: Statistics,
 }
 
 impl<'a> Interpreter<'a> {
@@ -74,14 +112,19 @@ impl<'a> Interpreter<'a> {
             table,
             memory,
             symbols,
-            loads: 0,
-            calls: 0,
-            stores: 0,
-            instret: 0,
             sp: 0x100_0000,
             frame: HashMap::new(),
             envs: vec![HashMap::new()],
             symbol: "main".to_string(),
+            stats: Statistics{
+                instret: 0,
+                loads: 0,
+                stores: 0,
+                branches: 0,
+                calls: 0,
+                non_trivial: 0,
+                shifts: 0,
+            }
         }
     }
 
@@ -162,33 +205,11 @@ impl<'a> Interpreter<'a> {
     }
 
     pub fn binop(&mut self, dest: Var, binop: Binop, lhs: i32, rhs: i32) {
-        let result: i32 = match binop {
-            Binop::And => lhs & rhs,
-            Binop::Or => lhs | rhs,
-            Binop::Xor => lhs ^ rhs,
-            Binop::Add => lhs.wrapping_add(rhs),
-            Binop::Sub => lhs.wrapping_sub(rhs),
-            Binop::Sll => lhs << rhs,
-            Binop::Sra => lhs >> rhs,
-            Binop::Srl => ((lhs as u32) >> (rhs as u32)) as i32,
-            Binop::Equal => (lhs == rhs) as i32,
-            Binop::NotEqual => (lhs != rhs) as i32,
-            Binop::LessThan => (lhs < rhs) as i32,
-            Binop::LessEqual => (lhs <= rhs) as i32,
-            Binop::ULessThan => ((lhs as u32) < (rhs as u32)) as i32,
-            Binop::ULessEqual => ((lhs as u32) <= (rhs as u32)) as i32,
-        };
-
-        self.write_var(dest, result);
+        self.write_var(dest, binop.eval(lhs, rhs));
     }
 
     pub fn unop(&mut self, dest: Var, unop: Unop, e: i32) {
-        let result = match unop {
-            Unop::Neg => e.wrapping_neg(),
-            Unop::Not => !e,
-        };
-
-        self.write_var(dest, result);
+        self.write_var(dest, unop.eval(e));
     }
 
     pub fn load(&self, addr: i32) -> i32 {
@@ -209,7 +230,7 @@ impl<'a> Interpreter<'a> {
     }
 
     pub fn interpret_function(&mut self) -> i32 {
-        self.calls += 1;
+        self.stats.calls += 1;
 
         // Push variables into the stack
         let sp = self.sp;
@@ -228,7 +249,7 @@ impl<'a> Interpreter<'a> {
 
         loop {
             for instr in self.cfg()[label].stmt.iter() {
-                self.instret += 1;
+                self.stats.instret += 1;
                 match instr {
                     Instr::Phi(dest, args) => {
                         let (l, _) =
@@ -237,14 +258,25 @@ impl<'a> Interpreter<'a> {
                     }
                     Instr::Binop(dest, binop, l1, l2) => {
                         self.binop(*dest, *binop, self.lit(l1), self.lit(l2));
+                        self.stats.non_trivial += 1;
+
+                        match binop {
+                            Binop::Sll
+                                | Binop::Srl
+                                | Binop::Sra
+                                => self.stats.shifts += 1,
+                            _ => {}
+                        }
                     }
                     Instr::Unop(dest, unop, l) => {
                         self.unop(*dest, *unop, self.lit(l));
+                        self.stats.non_trivial += 1;
                     }
                     Instr::Move(dest, l) => {
                         self.write_var(*dest, self.lit(l));
                     }
                     Instr::Call(dest, name, args) => {
+                        self.stats.non_trivial += 1;
                         self.call(
                             *dest,
                             name.clone(),
@@ -263,16 +295,20 @@ impl<'a> Interpreter<'a> {
                     Instr::Branch(cond, l1, l2) => {
                         prev_label = label;
                         label = if self.lit(cond) != 0 {*l1} else {*l2};
+                        self.stats.non_trivial += 1;
+                        self.stats.branches += 1;
                         continue;
                     }
                     Instr::Load{dest, addr, ..} => {
                         let val = self.load(self.lit(addr));
                         self.write_var(*dest, val);
-                        self.loads += 1;
+                        self.stats.non_trivial += 1;
+                        self.stats.loads += 1;
                     }
                     Instr::Store{val, addr, ..} => {
                         self.store(self.lit(addr), self.lit(val));
-                        self.stores += 1;
+                        self.stats.non_trivial += 1;
+                        self.stats.stores += 1;
                     }
                 }
             }

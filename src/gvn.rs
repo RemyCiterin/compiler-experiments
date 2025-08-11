@@ -23,19 +23,6 @@ impl std::fmt::Display for Value {
     }
 }
 
-pub fn commutative(binop: Binop) -> bool {
-    match binop {
-        Binop::And
-            | Binop::Or
-            | Binop::Xor
-            | Binop::Add
-            | Binop::Equal
-            | Binop::NotEqual
-            => true,
-        _ => false
-    }
-}
-
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum GenericExpr<Int, V> {
     /// Constant integer
@@ -54,39 +41,25 @@ pub enum GenericExpr<Int, V> {
     Binop(Binop, V, V),
 }
 
+impl std::fmt::Display for Expr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Int(i) => write!(f, "{i}"),
+            Self::Addr(a) => write!(f, "{a}"),
+            Self::Stack(s) => write!(f, "{s}"),
+            Self::Unop(unop, v) => write!(f, "{unop}{v}"),
+            Self::Binop(binop, v1, v2) => write!(f, "{v1} {binop} {v2}"),
+        }
+    }
+}
+
 pub type Expr = GenericExpr<i32, Value>;
-
-pub fn eval_unop(unop: Unop, e: i32) -> i32 {
-    match unop {
-        Unop::Neg => e.wrapping_neg(),
-        Unop::Not => !e,
-    }
-}
-
-pub fn eval_binop(binop: Binop, lhs: i32, rhs: i32) -> i32 {
-    match binop {
-        Binop::And => lhs & rhs,
-        Binop::Or => lhs | rhs,
-        Binop::Xor => lhs ^ rhs,
-        Binop::Add => lhs.wrapping_add(rhs),
-        Binop::Sub => lhs.wrapping_sub(rhs),
-        Binop::Sll => lhs << rhs,
-        Binop::Sra => lhs >> rhs,
-        Binop::Srl => ((lhs as u32) >> (rhs as u32)) as i32,
-        Binop::Equal => (lhs == rhs) as i32,
-        Binop::NotEqual => (lhs != rhs) as i32,
-        Binop::LessThan => (lhs < rhs) as i32,
-        Binop::LessEqual => (lhs <= rhs) as i32,
-        Binop::ULessThan => ((lhs as u32) < (rhs as u32)) as i32,
-        Binop::ULessEqual => ((lhs as u32) <= (rhs as u32)) as i32,
-    }
-}
 
 impl Expr {
     pub fn canon(self) -> Self {
         match self {
             Self::Binop(binop, v1, v2) =>
-                if commutative(binop) {
+                if binop.commutative() {
                     Self::Binop(binop, std::cmp::min(v1,v2), std::cmp::max(v1,v2))
                 } else {
                     Self::Binop(binop, v1, v2)
@@ -147,6 +120,8 @@ impl ValueTable {
             Lit::Addr(s) => self.insert(Expr::Addr(s.clone()), Lit::Addr(s)),
             Lit::Stack(slot) => self.insert(Expr::Stack(slot), Lit::Stack(slot)),
             Lit::Var(v) => {
+                if let Some(val) = self.vars.get(&v) { return *val; }
+
                 let val = self.values.insert(Lit::Var(v));
                 self.vars.insert(v, val);
                 val
@@ -154,39 +129,47 @@ impl ValueTable {
         }
     }
 
-    pub fn insert_instr(&mut self, instr: Instr) -> Vec<Instr> {
+    pub fn insert_instr(&mut self, instr: Instr) -> Instr {
         match &instr {
             Instr::Binop(dest, binop, Lit::Int(i1), Lit::Int(i2)) => {
-                let result = eval_binop(*binop, *i1, *i2);
-                let v = self.insert(Expr::Int(result), Lit::Var(*dest));
-                self.vars.insert(*dest, v);
-                vec![Instr::Move(*dest, Lit::Int(result))]
+                let result = binop.eval(*i1, *i2);
+                Instr::Move(*dest, Lit::Int(result))
             }
             Instr::Unop(dest, unop, Lit::Int(i)) => {
-                let result = eval_unop(*unop, *i);
-                let v = self.insert(Expr::Int(result), Lit::Var(*dest));
-                self.vars.insert(*dest, v);
-                vec![Instr::Move(*dest, Lit::Int(result))]
+                let result = unop.eval(*i);
+                Instr::Move(*dest, Lit::Int(result))
             }
             Instr::Binop(dest, binop, lit1, lit2) => {
                 let v1 = self.eval_lit(lit1.clone());
                 let v2 = self.eval_lit(lit2.clone());
-                let v = self.insert(Expr::Binop(*binop, v1, v2).canon(), Lit::Var(*dest));
+                let expr = Expr::Binop(*binop, v1, v2).canon();
+
+                if let Some(value) = self.exprs.get(&expr) {
+                    return Instr::Move(*dest, self.values[*value].clone());
+                }
+
+                let v = self.insert(expr, Lit::Var(*dest));
                 self.vars.insert(*dest, v);
-                vec![instr]
+                instr
             }
             Instr::Unop(dest, unop, lit) => {
                 let v1 = self.eval_lit(lit.clone());
-                let v = self.insert(Expr::Unop(*unop, v1).canon(), Lit::Var(*dest));
+                let expr = Expr::Unop(*unop, v1).canon();
+
+                if let Some(value) = self.exprs.get(&expr) {
+                    return Instr::Move(*dest, self.values[*value].clone());
+                }
+
+                let v = self.insert(expr, Lit::Var(*dest));
                 self.vars.insert(*dest, v);
-                vec![instr]
+                instr
             }
             Instr::Move(dest, lit) => {
                 let v = self.eval_lit(lit.clone());
                 self.vars.insert(*dest, v);
-                vec![instr]
+                instr
             }
-            _ => vec![instr],
+            _ => instr,
         }
     }
 
@@ -209,7 +192,7 @@ impl ValueTable {
                 *lit = self.update_operand(lit);
             }
 
-            stmt.extend(self.insert_instr(instr));
+            stmt.push(self.insert_instr(instr));
         }
 
         cfg.set_block_stmt(block, stmt);

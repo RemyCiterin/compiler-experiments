@@ -58,6 +58,72 @@ pub enum Unop {
     Neg
 }
 
+impl Unop{
+    pub fn eval(&self, e: i32) -> i32 {
+        match self {
+            Unop::Neg => e.wrapping_neg(),
+            Unop::Not => !e,
+        }
+    }
+}
+
+pub fn sll(lhs: i32, rhs: i32) -> i32 {
+    let x = lhs.cast_unsigned();
+    let y = rhs.cast_unsigned();
+
+    let ret =
+        if y >= 32 { 0 }
+        else { x.wrapping_shl(y) };
+
+    ret.cast_signed()
+}
+
+pub fn srl(lhs: i32, rhs: i32) -> i32 {
+    let x = lhs.cast_unsigned();
+    let y = rhs.cast_unsigned();
+
+    let ret =
+        if y >= 32 { 0 }
+        else { x.wrapping_shr(y) };
+
+    ret.cast_signed()
+}
+
+impl Binop {
+    pub fn eval(&self, lhs: i32, rhs: i32) -> i32 {
+        match self {
+            Binop::And => lhs & rhs,
+            Binop::Or => lhs | rhs,
+            Binop::Xor => lhs ^ rhs,
+            Binop::Add => lhs.wrapping_add(rhs),
+            Binop::Sub => lhs.wrapping_sub(rhs),
+            Binop::Sll => sll(lhs, rhs),
+            Binop::Sra => lhs.wrapping_shr(rhs.cast_unsigned()),
+            Binop::Srl => srl(lhs, rhs),
+            Binop::Equal => (lhs == rhs) as i32,
+            Binop::NotEqual => (lhs != rhs) as i32,
+            Binop::LessThan => (lhs < rhs) as i32,
+            Binop::LessEqual => (lhs <= rhs) as i32,
+            Binop::ULessThan => (lhs.cast_unsigned() < rhs.cast_unsigned()) as i32,
+            Binop::ULessEqual => (lhs.cast_unsigned() <= rhs.cast_unsigned()) as i32,
+        }
+    }
+
+
+    pub fn commutative(&self) -> bool {
+        match self {
+            Binop::And
+                | Binop::Or
+                | Binop::Xor
+                | Binop::Add
+                | Binop::Equal
+                | Binop::NotEqual
+                => true,
+            _ => false
+        }
+    }
+}
+
 impl fmt::Display for Binop {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match *self {

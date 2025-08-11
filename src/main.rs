@@ -29,10 +29,6 @@ pub fn optimize(table: &mut ssa::SymbolTable<ssa::Instr>) {
                 let mut gvn = gvn::ValueTable::new();
                 gvn.run(cfg);
 
-                let mut copy = copy_prop::CopyProp::new(&cfg);
-                copy.run(cfg);
-
-                // Taill call elimination may introduce useless moves, so we propagate copies again
                 tail_call_elim::tail_call_elim(name, cfg);
 
                 let mut copy = copy_prop::CopyProp::new(&cfg);
@@ -88,7 +84,7 @@ fn main() {
             }
         };
 
-    println!("{program}");
+    //println!("{program}");
     //println!("{table}");
     into_ssa(&mut table);
     optimize(&mut table);
@@ -98,6 +94,5 @@ fn main() {
     let mut interp = interpreter::Interpreter::new(&table);
     interp.interpret_function();
 
-    println!("instret: {} loads: {} stores: {} calls: {}",
-        interp.instret, interp.loads, interp.stores, interp.calls);
+    println!("{}", interp.stats);
 }
