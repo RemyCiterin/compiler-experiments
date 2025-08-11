@@ -26,6 +26,10 @@ pub fn optimize(table: &mut ssa::SymbolTable<ssa::Instr>) {
                 let mut simplifier = simplify_ssa::Simplifier::new(&cfg);
                 simplifier.run(cfg);
 
+                let mut combine = instcombine::InstCombine::new(cfg);
+                combine.run(cfg, |cfg,i|
+                    instcombine::combine_generic_instr(cfg,i));
+
                 let mut gvn = gvn::ValueTable::new();
                 gvn.run(cfg);
 

@@ -1,10 +1,10 @@
-use crate::dominance::*;
+use crate::rtl::*;
 use crate::ssa::*;
+
+use crate::dominance::*;
 use slotmap::*;
 
 use crate::persistent_hash_map::*;
-
-use crate::ast::{Binop, Unop};
 
 new_key_type!{
     pub struct Value;
@@ -24,9 +24,9 @@ impl std::fmt::Display for Value {
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum GenericExpr<Int, V> {
+pub enum Expr<Op> {
     /// Constant integer
-    Int(Int),
+    Int(i32),
 
     /// Constant address
     Addr(String),
@@ -34,53 +34,37 @@ pub enum GenericExpr<Int, V> {
     /// Local stack slot
     Stack(Slot),
 
-    /// Unary operation
-    Unop(Unop, V),
-
     /// Binary operation
-    Binop(Binop, V, V),
+    Operation(Op, Vec<Value>),
 }
 
-impl std::fmt::Display for Expr {
+impl<Op: Operation> std::fmt::Display for Expr<Op> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Int(i) => write!(f, "{i}"),
             Self::Addr(a) => write!(f, "{a}"),
             Self::Stack(s) => write!(f, "{s}"),
-            Self::Unop(unop, v) => write!(f, "({unop} {v})"),
-            Self::Binop(binop, v1, v2) => write!(f, "({binop} {v1} {v2})"),
+            Self::Operation(op, args) => {
+                write!(f, "({op}")?;
+                for a in args.iter() { write!(f, " {a}")?; }
+                write!(f, ")")
+            },
         }
     }
 }
 
-pub type Expr = GenericExpr<i32, Value>;
-
-impl Expr {
-    pub fn canon(self) -> Self {
-        match self {
-            Self::Binop(binop, v1, v2) =>
-                if binop.commutative() {
-                    Self::Binop(binop, std::cmp::min(v1,v2), std::cmp::max(v1,v2))
-                } else {
-                    Self::Binop(binop, v1, v2)
-                }
-            _ => self,
-        }
-    }
-}
-
-pub struct ValueTable {
+pub struct ValueTable<Op> {
     /// Associate an expression and a variable to each value
     values: SlotMap<Value, Lit>,
 
     /// Associate a value to each known expression
-    exprs: PHashMap<Expr, Value>,
+    exprs: PHashMap<Expr<Op>, Value>,
 
     /// A map from variables to values
     vars: PHashMap<Var, Value>,
 }
 
-impl ValueTable {
+impl<Op: Operation> ValueTable<Op> {
     pub fn new() -> Self {
         Self {
             values: SlotMap::with_key(),
@@ -89,7 +73,7 @@ impl ValueTable {
         }
     }
 
-    pub fn insert(&mut self, expr: Expr, lit: Lit) -> Value {
+    pub fn insert(&mut self, expr: Expr<Op>, lit: Lit) -> Value {
         if let Some(val) = self.exprs.get(&expr) { return *val; }
 
         let value = self.values.insert(lit);
@@ -97,9 +81,12 @@ impl ValueTable {
         value
     }
 
-    pub fn insert_with(&mut self, expr: Expr, value: Value) {
-        if let Some(val) = self.exprs.get(&expr) { assert!(*val == value); }
-        self.exprs.insert(expr.clone(), value);
+    pub fn eval_var(&mut self, v: Var) -> Value {
+        if let Some(val) = self.vars.get(&v) { return *val; }
+
+        let val = self.values.insert(Lit::Var(v));
+        self.vars.insert(v, val);
+        val
     }
 
     pub fn eval_lit(&mut self, lit: Lit) -> Value {
@@ -107,52 +94,29 @@ impl ValueTable {
             Lit::Int(i) => self.insert(Expr::Int(i), Lit::Int(i)),
             Lit::Addr(s) => self.insert(Expr::Addr(s.clone()), Lit::Addr(s)),
             Lit::Stack(slot) => self.insert(Expr::Stack(slot), Lit::Stack(slot)),
-            Lit::Var(v) => {
-                if let Some(val) = self.vars.get(&v) { return *val; }
-
-                let val = self.values.insert(Lit::Var(v));
-                self.vars.insert(v, val);
-                val
-            },
+            Lit::Var(v) => self.eval_var(v),
         }
     }
 
-    pub fn insert_instr(&mut self, instr: Instr) -> Instr {
+    /// Evaluate and register an instruction, and replace it by a move if the instruction is
+    /// redondant
+    pub fn insert_instr<Cond: Condition>(&mut self, instr: RInstr<Op, Cond>) -> RInstr<Op, Cond> {
         match &instr {
-            Instr::Binop(dest, binop, Lit::Int(i1), Lit::Int(i2)) => {
-                let result = binop.eval(*i1, *i2);
-                Instr::Move(*dest, Lit::Int(result))
-            }
-            Instr::Unop(dest, unop, Lit::Int(i)) => {
-                let result = unop.eval(*i);
-                Instr::Move(*dest, Lit::Int(result))
-            }
-            Instr::Binop(dest, binop, lit1, lit2) => {
-                let v1 = self.eval_lit(lit1.clone());
-                let v2 = self.eval_lit(lit2.clone());
-                let expr = Expr::Binop(*binop, v1, v2).canon();
+            RInstr::Operation(dest, op, args) => {
+                let vals = args.iter().map(|v| self.eval_var(*v)).collect();
+                let expr = Expr::Operation(op.clone(), vals);
 
-                if let Some(value) = self.exprs.get(&expr) {
-                    return Instr::Move(*dest, self.values[*value].clone());
+                if !op.may_have_side_effect() {
+                    if let Some(value) = self.exprs.get(&expr) {
+                        return RInstr::Move(*dest, self.values[*value].clone());
+                    }
                 }
 
                 let v = self.insert(expr, Lit::Var(*dest));
                 self.vars.insert(*dest, v);
                 instr
             }
-            Instr::Unop(dest, unop, lit) => {
-                let v1 = self.eval_lit(lit.clone());
-                let expr = Expr::Unop(*unop, v1).canon();
-
-                if let Some(value) = self.exprs.get(&expr) {
-                    return Instr::Move(*dest, self.values[*value].clone());
-                }
-
-                let v = self.insert(expr, Lit::Var(*dest));
-                self.vars.insert(*dest, v);
-                instr
-            }
-            Instr::Move(dest, lit) => {
+            RInstr::Move(dest, lit) => {
                 let v = self.eval_lit(lit.clone());
                 self.vars.insert(*dest, v);
                 instr
@@ -171,15 +135,10 @@ impl ValueTable {
         return lit.clone();
     }
 
-    /// `self.added` must be empty at input
-    pub fn run_on_block(&mut self, cfg: &mut Cfg<Instr>, dom: &Dominance, block: Label) {
+    pub fn run_on_block<Cond: Condition>(&mut self, cfg: &mut Rtl<Op, Cond>, dom: &Dominance, block: Label) {
         let mut stmt = vec![];
 
-        for mut instr in cfg[block].stmt.clone() {
-            for lit in instr.literals_mut() {
-                *lit = self.update_operand(lit);
-            }
-
+        for instr in cfg[block].stmt.clone() {
             stmt.push(self.insert_instr(instr));
         }
 
@@ -196,7 +155,7 @@ impl ValueTable {
         self.vars.pop();
     }
 
-    pub fn run(&mut self, cfg: &mut Cfg<Instr>) {
+    pub fn run<Cond: Condition>(&mut self, cfg: &mut Rtl<Op, Cond>) {
         for &arg in cfg.args.iter() {
             let val = self.values.insert(Lit::Var(arg));
             self.vars.insert(arg, val);
