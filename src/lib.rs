@@ -24,3 +24,4 @@ pub mod tail_call_elim;
 pub mod persistent_hash_map;
 pub mod rtl;
 pub mod instcombine;
+pub mod pattern;

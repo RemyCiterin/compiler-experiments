@@ -1,11 +1,11 @@
-use crate::ast::*;
 use crate::ssa::*;
 use slotmap::*;
 
-use crate::*;
+use crate::pattern::*;
+use crate::{pattern, unop, binop, declare_pattern_vars};
 
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet};
 
 /// Combine instructions in a control flow graph, using a user-given single-instruction
 /// simplification function, it maintains a worklist of the next instructions to explore, this pass
@@ -15,7 +15,7 @@ use std::collections::{BTreeSet, HashMap};
 ///
 /// ```
 /// fn simplify(cfg: &Cfg<Instr>, instr: &mut Instr) {
-///     let pat = pattern!( ( Sub 0 0 ) );
+///     let pat = pattern!( ( Sub x x ) );
 ///     if let Some(_) = search_pattern(pat, cfg, &instr) {
 ///         *instr = Instr::Move(instr.destination().unwrap(), Lit::Int(0));
 ///     }
@@ -102,179 +102,175 @@ impl InstCombine {
     }
 }
 
-/// A type to "pattern-match" a control from graph. Those patterns ca be built using a
-/// language of s-expressions with rust macros:
-/// ```
-/// sexpr =
-///     variable
-///     | (cst constant)
-///     | (int variable)
-///     | (addr variable)
-///     | (slot variable)
-///     | (unop sexpr)
-///     | (binop sexpr sexpr)
-/// variable = 0,1,2...
-/// constant = ...-2,-1,0,1,2,...
-/// binop = And | Add | Xor | Or ...
-/// unop = Neg | Not
-/// ```
-///
-/// We can test it using the following program:
-/// ```
-/// let mut cfg = Cfg::new(true);
-/// let v0 = cfg.fresh_arg();
-/// let v1 = cfg.fresh_var();
-/// let v2 = cfg.fresh_var();
-///
-/// let entry = vec![
-///     Instr::Binop(v1, Binop::Add, Lit::Int(7), Lit::Var(v0)),
-///     Instr::Return(Lit::Int(0)),
-/// ];
-///
-/// cfg.set_block_stmt(cfg.entry(), entry);
-///
-/// let p = pattern!( ( Sub (cst 0) (Add (int 0) 0) ) );
-/// let res = search_pattern(p, &cfg, &Instr::Binop(v2, Binop::Sub, Lit::Int(0), Lit::Var(v1)));
-///
-/// let Some(occ) = res else { unreachable!() };
-///
-/// assert!( occ.lits[&0] == Lit::Var(v0) );
-/// assert!( occ.ints[&0] == 7 );
-/// ```
-pub enum Pattern {
-    /// An variable of kind `integer`
-    Int(usize),
-
-    /// An variable of kind `address`
-    Addr(usize),
-
-    /// A variable of kind `stack slot`
-    Stack(usize),
-
-    /// An unary operation
-    Unop(Unop, Box<Pattern>),
-
-    /// A binary operation
-    Binop(Binop, Box<Pattern>, Box<Pattern>),
-
-    /// A variable of any kind
-    Leaf(usize),
-
-    /// A constant integer
-    Const(i32),
-}
-
-#[macro_export]
-macro_rules! pattern {
-    ( ( cst $e:expr ) ) => {
-        crate::instcombine::Pattern::Const($e)
-    };
-    ( (int $i:literal)  ) => { crate::instcombine::Pattern::Int( $i ) };
-    ( (addr $i:literal)  ) => { crate::instcombine::Pattern::Addr( $i ) };
-    ( (slot $i:literal)  ) => { crate::instcombine::Pattern::Stack( $i ) };
-    ( ($u:ident $p:tt) ) => {
-        crate::instcombine::Pattern::Unop( unop!($u), Box::new(pattern!($p)) )
-    };
-    ( ($b:ident $p1:tt $p2:tt ) ) => {
-        crate::instcombine::Pattern::Binop(
-            binop!($b),
-            Box::new(pattern!($p1)),
-            Box::new(pattern!($p2))
+macro_rules! op_rule {
+    ( $p:tt , $test:expr , $dest:ident =>  $transform:expr ) => {
+        OpRule::new(
+            pattern!($p),
+            |occ| {declare_pattern_vars!(occ, $p); $test},
+            |occ, v| {let $dest = v; declare_pattern_vars!(occ, $p); $transform}
         )
-    };
-    ( $i:literal ) => { crate::instcombine::Pattern::Leaf( $i ) };
-}
-
-/// A map from variables in a pattern to their concrete value if the C.F.G. in case of a match
-pub struct Occurence {
-    pub lits: HashMap<usize, Lit>,
-    pub ints: HashMap<usize, i32>,
-    pub slots: HashMap<usize, Slot>,
-    pub addrs: HashMap<usize, String>,
-}
-
-/// Search a given pattern in a control flow graph, and return it's occurence (map from variables
-/// to concrete values) in case of a match
-pub fn search_pattern(pat: Pattern, cfg: &Cfg<Instr>, instr: &Instr) -> Option<Occurence> {
-    let mut occ = Occurence::new();
-    if occ.search_instr(cfg, &pat, instr) {
-        Some(occ)
-    } else {
-        None
     }
 }
 
-impl Occurence {
-    pub fn new() -> Self {
+macro_rules! cond_rule {
+    ( $p:tt , $test:expr , $l1:ident $l2:ident =>  $transform:expr ) => {
+        CondRule::new(
+            pattern!($p),
+            |occ| {declare_pattern_vars!(occ, $p); $test},
+            |occ, l1, l2| {
+                let $l1 = l1;
+                let $l2 = l2;
+                declare_pattern_vars!(occ, $p);
+                $transform
+            }
+        )
+    }
+}
+
+
+pub fn combine_instructions(cfg: &mut Cfg<Instr>) {
+    let mut combine = InstCombine::new(cfg);
+
+    let op_rules = vec![
+        op_rule!(
+            ( Sub x x ), true,
+            dest => Instr::Move(dest, Lit::Int(0))
+        ),
+        op_rule!(
+            ( Xor x 0 ), true,
+            dest => Instr::Move(dest, x)
+        ),
+        op_rule!(
+            ( Xor 0 x ), true,
+            dest => Instr::Move(dest, x)
+        ),
+        op_rule!(
+            ( Xor x x ), true,
+            dest => Instr::Move(dest, Lit::Int(0))
+        ),
+        op_rule!(
+            ( Add 0 x ), true,
+            dest => Instr::Move(dest, x)
+        ),
+        op_rule!(
+            ( Add x 0 ), true,
+            dest => Instr::Move(dest, x)
+        ),
+        op_rule!(
+            ( Sub x 0 ), true,
+            dest => Instr::Move(dest, x)
+        ),
+        op_rule!(
+            ( Neg ( Neg x ) ), true,
+            dest => Instr::Move(dest, x)
+        ),
+        op_rule!(
+            ( Not ( Not x ) ), true,
+            dest => Instr::Move(dest, x)
+        ),
+    ];
+
+    let cond_rules = vec![
+        cond_rule!(
+            ( int x ), true,
+            l1 l2 =>
+                if x != 0 {Instr::Jump(l1)} else {Instr::Jump(l2)}
+        ),
+        cond_rule!(
+            ( NotEqual x 0 ), true,
+            l1 l2 => Instr::Branch(x, l1, l2)
+        ),
+        cond_rule!(
+            ( NotEqual x 0 ), true,
+            l1 l2 => Instr::Branch(x, l1, l2)
+        ),
+        cond_rule!(
+            ( Equal x 0 ), true,
+            l1 l2 => Instr::Branch(x, l2, l1)
+        ),
+        cond_rule!(
+            ( Equal x 0 ), true,
+            l1 l2 => Instr::Branch(x, l2, l1)
+        ),
+    ];
+
+    combine.run(
+        cfg,
+        |cfg, instr| {
+            combine_from_patterns(cfg, instr, &op_rules, &cond_rules)
+        });
+}
+
+pub struct OpRule<'a> {
+    pub pattern: Pattern,
+    pub test: Box<dyn Fn(&Occurence) -> bool + 'a>,
+    pub transform: Box<dyn Fn(Occurence, Var) -> Instr + 'a>,
+}
+
+impl<'a> OpRule<'a> {
+    pub fn new<F1, F2>(pattern: Pattern, test: F1, tr: F2) -> Self
+        where F1: Fn(&Occurence) -> bool + 'a,
+        F2: Fn(Occurence, Var) -> Instr + 'a {
         Self {
-            lits: HashMap::new(),
-            ints: HashMap::new(),
-            slots: HashMap::new(),
-            addrs: HashMap::new(),
+            pattern,
+            test: Box::new(test),
+            transform: Box::new(tr),
         }
     }
 
-    /// Try to match a literal with a given pattern, propagate the search in the control flow graph
-    /// if the literal is a variable, and the pattern is a node
-    pub fn search_lit(&mut self, cfg: &Cfg<Instr>, pattern: &Pattern, lit: &Lit) -> bool {
-        match (pattern, lit) {
-            (Pattern::Const(c), Lit::Int(x)) => {
-                x == c
-            }
-            (Pattern::Int(i), Lit::Int(x)) => {
-                if self.ints.contains_key(&i) && &self.ints[&i] != x { return false; }
-                self.ints.insert(*i, *x);
-                true
-            }
-            (Pattern::Addr(i), Lit::Addr(x)) => {
-                if self.addrs.contains_key(&i) && &self.addrs[&i] != x { return false; }
-                self.addrs.insert(*i, x.clone());
-                true
-            }
-            (Pattern::Stack(i), Lit::Stack(x)) => {
-                if self.slots.contains_key(&i) && &self.slots[&i] != x { return false; }
-                self.slots.insert(*i, *x);
-                true
-            }
-            (Pattern::Leaf(i), _) => {
-                if self.lits.contains_key(&i) && &self.lits[&i] != lit { return false; }
-                self.lits.insert(*i, lit.clone());
-                true
-            }
-            (_, Lit::Var(var)) => {
-                let VarKind::Local(label, pos) = cfg[*var] else { return false; };
-                let instr = &cfg[(label,pos)];
-                self.search_instr(cfg, pattern, instr)
-            }
-            _ => false
-        }
+    pub fn pattern(&self) -> Pattern {
+        self.pattern.clone()
     }
 
-    /// Try to match a pattern with an instruction
-    pub fn search_instr(&mut self, cfg: &Cfg<Instr>, pattern: &Pattern, instr: &Instr) -> bool {
-        match (pattern, instr) {
-            //(_, Instr::Move(_, lit)) => self.search_lit(cfg, pattern, lit),
-            (Pattern::Leaf(i), _) => {
-                let x = Lit::Var(instr.destination().unwrap());
-                if self.lits.contains_key(&i) && self.lits[&i] != x { return false; }
-                self.lits.insert(*i, x);
-                true
-            }
-            (Pattern::Unop(unop1, p), Instr::Unop(_, unop2, lit)) => {
-                if unop1 != unop2 { return false; }
-                self.search_lit(cfg, p, lit)
-            }
-            (Pattern::Binop(b1, p1, p2), Instr::Binop(_, b2, l1, l2)) => {
-                if b1 != b2 { return false; }
-                self.search_lit(cfg, p1, l1) && self.search_lit(cfg, p2, l2)
-            }
-            _ => false
-        }
+    pub fn test(&self, occ: &Occurence) -> bool {
+        let test = &self.test;
+        test(occ)
+    }
+
+    pub fn transform(&self, occ: Occurence, dest: Var) -> Instr {
+        let transform = &self.transform;
+        transform(occ, dest)
     }
 }
 
+pub struct CondRule<'a> {
+    pub pattern: Pattern,
+    pub test: Box<dyn Fn(&Occurence) -> bool + 'a>,
+    pub transform: Box<dyn Fn(Occurence, Label, Label) -> Instr + 'a>,
+}
 
-pub fn combine_generic_instr(cfg: &Cfg<Instr>, instr: &mut Instr) {
+impl<'a> CondRule<'a> {
+    pub fn new<F1, F2>(pattern: Pattern, test: F1, tr: F2) -> Self
+        where F1: Fn(&Occurence) -> bool + 'a,
+        F2: Fn(Occurence, Label, Label) -> Instr + 'a {
+        Self {
+            pattern,
+            test: Box::new(test),
+            transform: Box::new(tr),
+        }
+    }
+
+    pub fn pattern(&self) -> Pattern {
+        self.pattern.clone()
+    }
+
+    pub fn test(&self, occ: &Occurence) -> bool {
+        let test = &self.test;
+        test(occ)
+    }
+
+    pub fn transform(&self, occ: Occurence, l1: Label, l2: Label) -> Instr {
+        let transform = &self.transform;
+        transform(occ, l1, l2)
+    }
+}
+
+pub fn combine_from_patterns<'a>(
+    cfg: &Cfg<Instr>,
+    instr: &mut Instr,
+    op_rules: &Vec<OpRule<'a>>,
+    cond_rules: &Vec<CondRule<'a>>) {
+
     let def_var = |x: Var| {
         let VarKind::Local(label, pos) = cfg[x] else { return None; };
         Some(&cfg[(label, pos)])
@@ -301,78 +297,33 @@ pub fn combine_generic_instr(cfg: &Cfg<Instr>, instr: &mut Instr) {
         }
     }
 
-    // Constant folding on binary operation
+    // Constant folding in case of a binary operation
     if let Instr::Binop(dest, binop, Lit::Int(i1), Lit::Int(i2)) = &instr {
         *instr = Instr::Move(*dest, Lit::Int(binop.eval(*i1, *i2)));
     }
 
-    let mut pat = pattern!( ( Sub 0 0 ) );
-    if let Some(_) = search_pattern(pat, cfg, &instr) {
-        *instr = Instr::Move(instr.destination().unwrap(), Lit::Int(0));
-    }
-
-    pat = pattern!( ( Xor 0 0 ) );
-    if let Some(_) = search_pattern(pat, cfg, &instr) {
-        *instr = Instr::Move(instr.destination().unwrap(), Lit::Int(0));
-    }
-
-    pat = pattern!( ( Xor 0 (cst 0) ) );
-    if let Some(occ) = search_pattern(pat, cfg, &instr) {
-        *instr = Instr::Unop(instr.destination().unwrap(), Unop::Not, occ.lits[&0].clone());
-    }
-
-    pat = pattern!( ( Xor (cst 0) 0 ) );
-    if let Some(occ) = search_pattern(pat, cfg, &instr) {
-        *instr = Instr::Unop(instr.destination().unwrap(), Unop::Not, occ.lits[&0].clone());
-    }
-
-    pat = pattern!( ( Sub (cst 0) 0 ) );
-    if let Some(occ) = search_pattern(pat, cfg, &instr) {
-        *instr = Instr::Unop(instr.destination().unwrap(), Unop::Neg, occ.lits[&0].clone());
-    }
-
-    pat = pattern!( ( Add 0 (cst 0) ) );
-    if let Some(occ) = search_pattern(pat, cfg, &instr) {
-        *instr = Instr::Move(instr.destination().unwrap(), occ.lits[&0].clone());
-    }
-
-    pat = pattern!( ( Add (cst 0) 0 ) );
-    if let Some(occ) = search_pattern(pat, cfg, &instr) {
-        *instr = Instr::Move(instr.destination().unwrap(), occ.lits[&0].clone());
-    }
-
-    pat = pattern!( ( Sub 0 (cst 0) ) );
-    if let Some(occ) = search_pattern(pat, cfg, &instr) {
-        *instr = Instr::Move(instr.destination().unwrap(), occ.lits[&0].clone());
-    }
-
-    pat = pattern!( ( Neg ( Neg 0 ) ) );
-    if let Some(occ) = search_pattern(pat, cfg, &instr) {
-        *instr = Instr::Move(instr.destination().unwrap(), occ.lits[&0].clone());
-    }
-
-    pat = pattern!( ( Not ( Not 0 ) ) );
-    if let Some(occ) = search_pattern(pat, cfg, &instr) {
-        *instr = Instr::Move(instr.destination().unwrap(), occ.lits[&0].clone());
-    }
-
-    // Constant folding on unary operation
+    // Constant folding in case of an unary operation
     if let Instr::Unop(dest, unop, Lit::Int(i)) = &instr {
         *instr = Instr::Move(*dest, Lit::Int(unop.eval(*i)));
     }
 
-    // Change `if x != 0 ...` into `if x`
+    // Search for a rule for an operation
+    for rule in op_rules.iter() {
+        let result = search_pattern(rule.pattern(), cfg, instr);
+        if let Some(occ) = result && rule.test(&occ) {
+            *instr = rule.transform(occ, instr.destination().unwrap());
+        }
+    }
+
+    // Search for a rule for a branch
     if let Instr::Branch(x, l1, l2) = instr.clone() {
         let Some(ins) = def_lit(&x) else { return; };
 
-        pat = pattern!( ( NotEqual 0 (cst 0) ) );
-        if let Some(occ) = search_pattern(pat, cfg, &ins) {
-            *instr = Instr::Branch(occ.lits[&0].clone(), l1, l2);
-        }
-
-        pat = pattern!( ( Equal 0 (cst 0) ) );
-        if let Some(occ) = search_pattern(pat, cfg, &ins) {
-            *instr = Instr::Branch(occ.lits[&0].clone(), l2, l1);
+        for rule in cond_rules.iter() {
+            let result = search_pattern(rule.pattern(), cfg, ins);
+            if let Some(occ) = result && rule.test(&occ) {
+                *instr = rule.transform(occ, l1, l2);
+            }
         }
     }
 }
