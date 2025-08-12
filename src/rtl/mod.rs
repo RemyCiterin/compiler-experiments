@@ -1,4 +1,6 @@
 pub mod gvn;
+pub mod select;
+pub mod rv32;
 
 use crate::ssa::*;
 use std::fmt::*;
@@ -80,7 +82,7 @@ pub trait Operation: Clone + Eq + Ord + std::fmt::Display + std::hash::Hash {
 pub trait Condition: Clone + Eq + Ord + std::fmt::Display + std::hash::Hash {
     /// Number of register arguments of a conditional jump
     fn arity(&self) -> usize;
-    fn eval(&self, args: Vec<i32>) -> bool;
+    fn eval(&self, args: Vec<i32>) -> Option<bool>;
 
     fn may_have_side_effect(&self) -> bool;
 }
@@ -141,9 +143,9 @@ impl<Op: std::fmt::Display, Cond: std::fmt::Display> std::fmt::Display for RInst
             Self::Store{addr, val, ..} =>
                 write!(f, "[{}] := {}", addr, val),
             Self::LoadLocal{dest, addr} =>
-                write!(f, "{} := [{}]", dest, addr),
+                write!(f, "{} := [stack({})]", dest, addr),
             Self::StoreLocal{addr, val, ..} =>
-                write!(f, "[{}] := {}", addr, val),
+                write!(f, "[stack({})] := {}", addr, val),
             Self::Move(dest, src1) =>
                 write!(f, "{} := {}", dest, src1),
             Self::Jump(l) =>

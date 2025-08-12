@@ -53,6 +53,19 @@ pub fn optimize(table: &mut ssa::SymbolTable<ssa::Instr>) {
     }
 }
 
+pub fn translate(table: ssa::SymbolTable<ssa::Instr>) {
+    for (name, section) in table.symbols.into_iter() {
+        match section {
+            ssa::Section::Text(cfg) => {
+
+                let cfg = rtl::rv32::translate(cfg);
+                println!("{name} {cfg}\n\n");
+            }
+            _ => {}
+        }
+    }
+}
+
 pub fn fibo(x: i32) -> i32 {
     if x < 2 { x }
     else { fibo(x-1) + fibo(x-2) }
@@ -97,4 +110,5 @@ fn main() {
     interp.interpret_function();
 
     println!("{}", interp.stats);
+    translate(table);
 }

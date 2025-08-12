@@ -94,6 +94,34 @@ macro_rules! declare_pattern_vars {
 }
 
 #[macro_export]
+macro_rules! eval_pattern_vars {
+    ( $eval:ident, $occ:ident, $e:literal ) => {};
+    ( $eval:ident, $occ:ident, ( int $i:ident) ) => {
+        #[allow(unused_variables)]
+        let $i: i32 = $occ.ints[stringify!($i)].clone();
+    };
+    ( $eval:ident, $occ:ident, ( addr $i:ident) ) => {
+        #[allow(unused_variables)]
+        let $i: String = $occ.addrs[stringify!($i)].clone();
+    };
+    ( $eval:ident, $occ:ident, ( slot $i:ident) ) => {
+        #[allow(unused_variables)]
+        let $i: Var = $eval.eval_lit(Int::Stack($occ.slots[stringify!($i)].clone()));
+    };
+    ( $eval:ident, $occ:ident, $i:ident ) => {
+        #[allow(unused_variables)]
+        let $i: Var = $eval.eval_lit($occ.lits[stringify!($i)].clone());
+    };
+    ( $eval:ident, $occ:ident, ( $u:ident $p:tt ) ) => {
+        eval_pattern_vars!($eval, $occ, $p);
+    };
+    ( $eval:ident, $occ:ident, ( $b:ident $p1:tt $p2:tt ) ) => {
+        eval_pattern_vars!($eval, $occ, $p1);
+        eval_pattern_vars!($eval, $occ, $p2);
+    };
+}
+
+#[macro_export]
 macro_rules! pattern {
     ( $e:literal ) => {
         crate::pattern::Pattern::Const($e)
@@ -127,6 +155,17 @@ pub struct Occurence {
 pub fn search_pattern(pat: Pattern, cfg: &Cfg<Instr>, instr: &Instr) -> Option<Occurence> {
     let mut occ = Occurence::new();
     if occ.search_instr(cfg, &pat, instr) {
+        Some(occ)
+    } else {
+        None
+    }
+}
+
+/// Search a given pattern in a control flow graph, and return it's occurence (map from variables
+/// to concrete values) in case of a match
+pub fn search_pattern_in_lit(pat: Pattern, cfg: &Cfg<Instr>, lit: Lit) -> Option<Occurence> {
+    let mut occ = Occurence::new();
+    if occ.search_lit(cfg, &pat, &lit) {
         Some(occ)
     } else {
         None

@@ -77,6 +77,8 @@ impl Reg {
     }
 }
 
+
+
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum RvBinop {
     Add, Sub, Slt, Sltu, Sll, Srl, Sra, And, Or, Xor
