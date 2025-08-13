@@ -37,16 +37,6 @@ pub fn optimize(table: &mut ssa::SymbolTable<ssa::Instr>) {
                 copy.run(cfg);
 
                 cfg.gc();
-
-                //let translator = codegen::Translator::new(cfg);
-                //let mut cfg = translator.translate(cfg);
-
-                //let mut conv = out_of_ssa::Conventionalize::new(&cfg);
-                //conv.run(&mut cfg);
-
-                //out_of_ssa::out_of_ssa(&mut cfg);
-
-                //println!("cfg (ssa): \n{}", cfg);
             }
             _ => {}
         }
@@ -60,12 +50,28 @@ pub fn translate(table: ssa::SymbolTable<ssa::Instr>) {
 
                 let mut cfg = rtl::rv32::translate(cfg);
 
+                let mut gvn = rtl::gvn::ValueTable::new();
+                gvn.run(&mut cfg);
+
                 let mut conv = out_of_ssa::Conventionalize::new(&cfg);
                 conv.run(&mut cfg);
 
                 out_of_ssa::out_of_ssa(&mut cfg);
 
+                let coloring =
+                    rtl::regalloc::alloc_register::<rtl::rv32::RvArch>(&mut cfg);
+
                 println!("{name} {cfg}\n\n");
+                rtl::regalloc::show_coloring(&coloring);
+
+                let ltl = ltl::Ltl::<rtl::rv32::RvArch>::new(cfg, coloring);
+
+                for (i, block) in ltl.blocks.iter().enumerate() {
+                    println!("{i}");
+                    for instr in block.iter() {
+                        println!("\t{instr}");
+                    }
+                }
             }
             _ => {}
         }

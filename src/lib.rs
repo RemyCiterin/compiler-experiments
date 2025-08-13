@@ -25,3 +25,4 @@ pub mod persistent_hash_map;
 pub mod rtl;
 pub mod instcombine;
 pub mod pattern;
+pub mod ltl;

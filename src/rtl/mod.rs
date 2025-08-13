@@ -7,7 +7,15 @@ use crate::ssa::*;
 use std::fmt::*;
 
 /// Physical register definition
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Debug, Hash)]
 pub struct Phys(pub usize);
+
+
+impl std::fmt::Display for Phys {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "x{}", self.0)
+    }
+}
 
 pub trait Arch {
     type Cond: Condition;
