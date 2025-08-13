@@ -1,72 +1,75 @@
 pub mod gvn;
 pub mod select;
 pub mod rv32;
+pub mod regalloc;
 
 use crate::ssa::*;
 use std::fmt::*;
 
+/// Physical register definition
+pub struct Phys(pub usize);
+
 pub trait Arch {
     type Cond: Condition;
     type Op: Operation;
-    type Reg;
 
     /// Declare the set of callee saved registers
-    fn callee_saved() -> Vec<Self::Reg>;
+    fn callee_saved() -> Vec<Phys>;
 
     /// Declare the set of caller saved registers
-    fn caller_saved() -> Vec<Self::Reg>;
+    fn caller_saved() -> Vec<Phys>;
 
     /// Declare the set of argument registers, other arguments are saved on the stack, those
     /// registers must be caller saved
-    fn arg_regs() -> Vec<Self::Reg>;
+    fn arg_regs() -> Vec<Phys>;
 
     /// Declare the register used to return the result of a function
-    fn ret_reg() -> Self::Reg;
+    fn ret_reg() -> Phys;
 
-    /// Pretty print a move between two registers
-    fn pp_mv(f: &mut Formatter<'_>, dest: Self::Reg, src: Self::Reg) -> Result;
+    //  /// Pretty print a move between two registers
+    //  fn pp_mv(f: &mut Formatter<'_>, dest: Phys, src: Phys) -> Result;
 
-    /// Pretty print a move from a constant integer to a register
-    fn pp_from_int(f: &mut Formatter<'_>, dest: Self::Reg, src: i32) -> Result;
+    //  /// Pretty print a move from a constant integer to a register
+    //  fn pp_from_int(f: &mut Formatter<'_>, dest: Phys, src: i32) -> Result;
 
-    /// Pretty print a move from a global symbol to a register
-    fn pp_from_addr(f: &mut Formatter<'_>, dest: Self::Reg, src: &str) -> Result;
+    //  /// Pretty print a move from a global symbol to a register
+    //  fn pp_from_addr(f: &mut Formatter<'_>, dest: Phys, src: &str) -> Result;
 
-    /// Pretty print a move from a stack address into a register
-    fn pp_from_stack(f: &mut Formatter<'_>, dest: Self::Reg, offset: i32) -> Result;
+    //  /// Pretty print a move from a stack address into a register
+    //  fn pp_from_stack(f: &mut Formatter<'_>, dest: Phys, offset: i32) -> Result;
 
-    /// Pretty print a basic operation
-    fn pp_op(f: &mut Formatter<'_>, dest: Self::Reg, op: Self::Op, args: Vec<Self::Reg>) -> Result;
+    //  /// Pretty print a basic operation
+    //  fn pp_op(f: &mut Formatter<'_>, dest: Phys, op: Self::Op, args: Vec<Phys>) -> Result;
 
-    /// Pretty print a conditional jump
-    fn pp_jcc(f: &mut Formatter<'_>, cond: Self::Cond, args: Vec<Self::Reg>, label: &str) -> Result;
+    //  /// Pretty print a conditional jump
+    //  fn pp_jcc(f: &mut Formatter<'_>, cond: Self::Cond, args: Vec<Phys>, label: &str) -> Result;
 
-    /// Pretty print an unconditional jump
-    fn pp_j(f: &mut Formatter<'_>, label: &str) -> Result;
+    //  /// Pretty print an unconditional jump
+    //  fn pp_j(f: &mut Formatter<'_>, label: &str) -> Result;
 
-    /// Pretty print a load from a local variables at address `sp + offset`
-    fn pp_load_local(f: &mut Formatter<'_>, dest: Self::Reg, offset: i32) -> Result;
+    //  /// Pretty print a load from a local variables at address `sp + offset`
+    //  fn pp_load_local(f: &mut Formatter<'_>, dest: Phys, offset: i32) -> Result;
 
-    /// Pretty print a store to a local variables at address `sp + offset`
-    fn pp_store_local(f: &mut Formatter<'_>, val: Self::Reg, offset: i32) -> Result;
+    //  /// Pretty print a store to a local variables at address `sp + offset`
+    //  fn pp_store_local(f: &mut Formatter<'_>, val: Phys, offset: i32) -> Result;
 
-    /// Pretty print a load from a variable in a register
-    fn pp_load(f: &mut Formatter<'_>, dest: Self::Reg, addr: Self::Reg) -> Result;
+    //  /// Pretty print a load from a variable in a register
+    //  fn pp_load(f: &mut Formatter<'_>, dest: Phys, addr: Phys) -> Result;
 
-    /// Pretty print a store to a variable in a register
-    fn pp_store(f: &mut Formatter<'_>, dest: Self::Reg, addr: Self::Reg) -> Result;
+    //  /// Pretty print a store to a variable in a register
+    //  fn pp_store(f: &mut Formatter<'_>, dest: Phys, addr: Phys) -> Result;
 
-    /// Pretty print return instruction
-    fn pp_return(f: &mut Formatter<'_>) -> Result;
+    //  /// Pretty print return instruction
+    //  fn pp_return(f: &mut Formatter<'_>) -> Result;
 
-    /// Pretty print call instruction
-    fn pp_call(f: &mut Formatter<'_>, symbol: &str) -> Result;
+    //  /// Pretty print call instruction
+    //  fn pp_call(f: &mut Formatter<'_>, symbol: &str) -> Result;
 
-    /// Push some variables to the stack
-    fn pp_push(f: &mut Formatter<'_>, args: Vec<Self::Reg>) -> Result;
+    //  /// Push some variables to the stack
+    //  fn pp_push(f: &mut Formatter<'_>, args: Vec<Phys>) -> Result;
 
-    /// Pop some variables from the stack
-    fn pp_pop(f: &mut Formatter<'_>, args: Vec<Self::Reg>) -> Result;
+    //  /// Pop some variables from the stack
+    //  fn pp_pop(f: &mut Formatter<'_>, args: Vec<Phys>) -> Result;
 }
 
 /// Define the basic operations of an architecture
@@ -285,3 +288,24 @@ impl<Op: Operation, Cond: Condition> Instruction for RInstr<Op, Cond> {
 }
 
 pub type Rtl<Op, Cond> = Cfg<RInstr<Op, Cond>>;
+
+
+impl<Op: Operation, Cond: Condition> crate::out_of_ssa::HasMove for RInstr<Op, Cond> {
+    fn mv(var: Var, lit: Lit) -> Self {
+        Self::Move(var, lit)
+    }
+}
+
+impl<Op: Operation, Cond: Condition> crate::out_of_ssa::HasPhi for RInstr<Op, Cond> {
+    fn to_phi(&self) -> Option<(Var, Vec<(Lit, Label)>)> {
+        match self {
+            Self::Phi(var, args) =>
+                Some((*var, args.iter().map(|(v,l)|(Lit::Var(*v),*l)).collect())),
+            _ => None
+        }
+    }
+
+    fn from_phi(dest: Var, args: Vec<(Var, Label)>) -> Self {
+        Self::Phi(dest, args)
+    }
+}

@@ -4,6 +4,69 @@ use crate::*;
 use crate::ssa::*;
 use crate::pattern::*;
 
+pub struct RvArch;
+
+impl Arch for RvArch {
+    type Op = RvOp;
+    type Cond = RvCond;
+
+    fn ret_reg() -> Phys {
+        Phys(10)
+    }
+
+    fn arg_regs() -> Vec<Phys> {
+        vec![
+            Phys(10),
+            Phys(11),
+            Phys(12),
+            Phys(13),
+            Phys(14),
+            Phys(15),
+            Phys(16),
+            Phys(17),
+        ]
+    }
+
+    fn callee_saved() -> Vec<Phys> {
+        vec![
+            Phys(8),
+            Phys(9),
+
+            Phys(18),
+            Phys(19),
+            Phys(20),
+            Phys(21),
+            Phys(22),
+            Phys(23),
+            Phys(24),
+            Phys(25),
+            Phys(26),
+            Phys(27),
+        ]
+    }
+
+    fn caller_saved() -> Vec<Phys> {
+        vec![
+            Phys(5),
+            Phys(6),
+            Phys(7),
+
+            Phys(10),
+            Phys(11),
+            Phys(12),
+            Phys(13),
+            Phys(14),
+            Phys(15),
+            Phys(16),
+            Phys(17),
+
+            Phys(28),
+            Phys(29),
+            Phys(30),
+            Phys(31),
+        ]
+    }
+}
 
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
@@ -130,6 +193,7 @@ pub fn translate_operation
     (select: &mut Selection<RvOp, RvCond>, instr: &Instr, dest: Var) -> Vec<RvInstr> {
 
     let operation_rules = vec![
+        // First: we try to detect some cases where we can propagate the immediate
         translate_operation_rule!(
             ( Add x (int y) ), check_riscv_immediate(y),
             select dest => vec![RvInstr::Operation(dest, RvOp::Unop(RvUnop::Add, y), vec![x])]
@@ -156,24 +220,6 @@ pub fn translate_operation
             ( Srl x (int y) ), 0 <= y && y < 32,
             select dest => vec![RvInstr::Operation(dest, RvOp::Unop(RvUnop::Srl, y), vec![x])]
         ),
-
-        translate_operation_rule!(
-            ( Equal x 0 ), true,
-            select dest => vec![RvInstr::Operation(dest, RvOp::Seqz, vec![x])]
-        ),
-        translate_operation_rule!(
-            ( NotEqual x 0 ), true,
-            select dest => vec![RvInstr::Operation(dest, RvOp::Snez, vec![x])]
-        ),
-        translate_operation_rule!(
-            ( Equal 0 x ), true,
-            select dest => vec![RvInstr::Operation(dest, RvOp::Seqz, vec![x])]
-        ),
-        translate_operation_rule!(
-            ( NotEqual 0 x ), true,
-            select dest => vec![RvInstr::Operation(dest, RvOp::Snez, vec![x])]
-        ),
-
         translate_operation_rule!(
             ( Equal x (int y) ), check_riscv_immediate(y.wrapping_neg()),
             select dest => {
@@ -195,7 +241,26 @@ pub fn translate_operation
             }
         ),
 
-        // Default patterns in case we don't reconize an immediate
+        // Then we simplify some kind of equalities to replace them by pseudo-instructions
+        translate_operation_rule!(
+            ( Equal x 0 ), true,
+            select dest => vec![RvInstr::Operation(dest, RvOp::Seqz, vec![x])]
+        ),
+        translate_operation_rule!(
+            ( NotEqual x 0 ), true,
+            select dest => vec![RvInstr::Operation(dest, RvOp::Snez, vec![x])]
+        ),
+        translate_operation_rule!(
+            ( Equal 0 x ), true,
+            select dest => vec![RvInstr::Operation(dest, RvOp::Seqz, vec![x])]
+        ),
+        translate_operation_rule!(
+            ( NotEqual 0 x ), true,
+            select dest => vec![RvInstr::Operation(dest, RvOp::Snez, vec![x])]
+        ),
+
+
+        // Default patterns in case we don't reconize a possible simplification
         translate_operation_rule!(
             ( Not x ), true,
             select dest => vec![RvInstr::Operation(dest, RvOp::Not, vec![x])]
@@ -334,6 +399,7 @@ pub fn translate_condition
                 vec![RvInstr::Branch(RvCond::Eq, vec![x, y], l1, l2)]
         ),
 
+        // Default pattern if we don't find a way to optimize the branch
         translate_condition_rule!(
             x, true, select l1 l2 =>
                 vec![RvInstr::Branch(RvCond::Nez, vec![x], l1, l2)]

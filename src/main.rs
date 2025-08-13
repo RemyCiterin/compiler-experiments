@@ -58,7 +58,13 @@ pub fn translate(table: ssa::SymbolTable<ssa::Instr>) {
         match section {
             ssa::Section::Text(cfg) => {
 
-                let cfg = rtl::rv32::translate(cfg);
+                let mut cfg = rtl::rv32::translate(cfg);
+
+                let mut conv = out_of_ssa::Conventionalize::new(&cfg);
+                conv.run(&mut cfg);
+
+                out_of_ssa::out_of_ssa(&mut cfg);
+
                 println!("{name} {cfg}\n\n");
             }
             _ => {}

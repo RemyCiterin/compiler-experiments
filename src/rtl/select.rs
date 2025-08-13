@@ -1,3 +1,44 @@
+//! Instruction selection, it take as input a C.F.G. using the ```Instr``` type of instructions
+//! and return a Rtl using a custom type of operations/conditions, it take as input:
+//!
+//! - A closure to transform an operation (binop/unop) into a vector or Rtl instructions.
+//! - A closure to transform a condition (in case of a branch) into a vector of Rtl instructions.
+//!
+//! These closures have access to the instruction selector itself, as example to interpret the
+//! literals presents in the original CFG into variables (e.g. replacing a literal
+//! `Lit::Stack(slot)` into a move to a fresh virtual register using the eval_lit function).
+//!
+//! This instructions selection pass handle automatically the Phi/Return/Load/Store/Move/Jump
+//! instructions.
+//!
+//! This module also define some macros to define simplification rules, as example, one can
+//! define a rule to simplify additions with known integers:
+//!
+//! ```
+//! pub fn translate_operation
+//!     (select: &mut Selection<RvOp, RvCond>, instr: &Instr, dest: Var) -> Vec<RvInstr> {
+//!
+//!     let rule =
+//!         translate_operation_rule!(
+//!             ( Add x (int y) ), valid_arch_immediate(y),
+//!             select dest =>
+//!                 vec![RInstr::Operation(dest, ArchOp::Unop(ArchOpUnop::Add, y), vec![x])]
+//!         );
+//!
+//!     let result =
+//!         search_pattern(rule.pattern(), &mut select.old, instr);
+//!     if let Some(occ) = result && rule.test(&occ) {
+//!         return rule.transform(select, occ, dest);
+//!     }
+//!
+//!     ...
+//!
+//!     unreachable!();
+//! }
+//! ```
+//!
+//! See [crate::rtl::rv32] for a full example.
+
 use crate::ssa::*;
 
 use slotmap::*;
