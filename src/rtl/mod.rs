@@ -34,50 +34,50 @@ pub trait Arch {
     /// Declare the register used to return the result of a function
     fn ret_reg() -> Phys;
 
-    //  /// Pretty print a move between two registers
-    //  fn pp_mv(f: &mut Formatter<'_>, dest: Phys, src: Phys) -> Result;
+    /// Pretty print a move between two registers
+    fn pp_mv(f: &mut Formatter<'_>, dest: Phys, src: Phys) -> Result;
 
-    //  /// Pretty print a move from a constant integer to a register
-    //  fn pp_from_int(f: &mut Formatter<'_>, dest: Phys, src: i32) -> Result;
+    /// Pretty print a move from a constant integer to a register
+    fn pp_from_int(f: &mut Formatter<'_>, dest: Phys, src: i32) -> Result;
 
-    //  /// Pretty print a move from a global symbol to a register
-    //  fn pp_from_addr(f: &mut Formatter<'_>, dest: Phys, src: &str) -> Result;
+    /// Pretty print a move from a global symbol to a register
+    fn pp_from_addr(f: &mut Formatter<'_>, dest: Phys, src: &str) -> Result;
 
-    //  /// Pretty print a move from a stack address into a register
-    //  fn pp_from_stack(f: &mut Formatter<'_>, dest: Phys, offset: i32) -> Result;
+    /// Pretty print a move from a stack address into a register
+    fn pp_from_stack(f: &mut Formatter<'_>, dest: Phys, offset: i32) -> Result;
 
-    //  /// Pretty print a basic operation
-    //  fn pp_op(f: &mut Formatter<'_>, dest: Phys, op: Self::Op, args: Vec<Phys>) -> Result;
+    /// Pretty print a basic operation
+    fn pp_op(f: &mut Formatter<'_>, dest: Phys, op: Self::Op, args: Vec<Phys>) -> Result;
 
-    //  /// Pretty print a conditional jump
-    //  fn pp_jcc(f: &mut Formatter<'_>, cond: Self::Cond, args: Vec<Phys>, label: &str) -> Result;
+    /// Pretty print a conditional jump
+    fn pp_jcc(f: &mut Formatter<'_>, cond: Self::Cond, args: Vec<Phys>, label: &str) -> Result;
 
-    //  /// Pretty print an unconditional jump
-    //  fn pp_j(f: &mut Formatter<'_>, label: &str) -> Result;
+    /// Pretty print an unconditional jump
+    fn pp_jump(f: &mut Formatter<'_>, label: &str) -> Result;
 
-    //  /// Pretty print a load from a local variables at address `sp + offset`
-    //  fn pp_load_local(f: &mut Formatter<'_>, dest: Phys, offset: i32) -> Result;
+    /// Pretty print a load from a local variables at address `sp + offset`
+    fn pp_load_local(f: &mut Formatter<'_>, dest: Phys, offset: i32) -> Result;
 
-    //  /// Pretty print a store to a local variables at address `sp + offset`
-    //  fn pp_store_local(f: &mut Formatter<'_>, val: Phys, offset: i32) -> Result;
+    /// Pretty print a store to a local variables at address `sp + offset`
+    fn pp_store_local(f: &mut Formatter<'_>, offset: i32, val: Phys) -> Result;
 
-    //  /// Pretty print a load from a variable in a register
-    //  fn pp_load(f: &mut Formatter<'_>, dest: Phys, addr: Phys) -> Result;
+    /// Pretty print a load from a variable in a register
+    fn pp_load(f: &mut Formatter<'_>, dest: Phys, addr: Phys) -> Result;
 
-    //  /// Pretty print a store to a variable in a register
-    //  fn pp_store(f: &mut Formatter<'_>, dest: Phys, addr: Phys) -> Result;
+    /// Pretty print a store to a variable in a register
+    fn pp_store(f: &mut Formatter<'_>, addr: Phys, val: Phys) -> Result;
 
-    //  /// Pretty print return instruction
-    //  fn pp_return(f: &mut Formatter<'_>) -> Result;
+    /// Pretty print return instruction
+    fn pp_return(f: &mut Formatter<'_>) -> Result;
 
-    //  /// Pretty print call instruction
-    //  fn pp_call(f: &mut Formatter<'_>, symbol: &str) -> Result;
+    /// Pretty print call instruction
+    fn pp_call(f: &mut Formatter<'_>, symbol: &str) -> Result;
 
-    //  /// Push some variables to the stack
-    //  fn pp_push(f: &mut Formatter<'_>, args: Vec<Phys>) -> Result;
+    /// Push some variables to the stack
+    fn pp_push(f: &mut Formatter<'_>, size: i32) -> Result;
 
-    //  /// Pop some variables from the stack
-    //  fn pp_pop(f: &mut Formatter<'_>, args: Vec<Phys>) -> Result;
+    /// Pop some variables from the stack
+    fn pp_pop(f: &mut Formatter<'_>, size: i32) -> Result;
 }
 
 /// Define the basic operations of an architecture

@@ -6,6 +6,7 @@ use crate::rtl::*;
 use crate::ssa::*;
 use slotmap::*;
 
+#[derive(Clone)]
 pub enum LInstr<Op, Cond> {
     /// A generic architecture specific operation
     Operation(Phys, Op, Vec<Phys>),
@@ -164,6 +165,67 @@ impl<A: Arch> Ltl<A> {
             stack: cfg.stack
         }
     }
+
+    pub fn pp(&self, f: &mut std::fmt::Formatter<'_>, prefix: &str) -> std::fmt::Result {
+        let mut slots: SparseSecondaryMap<Slot, i32> = SparseSecondaryMap::new();
+        let mut stack_size: i32 = 0;
+
+        for (x, sz) in self.stack.iter() {
+            slots.insert(x, stack_size);
+            stack_size += *sz as i32;
+        }
+
+        write!(f, "\t")?;
+        A::pp_push(f, stack_size)?;
+        write!(f, "\n")?;
+
+        for (i, block) in self.blocks.iter().enumerate() {
+            write!(f, ".{prefix}{}:\n", i)?;
+
+            for instr in block.iter().cloned() {
+
+                if matches!(instr, LInstr::Return) {
+                    write!(f, "\t")?;
+                    A::pp_pop(f, stack_size)?;
+                    write!(f, "\n")?;
+                }
+
+                write!(f, "\t")?;
+                match instr {
+                    LInstr::Operation(dest, op, args) =>
+                        _ = A::pp_op(f, dest, op, args)?,
+                    LInstr::Jcc(cond, args, label) =>
+                        _ = A::pp_jcc(f, cond, args, &format!(".{prefix}{label}"))?,
+                    LInstr::Jump(label) =>
+                        _ = A::pp_jump(f, &format!(".{prefix}{label}"))?,
+                    LInstr::Move(dest, src) =>
+                        _ = A::pp_mv(f, dest, src)?,
+                    LInstr::Li(dest, src) =>
+                        _ = A::pp_from_int(f, dest, src)?,
+                    LInstr::Ls(dest, src) =>
+                        _ = A::pp_from_int(f, dest, slots[src])?,
+                    LInstr::La(dest, src) =>
+                        _ = A::pp_from_addr(f, dest, &src)?,
+                    LInstr::Call(name) =>
+                        _ = A::pp_call(f, &name)?,
+                    LInstr::Return =>
+                        _ = A::pp_return(f)?,
+                    LInstr::Load{addr, dest} =>
+                        _ = A::pp_load(f, dest, addr)?,
+                    LInstr::Store{addr, val} =>
+                        _ = A::pp_store(f, addr, val)?,
+                    LInstr::LoadLocal{addr, dest} =>
+                        _ = A::pp_load_local(f, dest, slots[addr])?,
+                    LInstr::StoreLocal{addr, val} =>
+                        _ = A::pp_store_local(f, slots[addr], val)?,
+                }
+                write!(f, "\n")?;
+            }
+        }
+
+        Ok(())
+
+    }
 }
 
 impl<Op: std::fmt::Display, Cond: std::fmt::Display> std::fmt::Display for LInstr<Op, Cond> {
@@ -208,21 +270,22 @@ impl<Op: std::fmt::Display, Cond: std::fmt::Display> std::fmt::Display for LInst
 
 impl<A: Arch> std::fmt::Display for Ltl<A> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "stack: ")?;
-        for (slot, size) in self.stack.iter() {
-            write!(f, " [{slot}; {size}]")?;
-        }
-        write!(f, "\n")?;
+        self.pp(f, "label")
+        // write!(f, "stack: ")?;
+        // for (slot, size) in self.stack.iter() {
+        //     write!(f, " [{slot}; {size}]")?;
+        // }
+        // write!(f, "\n")?;
 
-        for (i, block) in self.blocks.iter().enumerate() {
-            write!(f, "{i}:\n")?;
+        // for (i, block) in self.blocks.iter().enumerate() {
+        //     write!(f, "{i}:\n")?;
 
-            for instr in block.iter() {
-                write!(f, "\t{instr}\n")?;
-            }
-        }
+        //     for instr in block.iter() {
+        //         write!(f, "\t{instr}\n")?;
+        //     }
+        // }
 
-        Ok(())
+        // Ok(())
     }
 }
 

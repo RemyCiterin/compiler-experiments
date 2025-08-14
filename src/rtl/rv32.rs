@@ -10,6 +10,86 @@ impl Arch for RvArch {
     type Op = RvOp;
     type Cond = RvCond;
 
+    fn pp_mv(f: &mut Formatter<'_>, dest: Phys, src: Phys) -> Result {
+        write!(f, "mv {dest}, {src}")
+    }
+
+    fn pp_from_int(f: &mut Formatter<'_>, dest: Phys, src: i32) -> Result {
+        write!(f, "li {dest}, {src}")
+    }
+
+    fn pp_from_addr(f: &mut Formatter<'_>, dest: Phys, src: &str) -> Result {
+        write!(f, "li {dest}, {src}")
+    }
+
+    fn pp_from_stack(f: &mut Formatter<'_>, dest: Phys, offset: i32) -> Result {
+        write!(f, "addi {dest}, sp, {offset}")
+    }
+
+    fn pp_op(f: &mut Formatter<'_>, dest: Phys, op: RvOp, args: Vec<Phys>) -> Result {
+        match op {
+            RvOp::Neg => write!(f, "neg {dest}, {}", args[0]),
+            RvOp::Not => write!(f, "not {dest}, {}", args[0]),
+            RvOp::Seqz => write!(f, "seqz {dest}, {}", args[0]),
+            RvOp::Snez => write!(f, "snez {dest}, {}", args[0]),
+            RvOp::Binop(binop) =>
+                write!(f, "{binop} {dest}, {}, {}", args[0], args[1]),
+            RvOp::Unop(unop, imm) =>
+                write!(f, "{unop} {dest}, {}, {}", args[0], imm),
+        }
+    }
+
+    fn pp_jcc(f: &mut Formatter<'_>, cond: RvCond, args: Vec<Phys>, label: &str) -> Result {
+        match cond {
+            RvCond::Eq => write!(f, "beq {}, {}, {}", args[0], args[1], label),
+            RvCond::Ne => write!(f, "bne {}, {}, {}", args[0], args[1], label),
+            RvCond::Lt => write!(f, "blt {}, {}, {}", args[0], args[1], label),
+            RvCond::Ltu => write!(f, "bltu {}, {}, {}", args[0], args[1], label),
+            RvCond::Ge => write!(f, "bge {}, {}, {}", args[0], args[1], label),
+            RvCond::Geu => write!(f, "bgeu {}, {}, {}", args[0], args[1], label),
+            RvCond::Eqz => write!(f, "beqz {}, {}", args[0], label),
+            RvCond::Nez => write!(f, "bnez {}, {}", args[0], label),
+        }
+    }
+
+    fn pp_jump(f: &mut Formatter<'_>, label: &str) -> Result {
+        write!(f, "j {label}")
+    }
+
+    fn pp_load(f: &mut Formatter<'_>, dest: Phys, addr: Phys) -> Result {
+        write!(f, "lw {dest}, ({addr})")
+    }
+
+    fn pp_load_local(f: &mut Formatter<'_>, dest: Phys, offset: i32) -> Result {
+        write!(f, "lw {dest}, {offset}(sp)")
+    }
+
+    fn pp_store(f: &mut Formatter<'_>, addr: Phys, val: Phys) -> Result {
+        write!(f, "sw {val}, ({addr})")
+    }
+
+    fn pp_store_local(f: &mut Formatter<'_>, offset: i32, val: Phys) -> Result {
+        write!(f, "sw {val}, {offset}(sp)")
+    }
+
+    fn pp_return(f: &mut Formatter<'_>) -> Result {
+        write!(f, "ret")
+    }
+
+    fn pp_call(f: &mut Formatter<'_>, name: &str) -> Result {
+        write!(f, "call {name}")
+    }
+
+    fn pp_push(f: &mut Formatter<'_>, size: i32) -> Result {
+        write!(f, "addi sp, sp, {}\n", -(size+4))?;
+        write!(f, "\tsw ra, {}(sp)", size)
+    }
+
+    fn pp_pop(f: &mut Formatter<'_>, size: i32) -> Result {
+        write!(f, "lw ra, {}(sp)\n", size)?;
+        write!(f, "\taddi sp, sp, {}", size+4)
+    }
+
     fn ret_reg() -> Phys {
         Phys(10)
     }
@@ -425,11 +505,11 @@ pub fn translate_condition
         ),
         translate_condition_rule!(
             (Equal 0 x), true, select l1 l2 =>
-                vec![RvInstr::Branch(RvCond::Eqz, vec![x], l1, l2)]
+                vec![RvInstr::Branch(RvCond::Nez, vec![x], l2, l1)]
         ),
         translate_condition_rule!(
             (Equal x 0), true, select l1 l2 =>
-                vec![RvInstr::Branch(RvCond::Eqz, vec![x], l1, l2)]
+                vec![RvInstr::Branch(RvCond::Nez, vec![x], l2, l1)]
         ),
 
 
@@ -439,7 +519,7 @@ pub fn translate_condition
         ),
         translate_condition_rule!(
             (Equal x y), true, select l1 l2 =>
-                vec![RvInstr::Branch(RvCond::Eq, vec![x, y], l1, l2)]
+                vec![RvInstr::Branch(RvCond::Ne, vec![x, y], l2, l1)]
         ),
 
         // Default pattern if we don't find a way to optimize the branch
