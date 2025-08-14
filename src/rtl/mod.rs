@@ -207,6 +207,8 @@ impl<Op: Operation, Cond: Condition> Instruction for RInstr<Op, Cond> {
         match self {
             Self::Load{..}
                 | Self::Store{..}
+                | Self::LoadLocal{..}
+                | Self::StoreLocal{..}
                 | Self::Call(..)
                 | Self::Return(..)
                 | Self::Branch(..)

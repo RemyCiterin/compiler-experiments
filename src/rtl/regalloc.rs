@@ -200,6 +200,7 @@ pub fn alloc_register<A:Arch>(cfg: &mut Rtl<A::Op, A::Cond>) -> Coloring {
         let spill_set = solve_coloring::<A>(cfg, &mut copy, heuristic);
 
         if spill_set.is_empty() {
+            //println!("{cfg}");
             let saved = A::caller_saved().into_iter().collect();
             save_caller_saved::<A>(cfg, &copy, saved);
             return copy;
@@ -220,6 +221,10 @@ pub fn save_caller_saved<A: Arch>(cfg: &mut Rtl<A::Op, A::Cond>, color: &Colorin
         let mut stmt: Vec<RInstr<A::Op, A::Cond>> = vec![];
         let mut lives = liveness[block].outputs.clone();
 
+        //println!("{block}:");
+        //for x in lives.iter() { print!(" {x}"); }
+        //println!();
+
         for instr in cfg[block].stmt.clone().into_iter().rev() {
             if let Some(dest) = instr.destination() {
                 lives.remove(&dest);
@@ -239,7 +244,7 @@ pub fn save_caller_saved<A: Arch>(cfg: &mut Rtl<A::Op, A::Cond>, color: &Colorin
                 }
             }
 
-            stmt.push(instr);
+            stmt.push(instr.clone());
 
             if is_call {
                 let mut i: usize = 0;
@@ -250,6 +255,10 @@ pub fn save_caller_saved<A: Arch>(cfg: &mut Rtl<A::Op, A::Cond>, color: &Colorin
                         i += 1;
                     }
                 }
+            }
+
+            for x in instr.operands() {
+                lives.insert(x);
             }
         }
 

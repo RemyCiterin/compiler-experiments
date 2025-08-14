@@ -121,27 +121,22 @@ def quickSort(arr, low, high) {
     } else {nop;}
 }
 
-def bar() { return 0; }
-
 def main() {
-  let x = 0;
-  let y = 42;
-  swap(&x, &y);
-  print_i32(x);
+  //let x = 0;
+  //let y = 42;
+  //swap(&x, &y);
+  //print_i32(x);
   fibo_mem(buf, 100);
 
   print_i32(buf[20]);
 
-  print_i32(fibo(8));
+  print_i32(fibo(4));
 
   print_i32(factorial(12));
   print_i32(tail_factorial(12));
   print_i32(loop_factorial(12));
 
   puts(hello_world);
-
-  let x = bar();
-  print_i32(- - x);
 
   quickSort(hello_world, 0, 10);
   puts(hello_world);

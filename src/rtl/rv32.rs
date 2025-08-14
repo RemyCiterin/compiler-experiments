@@ -166,7 +166,35 @@ impl Operation for RvOp {
 
     fn may_have_side_effect(&self) -> bool { false }
 
-    fn eval(&self, _: Vec<i32>) -> Option<i32> { None }
+    fn eval(&self, v: Vec<i32>) -> Option<i32> {
+        match self {
+            RvOp::Seqz => Some( (v[0] == 0) as i32 ),
+            RvOp::Snez => Some( (v[0] != 0) as i32 ),
+            RvOp::Not => Some( !v[0] ),
+            RvOp::Neg => Some( -v[0] ),
+            RvOp::Binop(RvBinop::Add) => Some( v[0] + v[1] ),
+            RvOp::Binop(RvBinop::Sub) => Some( v[0] - v[1] ),
+            RvOp::Binop(RvBinop::And) => Some( v[0] & v[1] ),
+            RvOp::Binop(RvBinop::Or) => Some( v[0] | v[1] ),
+            RvOp::Binop(RvBinop::Xor) => Some( v[0] ^ v[1] ),
+            RvOp::Binop(RvBinop::Slt) => Some( (v[0] < v[1]) as i32 ),
+            RvOp::Binop(RvBinop::Sltu) =>
+                Some( (v[0].cast_unsigned() < v[1].cast_unsigned()) as i32 ),
+            RvOp::Binop(RvBinop::Sll) => Some( crate::ast::sll(v[0], v[1]) ),
+            RvOp::Binop(RvBinop::Srl) => Some( crate::ast::srl(v[0], v[1]) ),
+            RvOp::Binop(RvBinop::Sra) => Some( v[0].wrapping_shr(v[1].cast_unsigned()) ),
+            RvOp::Unop(RvUnop::Add, imm) => Some( v[0] + *imm ),
+            RvOp::Unop(RvUnop::And, imm) => Some( v[0] & *imm ),
+            RvOp::Unop(RvUnop::Or, imm) => Some( v[0] | *imm ),
+            RvOp::Unop(RvUnop::Xor, imm) => Some( v[0] ^ *imm ),
+            RvOp::Unop(RvUnop::Slt, imm) => Some( (v[0] < *imm) as i32 ),
+            RvOp::Unop(RvUnop::Sltu, imm) =>
+                Some( (v[0].cast_unsigned() < imm.cast_unsigned()) as i32 ),
+            RvOp::Unop(RvUnop::Sll, imm) => Some( crate::ast::sll(v[0], *imm) ),
+            RvOp::Unop(RvUnop::Srl, imm) => Some( crate::ast::srl(v[0], *imm) ),
+            RvOp::Unop(RvUnop::Sra, imm) => Some( v[0].wrapping_shr(imm.cast_unsigned()) ),
+        }
+    }
 }
 
 impl Condition for RvCond {
@@ -180,7 +208,18 @@ impl Condition for RvCond {
 
     fn may_have_side_effect(&self) -> bool { false }
 
-    fn eval(&self, _: Vec<i32>) -> Option<bool> { None }
+    fn eval(&self, v: Vec<i32>) -> Option<bool> {
+        match self {
+            RvCond::Eq => Some( v[0] == v[1] ),
+            RvCond::Ne => Some( v[0] != v[1] ),
+            RvCond::Nez => Some( v[0] != 0 ),
+            RvCond::Eqz => Some( v[0] == 0 ),
+            RvCond::Lt => Some( v[0] < v[1] ),
+            RvCond::Ltu => Some( v[0].cast_unsigned() < v[1].cast_unsigned() ),
+            RvCond::Ge => Some( v[0] >= v[1] ),
+            RvCond::Geu => Some( v[0].cast_unsigned() >= v[1].cast_unsigned() ),
+        }
+    }
 }
 
 pub fn check_riscv_immediate(imm: i32) -> bool {
@@ -336,20 +375,24 @@ pub fn translate_operation
         translate_operation_rule!(
             ( LessEqual x y ), true,
             select dest => {
-                let tmp = select.fresh();
+                let tmp1 = select.fresh();
+                let tmp2 = select.fresh();
                 vec![
-                    RvInstr::Operation(tmp, RvOp::Binop(RvBinop::Slt), vec![y, x]),
-                    RvInstr::Operation(dest, RvOp::Not, vec![tmp])
+                    RvInstr::Move(tmp2, Lit::Int(1)),
+                    RvInstr::Operation(tmp1, RvOp::Binop(RvBinop::Slt), vec![y, x]),
+                    RvInstr::Operation(dest, RvOp::Binop(RvBinop::Sub), vec![tmp2, tmp1])
                 ]
             }
         ),
         translate_operation_rule!(
             ( ULessEqual x y ), true,
             select dest => {
-                let tmp = select.fresh();
+                let tmp1 = select.fresh();
+                let tmp2 = select.fresh();
                 vec![
-                    RvInstr::Operation(tmp, RvOp::Binop(RvBinop::Sltu), vec![y, x]),
-                    RvInstr::Operation(dest, RvOp::Not, vec![tmp])
+                    RvInstr::Move(tmp2, Lit::Int(1)),
+                    RvInstr::Operation(tmp1, RvOp::Binop(RvBinop::Sltu), vec![y, x]),
+                    RvInstr::Operation(dest, RvOp::Binop(RvBinop::Sub), vec![tmp2, tmp1])
                 ]
             }
         ),

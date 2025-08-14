@@ -1,5 +1,7 @@
 use compiler_experiments::*;
 
+use std::collections::HashMap;
+
 use std::io::prelude::*;
 
 use builder;
@@ -43,7 +45,9 @@ pub fn optimize(table: &mut ssa::SymbolTable<ssa::Instr>) {
     }
 }
 
-pub fn translate(table: ssa::SymbolTable<ssa::Instr>) {
+pub fn translate(table: ssa::SymbolTable<ssa::Instr>) -> ssa::SymbolTable<rtl::rv32::RvInstr> {
+    let mut symbols = HashMap::new();
+
     for (name, section) in table.symbols.into_iter() {
         match section {
             ssa::Section::Text(cfg) => {
@@ -58,24 +62,29 @@ pub fn translate(table: ssa::SymbolTable<ssa::Instr>) {
 
                 out_of_ssa::out_of_ssa(&mut cfg);
 
-                let coloring =
-                    rtl::regalloc::alloc_register::<rtl::rv32::RvArch>(&mut cfg);
+                symbols.insert(name, ssa::Section::Text(cfg));
 
-                println!("{name} {cfg}\n\n");
-                rtl::regalloc::show_coloring(&coloring);
+                //let coloring =
+                //    rtl::regalloc::alloc_register::<rtl::rv32::RvArch>(&mut cfg);
 
-                let ltl = ltl::Ltl::<rtl::rv32::RvArch>::new(cfg, coloring);
+                //println!("{name} {cfg}\n\n");
+                //rtl::regalloc::show_coloring(&coloring);
 
-                for (i, block) in ltl.blocks.iter().enumerate() {
-                    println!("{i}");
-                    for instr in block.iter() {
-                        println!("\t{instr}");
-                    }
-                }
+                //let ltl = ltl::Ltl::<rtl::rv32::RvArch>::new(cfg, coloring);
+
+                //for (i, block) in ltl.blocks.iter().enumerate() {
+                //    println!("{i}");
+                //    for instr in block.iter() {
+                //        println!("\t{instr}");
+                //    }
+                //}
             }
-            _ => {}
+            ssa::Section::Data(v) =>
+                _ = symbols.insert(name, ssa::Section::Data(v.clone())),
         }
     }
+
+    ssa::SymbolTable{symbols}
 }
 
 pub fn fibo(x: i32) -> i32 {
@@ -122,5 +131,18 @@ fn main() {
     interp.interpret_function();
 
     println!("{}", interp.stats);
-    translate(table);
+
+    let rtl_table = translate(table);
+
+    //println!("{}", rtl_table);
+
+    let ltl_table: ltl::LtlSymbolTable<rtl::rv32::RvArch>
+        = ltl::LtlSymbolTable::new(rtl_table);
+
+    println!("{}", ltl_table);
+    let mut interp =
+        ltl::interpreter::Interpreter::new(&ltl_table);
+    interp.interpret_function();
+
+    println!("{}", interp.stats);
 }

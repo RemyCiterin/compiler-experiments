@@ -1,3 +1,4 @@
+pub mod interpreter;
 
 use std::collections::{HashMap, HashSet};
 use crate::rtl::regalloc::*;
@@ -202,5 +203,98 @@ impl<Op: std::fmt::Display, Cond: std::fmt::Display> std::fmt::Display for LInst
                 write!(f, "call {name}")
             }
         }
+    }
+}
+
+impl<A: Arch> std::fmt::Display for Ltl<A> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "stack: ")?;
+        for (slot, size) in self.stack.iter() {
+            write!(f, " [{slot}; {size}]")?;
+        }
+        write!(f, "\n")?;
+
+        for (i, block) in self.blocks.iter().enumerate() {
+            write!(f, "{i}:\n")?;
+
+            for instr in block.iter() {
+                write!(f, "\t{instr}\n")?;
+            }
+        }
+
+        Ok(())
+    }
+}
+
+pub enum LtlSection<A: Arch> {
+    Text(Ltl<A>),
+    Data(Vec<Word>),
+}
+
+
+impl<A: Arch> LtlSection<A> {
+    pub fn as_text(&self) -> Option<&Ltl<A>> {
+        if let Self::Text(cfg) = self {return Some(cfg);}
+        return None;
+    }
+
+    pub fn as_text_mut(&mut self) -> Option<&mut Ltl<A>> {
+        if let Self::Text(cfg) = self {return Some(cfg);}
+        return None;
+    }
+
+    pub fn as_data_mut(&mut self) -> Option<&mut Vec<Word>> {
+        if let Self::Data(vec) = self {return Some(vec);}
+        return None;
+    }
+}
+
+pub struct LtlSymbolTable<A: Arch> {
+    pub symbols: HashMap<String, LtlSection<A>>,
+}
+
+impl<A: Arch> LtlSymbolTable<A> {
+    pub fn new(table: SymbolTable<RInstr<A::Op, A::Cond>>) -> Self {
+        let mut symbols: HashMap<String, LtlSection<A>> = HashMap::new();
+
+        for (name, section) in table.symbols {
+            match section {
+                Section::Data(words) =>
+                    _ = symbols.insert(name, LtlSection::Data(words)),
+                Section::Text(mut cfg) => {
+                    use crate::rtl::regalloc::*;
+                    let coloring = alloc_register::<A>(&mut cfg);
+                    _ = symbols.insert(name, LtlSection::Text(Ltl::new(cfg, coloring)));
+                }
+            }
+        }
+
+        Self {symbols}
+    }
+}
+
+impl<A: Arch> std::fmt::Display for LtlSection<A> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Text(cfg) =>  write!(f, "{cfg}"),
+            Self::Data(items) => {
+                for x in items.iter() {
+                    write!(f, "\n\t{x}")?;
+                }
+
+                write!(f, "\n")?;
+                Ok(())
+            },
+        }
+    }
+}
+
+impl<A: Arch> std::fmt::Display for LtlSymbolTable<A> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for (symbol, section) in self.symbols.iter() {
+            write!(f, ".globl {symbol}:\n{section}\n\n")?;
+        }
+
+        Ok(())
     }
 }

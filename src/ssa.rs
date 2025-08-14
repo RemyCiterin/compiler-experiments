@@ -616,6 +616,7 @@ impl<I: Instruction> Cfg<I> {
     }
 }
 
+#[derive(Clone)]
 pub enum Word {
     Addr(String, i32),
     Int(i32),
