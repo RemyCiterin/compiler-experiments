@@ -1,5 +1,6 @@
 use std::collections::{BTreeSet, HashMap};
 
+use crate::union_find::*;
 use crate::interference::*;
 use crate::liveness::*;
 use crate::ssa::*;
@@ -15,26 +16,91 @@ pub fn show_coloring(color: &Coloring) {
     }
 }
 
-/// Search "preferences" in register allocation: each times we see a ```move x, y```, and if in the
-/// coloring algotithm the color of `x` is available, then we choose this color in priority
-pub fn coalessing<A: Arch>(cfg: &Rtl<A::Op, A::Cond>) -> SparseSecondaryMap<Var, BTreeSet<Var>> {
+pub fn coalescing<A: Arch>(cfg: &Rtl<A::Op, A::Cond>) -> SparseSecondaryMap<Var, BTreeSet<Var>> {
     let mut map = SparseSecondaryMap::<Var, BTreeSet<Var>>::new();
 
     for (var, _) in cfg.iter_vars() {
         map.insert(var, BTreeSet::new());
     }
 
+    //for (_, block) in cfg.iter_blocks() {
+    //    for instr in block.stmt.iter() {
+    //        if let RInstr::Move(dst, Lit::Var(src)) = instr {
+    //            map[*dst].insert(*src);
+    //            map[*src].insert(*dst);
+    //        }
+    //    }
+    //}
+
+    map
+}
+
+/// TODO: to fix
+pub fn aggressive_coalescing<A: Arch>(
+    cfg: &mut Rtl<A::Op, A::Cond>,
+    color: &mut Coloring,
+) -> InterferenceGraph {
+    let mut liveness = Liveness::new(cfg);
+    liveness.run(cfg);
+
+    let mut graph = InterferenceGraph::new(cfg);
+    graph.run(cfg, &liveness);
+
+    let mut uf: UnionFind<Var> = UnionFind::new();
+
+    for (var, _) in cfg.iter_vars() {
+        uf.insert(var);
+    }
+
     for (_, block) in cfg.iter_blocks() {
         for instr in block.stmt.iter() {
-            if let RInstr::Move(dst, Lit::Var(src)) = instr {
-                map[*dst].insert(*src);
-                map[*src].insert(*dst);
+            if let RInstr::Move(new, Lit::Var(old)) = instr {
+                let new = uf.find(*new);
+                let old = uf.find(*old);
+
+                let same_color =
+                    !color.contains_key(new) &&
+                    !color.contains_key(old);
+
+                let no_interference =
+                    !graph[new].contains(&old);
+
+                if new != old && same_color && no_interference {
+                    if color.contains_key(old) { color.insert(new, color[old]); }
+                    graph.merge(new, old);
+                    uf.merge(new, old);
+                }
             }
         }
     }
 
-    map
+    for label in cfg.labels() {
+        let mut stmt: Vec<RInstr<A::Op, A::Cond>> = vec![];
+
+        for mut instr in cfg[label].stmt.iter().cloned() {
+            if let RInstr::Move(new, Lit::Var(old)) = instr
+                && uf.find(new) == uf.find(old) {
+                continue;
+            }
+
+            for x in instr.operands_mut() {
+                *x = uf.find(*x);
+            }
+
+            if let Some(x) = instr.destination_mut() {
+                *x = uf.find(*x);
+            }
+
+            stmt.push(instr);
+        }
+
+        cfg.set_block_stmt(label, stmt);
+    }
+
+    graph
 }
+
+//pub fn aggressive_coalescing<A: Arch>(cfg: &mut Rtl<A::Op, A::Cond>)
 
 /// Prepare coloring, in particular it introduce copies and precolor registers for
 /// calls/return instructions
@@ -107,7 +173,7 @@ pub fn prepare_coloring<A: Arch>(cfg: &mut Rtl<A::Op, A::Cond>) -> Coloring {
 pub fn solve_coloring<A: Arch>(
     cfg: &Cfg<RInstr<A::Op, A::Cond>>,
     coloring: &mut Coloring,
-    heuristic: SparseSecondaryMap<Var, BTreeSet<Var>>
+    coalesced: SparseSecondaryMap<Var, BTreeSet<Var>>
 ) -> BTreeSet<Var> {
     let mut liveness = Liveness::new(cfg);
     liveness.run(cfg);
@@ -134,7 +200,7 @@ pub fn solve_coloring<A: Arch>(
                 coloring.get(*v).cloned()
             }).collect();
 
-        for v in heuristic[var].iter() {
+        for v in coalesced[var].iter() {
             if let Some(c) = coloring.get(*v) && !others.contains(c) {
                 coloring.insert(var, *c);
                 continue 'main_loop;
@@ -192,12 +258,14 @@ pub fn spill_vars<A: Arch>(cfg: &mut Rtl<A::Op, A::Cond>, spill: BTreeSet<Var>) 
 }
 
 pub fn alloc_register<A:Arch>(cfg: &mut Rtl<A::Op, A::Cond>) -> Coloring {
-    let color = prepare_coloring::<A>(cfg);
+    let mut color = prepare_coloring::<A>(cfg);
 
     loop {
         let mut copy = color.clone();
-        let heuristic = coalessing::<A>(cfg);
-        let spill_set = solve_coloring::<A>(cfg, &mut copy, heuristic);
+        aggressive_coalescing::<A>(cfg, &mut copy);
+
+        let coalesced = coalescing::<A>(cfg);
+        let spill_set = solve_coloring::<A>(cfg, &mut copy, coalesced);
 
         if spill_set.is_empty() {
             //println!("{cfg}");
@@ -207,7 +275,6 @@ pub fn alloc_register<A:Arch>(cfg: &mut Rtl<A::Op, A::Cond>) -> Coloring {
         }
 
         spill_vars::<A>(cfg, spill_set);
-
     }
 }
 

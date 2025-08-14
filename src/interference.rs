@@ -31,6 +31,20 @@ impl InterferenceGraph {
         self.matrix[y].insert(x);
     }
 
+    pub fn merge(&mut self, new: Var, old: Var) {
+        assert!(!self.matrix[new].contains(&old));
+        assert!(!self.matrix[old].contains(&new));
+
+        let added = std::mem::take(&mut self.matrix[old]);
+
+        for &x in added.iter() {
+            self.matrix[x].remove(&old);
+            self.add_conflict(new, x);
+        }
+
+        self.matrix.remove(old);
+    }
+
     pub fn run<I: Instruction>(&mut self, cfg: &Cfg<I>, liveness: &Liveness) {
         for (block, _) in cfg.iter_blocks() {
             let mut lives = liveness[block].outputs.clone();

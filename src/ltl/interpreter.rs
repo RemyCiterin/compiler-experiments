@@ -221,12 +221,12 @@ impl<'a, A: Arch> Interpreter<'a, A> {
     }
 
     pub fn interpret_function(&mut self) {
-        print!("{}:", self.symbol);
-        for i in 0..5 {
-            let phy = A::arg_regs()[i];
-            print!("  {phy} = {}", self.env[&phy]);
-        }
-        println!("");
+        //print!("{}:", self.symbol);
+        //for i in 0..5 {
+        //    let phy = A::arg_regs()[i];
+        //    print!("  {phy} = {}", self.env[&phy]);
+        //}
+        //println!("");
 
         self.stats.calls += 1;
 
