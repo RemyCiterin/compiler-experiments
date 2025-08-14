@@ -31,6 +31,10 @@ impl InterferenceGraph {
         self.matrix[y].insert(x);
     }
 
+    pub fn contains(&self, x: Var) -> bool {
+        self.matrix.contains_key(x)
+    }
+
     pub fn merge(&mut self, new: Var, old: Var) {
         assert!(!self.matrix[new].contains(&old));
         assert!(!self.matrix[old].contains(&new));
