@@ -184,7 +184,11 @@ def execute(prog) {
     } else {nop;}
 
     if char == '[' {
-      //print_i32(exit_loop(prog, pos));
+      if memory[index] == 0 {
+        pos = exit_loop(prog, pos);
+        continue;
+      } else {nop;}
+
       stack[top] = pos;
       top = top + 1;
     } else {nop;}
