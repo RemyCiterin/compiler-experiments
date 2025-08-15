@@ -437,7 +437,7 @@ pub fn translate_operation
             select dest => {
                 let tmp = select.fresh();
                 vec![
-                    RvInstr::Operation(tmp, RvOp::Binop(RvBinop::Sub), vec![x, y]),
+                    RvInstr::Operation(tmp, RvOp::Binop(RvBinop::Xor), vec![x, y]),
                     RvInstr::Operation(dest, RvOp::Seqz, vec![tmp])
                 ]
             }
@@ -447,7 +447,7 @@ pub fn translate_operation
             select dest => {
                 let tmp = select.fresh();
                 vec![
-                    RvInstr::Operation(tmp, RvOp::Binop(RvBinop::Sub), vec![x, y]),
+                    RvInstr::Operation(tmp, RvOp::Binop(RvBinop::Xor), vec![x, y]),
                     RvInstr::Operation(dest, RvOp::Snez, vec![tmp])
                 ]
             }
@@ -522,6 +522,23 @@ pub fn translate_condition
                 vec![RvInstr::Branch(RvCond::Ne, vec![x, y], l2, l1)]
         ),
 
+        translate_condition_rule!(
+            (LessThan x y), true, select l1 l2 =>
+                vec![RvInstr::Branch(RvCond::Lt, vec![x, y], l1, l2)]
+        ),
+        translate_condition_rule!(
+            (ULessThan x y), true, select l1 l2 =>
+                vec![RvInstr::Branch(RvCond::Ltu, vec![x, y], l1, l2)]
+        ),
+        translate_condition_rule!(
+            (LessEqual x y), true, select l1 l2 =>
+                vec![RvInstr::Branch(RvCond::Ge, vec![y, x], l1, l2)]
+        ),
+        translate_condition_rule!(
+            (ULessEqual x y), true, select l1 l2 =>
+                vec![RvInstr::Branch(RvCond::Geu, vec![y, x], l1, l2)]
+        ),
+
         // Default pattern if we don't find a way to optimize the branch
         translate_condition_rule!(
             x, true, select l1 l2 =>
@@ -547,8 +564,10 @@ pub fn translate(cfg: Cfg<Instr>) -> Cfg<RvInstr> {
 
 
     select.run(
-        |select, instr, dest| translate_operation(select, instr, dest),
-        |select, lit, l1, l2| translate_condition(select, lit, l1, l2),
+        |select, instr, dest|
+            translate_operation(select, instr, dest),
+        |select, lit, l1, l2|
+            translate_condition(select, lit, l1, l2),
     );
 
     select.rtl()

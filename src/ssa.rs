@@ -334,14 +334,15 @@ impl<I: Instruction> Cfg<I> {
         &self.preds[block]
     }
 
-    fn mk_preorder(&self, block: Label, order: &mut Vec<Label>, seen: &mut BTreeSet<Label>) {
+    fn mk_postorder(&self, block: Label, order: &mut Vec<Label>, seen: &mut BTreeSet<Label>) {
         if seen.contains(&block) { return; }
         seen.insert(block);
-        order.push(block);
 
         for succ in self[block].succs() {
-            self.mk_preorder(succ, order, seen);
+            self.mk_postorder(succ, order, seen);
         }
+
+        order.push(block);
     }
 
     /// Return the preorder (also called reverse postorder) of a control flow graph,
@@ -351,12 +352,13 @@ impl<I: Instruction> Cfg<I> {
         let mut seen = BTreeSet::new();
         let mut order = vec![];
 
-        self.mk_preorder(self.entry, &mut order, &mut seen);
+        self.mk_postorder(self.entry, &mut order, &mut seen);
 
         for (block, _) in self.iter_blocks() {
-            self.mk_preorder(block, &mut order, &mut seen);
+            self.mk_postorder(block, &mut order, &mut seen);
         }
 
+        order.reverse();
         order
     }
 
@@ -485,7 +487,7 @@ impl<I: Instruction> Cfg<I> {
     pub fn gc(&mut self) {
         let mut seen = BTreeSet::new();
 
-        self.mk_preorder(self.entry, &mut vec![], &mut seen);
+        self.mk_postorder(self.entry, &mut vec![], &mut seen);
 
         let blocks: Vec<Label> = self.blocks.iter().map(|(b,_)| b).collect();
 

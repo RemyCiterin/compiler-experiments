@@ -54,8 +54,12 @@ pub fn translate(table: ssa::SymbolTable<ssa::Instr>) -> ssa::SymbolTable<rtl::r
 
                 let mut cfg = rtl::rv32::translate(cfg);
 
-                let mut gvn = rtl::gvn::ValueTable::new();
-                gvn.run(&mut cfg);
+                if name == "execute" {
+                    println!("{cfg}\n");
+                    let mut gvn = rtl::gvn::ValueTable::new();
+                    gvn.run(&mut cfg);
+                    println!("\n{cfg}");
+                }
 
                 let mut conv = out_of_ssa::Conventionalize::new(&cfg);
                 conv.run(&mut cfg);
@@ -63,21 +67,6 @@ pub fn translate(table: ssa::SymbolTable<ssa::Instr>) -> ssa::SymbolTable<rtl::r
                 out_of_ssa::out_of_ssa(&mut cfg);
 
                 symbols.insert(name, ssa::Section::Text(cfg));
-
-                //let coloring =
-                //    rtl::regalloc::alloc_register::<rtl::rv32::RvArch>(&mut cfg);
-
-                //println!("{name} {cfg}\n\n");
-                //rtl::regalloc::show_coloring(&coloring);
-
-                //let ltl = ltl::Ltl::<rtl::rv32::RvArch>::new(cfg, coloring);
-
-                //for (i, block) in ltl.blocks.iter().enumerate() {
-                //    println!("{i}");
-                //    for instr in block.iter() {
-                //        println!("\t{instr}");
-                //    }
-                //}
             }
             ssa::Section::Data(v) =>
                 _ = symbols.insert(name, ssa::Section::Data(v.clone())),
@@ -129,7 +118,6 @@ fn main() {
 
     let mut interp = interpreter::Interpreter::new(&table);
     interp.interpret_function();
-
     println!("{}", interp.stats);
 
     let rtl_table = translate(table);
@@ -139,10 +127,14 @@ fn main() {
     let ltl_table: ltl::LtlSymbolTable<rtl::rv32::RvArch>
         = ltl::LtlSymbolTable::new(rtl_table);
 
-    println!("{}", ltl_table);
     let mut interp =
         ltl::interpreter::Interpreter::new(&ltl_table);
     interp.interpret_function();
 
     println!("{}", interp.stats);
+
+    let file_name = std::env::args().nth(2).unwrap();
+    let mut file = std::fs::File::create(file_name).unwrap();
+
+    file.write_all(format!("{ltl_table}").as_bytes()).unwrap();
 }

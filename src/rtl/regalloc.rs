@@ -102,7 +102,34 @@ pub fn aggressive_coalescing<A: Arch>(
     graph
 }
 
-//pub fn aggressive_coalescing<A: Arch>(cfg: &mut Rtl<A::Op, A::Cond>)
+pub fn search_caller_saved<A: Arch>(cfg: &Rtl<A::Op, A::Cond>) -> BTreeSet<Var> {
+    let mut liveness = Liveness::new(cfg);
+    liveness.run(cfg);
+
+    let mut set: BTreeSet<Var> = BTreeSet::new();
+
+    for block in cfg.labels() {
+        let mut lives = liveness[block].outputs.clone();
+
+        for instr in cfg[block].stmt.iter().rev() {
+            if let Some(dest) = instr.destination() {
+                lives.remove(&dest);
+            }
+
+            if matches!(instr, RInstr::Call(..)) {
+                for &v in lives.iter() {
+                    set.insert(v);
+                }
+            }
+
+            for x in instr.operands() {
+                lives.insert(x);
+            }
+        }
+    }
+
+    set
+}
 
 /// Prepare coloring, in particular it introduce copies and precolor registers for
 /// calls/return instructions
@@ -201,9 +228,17 @@ pub fn solve_coloring<A: Arch>(
         .map(|x|x.0)
         .collect();
 
+    let callee_saved: BTreeSet<usize> =
+        A::callee_saved().into_iter().map(|x|x.0).collect();
+
+    let caller_saved: BTreeSet<usize> =
+        A::caller_saved().into_iter().map(|x|x.0).collect();
+
     let mut spill_set: BTreeSet<Var> = BTreeSet::new();
 
     let mut worklist: Vec<Var> = cfg.iter_vars().map(|(v,_)| v).collect();
+
+    let must_be_saved = search_caller_saved::<A>(cfg);
 
     while let Some(var) = worklist.pop() {
         if coloring.contains_key(var) { continue; }
@@ -214,6 +249,18 @@ pub fn solve_coloring<A: Arch>(
             .filter_map(|v| {
                 coloring.get(*v).cloned()
             }).collect();
+
+        if must_be_saved.contains(&var) {
+            if let Some(c) = callee_saved.difference(&others).into_iter().next() {
+                coloring.insert(var, *c);
+                continue;
+            }
+        } else {
+            if let Some(c) = caller_saved.difference(&others).into_iter().next() {
+                coloring.insert(var, *c);
+                continue;
+            }
+        }
 
 
         // Allocation succede without spilling the variable

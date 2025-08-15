@@ -111,6 +111,8 @@ peg::parser!(pub grammar customlang() for str {
         }
         begin:location() n:number() end:location()
             { RValue::constant(n, begin, end) }
+        begin:location() n:character() end:location()
+            { RValue::constant(n as i32, begin, end) }
         "(" _ e:rvalue() _ ")" { e }
     }
 
@@ -184,6 +186,8 @@ peg::parser!(pub grammar customlang() for str {
             { Decl::function(s, args, body, begin, end) }
         begin:location() "var" _ s:variable() _ "=" _ n:number() _ ";" end:location()
             { Decl::variable(s, n, begin, end) }
+        begin:location() "var" _ s:variable() _ "=" _ n:character() _ ";" end:location()
+            { Decl::variable(s, n as i32, begin, end) }
         begin:location() "var" _ s:variable() _ "[" _ n1:number() _ "]" _
             "=" _ n2:number() _ ";" end:location()
             { Decl::array(s, std::iter::repeat(n2).take(n1 as usize).collect(), begin, end) }
@@ -216,6 +220,9 @@ peg::parser!(pub grammar customlang() for str {
 
     rule string() -> String =
         "\"" s:$([^'"']*) "\"" { parse_string(s) }
+
+    rule character() -> u8 =
+        "'" s:([^'\'']) "'" { s as u8 }
 });
 
 
@@ -233,6 +240,8 @@ pub fn parse_string(s: &str) -> String {
                 b'r' => result.push(b'\r'),
                 b'\\' => result.push(b'\\'),
                 b't' => result.push(b'\t'),
+                b'\'' => result.push(b'\''),
+                b'"' => result.push(b'"'),
                 _ => panic!(),
             }
 

@@ -55,7 +55,7 @@ impl<Op: Operation> std::fmt::Display for Expr<Op> {
 
 pub struct ValueTable<Op> {
     /// Associate an expression and a variable to each value
-    values: SlotMap<Value, Lit>,
+    values: SlotMap<Value, Var>,
 
     /// Associate a value to each known expression
     exprs: PHashMap<Expr<Op>, Value>,
@@ -73,28 +73,37 @@ impl<Op: Operation> ValueTable<Op> {
         }
     }
 
-    pub fn insert(&mut self, expr: Expr<Op>, lit: Lit) -> Value {
+    pub fn insert(&mut self, expr: Expr<Op>, var: Var) -> Value {
         if let Some(val) = self.exprs.get(&expr) { return *val; }
 
-        let value = self.values.insert(lit);
+        let value = self.values.insert(var);
         self.exprs.insert(expr.clone(), value);
         value
     }
 
-    pub fn eval_var(&mut self, v: Var) -> Value {
+    pub fn insert_var(&mut self, v: Var) -> Value {
         if let Some(val) = self.vars.get(&v) { return *val; }
 
-        let val = self.values.insert(Lit::Var(v));
+        let val = self.values.insert(v);
         self.vars.insert(v, val);
         val
     }
 
-    pub fn eval_lit(&mut self, lit: Lit) -> Value {
+    pub fn insert_move(&mut self, dest: Var, lit: Lit) -> Value {
         match lit {
-            Lit::Int(i) => self.insert(Expr::Int(i), Lit::Int(i)),
-            Lit::Addr(s) => self.insert(Expr::Addr(s.clone()), Lit::Addr(s)),
-            Lit::Stack(slot) => self.insert(Expr::Stack(slot), Lit::Stack(slot)),
-            Lit::Var(v) => self.eval_var(v),
+            Lit::Int(i) => self.insert(Expr::Int(i), dest),
+            Lit::Addr(s) => self.insert(Expr::Addr(s.clone()), dest),
+            Lit::Stack(slot) => self.insert(Expr::Stack(slot), dest),
+            Lit::Var(v) => self.insert_var(v),
+        }
+    }
+
+    pub fn get_lit(&self, lit: Lit) -> Option<Value> {
+        match lit {
+            Lit::Int(i) => self.exprs.get(&Expr::Int(i)).cloned(),
+            Lit::Addr(a) => self.exprs.get(&Expr::Addr(a)).cloned(),
+            Lit::Stack(s) => self.exprs.get(&Expr::Stack(s)).cloned(),
+            Lit::Var(v) => self.vars.get(&v).cloned(),
         }
     }
 
@@ -103,21 +112,28 @@ impl<Op: Operation> ValueTable<Op> {
     pub fn insert_instr<Cond: Condition>(&mut self, instr: RInstr<Op, Cond>) -> RInstr<Op, Cond> {
         match &instr {
             RInstr::Operation(dest, op, args) => {
-                let vals = args.iter().map(|v| self.eval_var(*v)).collect();
+                let vals = args.iter().map(|v| self.insert_var(*v)).collect();
                 let expr = Expr::Operation(op.clone(), vals);
 
                 if !op.may_have_side_effect() {
                     if let Some(value) = self.exprs.get(&expr) {
-                        return RInstr::Move(*dest, self.values[*value].clone());
+
+                        self.vars.insert(*dest, *value);
+                        return RInstr::Move(*dest, Lit::Var(self.values[*value].clone()));
                     }
                 }
 
-                let v = self.insert(expr, Lit::Var(*dest));
+                let v = self.insert(expr, *dest);
                 self.vars.insert(*dest, v);
                 instr
             }
             RInstr::Move(dest, lit) => {
-                let v = self.eval_lit(lit.clone());
+                if let Some(value) = self.get_lit(lit.clone()) {
+                    self.vars.insert(*dest, value);
+                    return RInstr::Move(*dest, Lit::Var(self.values[value].clone()));
+                }
+
+                let v = self.insert_move(*dest, lit.clone());
                 self.vars.insert(*dest, v);
                 instr
             }
@@ -125,27 +141,30 @@ impl<Op: Operation> ValueTable<Op> {
         }
     }
 
-    pub fn update_operand(&self, lit: &Lit) -> Lit {
-        if let Lit::Var(var) = lit {
-            if let Some(value) = self.vars.get(&var) {
-                return self.values[*value].clone()
-            }
+    pub fn update_operand(&self, var: Var) -> Var {
+        if let Some(value) = self.vars.get(&var) {
+            return self.values[*value].clone();
         }
 
-        return lit.clone();
+        return var;
     }
 
-    pub fn run_on_block<Cond: Condition>(&mut self, cfg: &mut Rtl<Op, Cond>, dom: &Dominance, block: Label) {
+    pub fn run_on_block<Cond: Condition>
+        (&mut self, cfg: &mut Rtl<Op, Cond>, dom: &Dominance, block: Label) {
+        self.vars.push();
+        self.exprs.push();
         let mut stmt = vec![];
 
-        for instr in cfg[block].stmt.clone() {
+        for mut instr in cfg[block].stmt.clone() {
+            for var in instr.operands_mut() {
+                *var = self.update_operand(*var);
+            }
+
             stmt.push(self.insert_instr(instr));
         }
 
         cfg.set_block_stmt(block, stmt);
 
-        self.vars.push();
-        self.exprs.push();
 
         for &child in dom.childrens(block).iter() {
             self.run_on_block(cfg, dom, child);
@@ -153,11 +172,12 @@ impl<Op: Operation> ValueTable<Op> {
 
         self.exprs.pop();
         self.vars.pop();
+
     }
 
     pub fn run<Cond: Condition>(&mut self, cfg: &mut Rtl<Op, Cond>) {
         for &arg in cfg.args.iter() {
-            let val = self.values.insert(Lit::Var(arg));
+            let val = self.values.insert(arg);
             self.vars.insert(arg, val);
         }
 
@@ -166,6 +186,8 @@ impl<Op: Operation> ValueTable<Op> {
 
         let mut dom = Dominance::new(cfg);
         dom.run(cfg);
+
+
 
         self.run_on_block(cfg, &dom, cfg.entry());
 

@@ -185,15 +185,15 @@ impl ValueTable {
 
         cfg.set_block_stmt(block, stmt);
 
-        self.vars.push();
-        self.exprs.push();
 
         for &child in dom.childrens(block).iter() {
+            self.vars.push();
+            self.exprs.push();
             self.run_on_block(cfg, dom, child);
+            self.exprs.pop();
+            self.vars.pop();
         }
 
-        self.exprs.pop();
-        self.vars.pop();
     }
 
     pub fn run(&mut self, cfg: &mut Cfg<Instr>) {

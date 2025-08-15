@@ -168,6 +168,99 @@ pub fn combine_instructions(cfg: &mut Cfg<Instr>) {
             ( Not ( Not x ) ), true,
             dest => Instr::Move(dest, x)
         ),
+
+
+        op_rule!(
+            ( NotEqual 0 ( LessThan x y ) ), true,
+            dest => Instr::Binop(dest, crate::ast::Binop::LessThan, x, y)
+        ),
+        op_rule!(
+            ( NotEqual 0 ( ULessThan x y ) ), true,
+            dest => Instr::Binop(dest, crate::ast::Binop::ULessThan, x, y)
+        ),
+        op_rule!(
+            ( NotEqual ( LessThan x y ) 0 ), true,
+            dest => Instr::Binop(dest, crate::ast::Binop::LessThan, x, y)
+        ),
+        op_rule!(
+            ( NotEqual ( ULessThan x y ) 0 ), true,
+            dest => Instr::Binop(dest, crate::ast::Binop::ULessThan, x, y)
+        ),
+        op_rule!(
+            ( NotEqual 0 ( LessEqual x y ) ), true,
+            dest => Instr::Binop(dest, crate::ast::Binop::LessEqual, x, y)
+        ),
+        op_rule!(
+            ( NotEqual 0 ( ULessEqual x y ) ), true,
+            dest => Instr::Binop(dest, crate::ast::Binop::ULessEqual, x, y)
+        ),
+        op_rule!(
+            ( NotEqual ( LessEqual x y ) 0 ), true,
+            dest => Instr::Binop(dest, crate::ast::Binop::LessEqual, x, y)
+        ),
+        op_rule!(
+            ( NotEqual ( ULessEqual x y ) 0 ), true,
+            dest => Instr::Binop(dest, crate::ast::Binop::ULessEqual, x, y)
+        ),
+
+
+        op_rule!(
+            ( Equal 0 ( LessThan x y ) ), true,
+            dest => Instr::Binop(dest, crate::ast::Binop::LessEqual, y, x)
+        ),
+        op_rule!(
+            ( Equal 0 ( ULessThan x y ) ), true,
+            dest => Instr::Binop(dest, crate::ast::Binop::ULessEqual, y, x)
+        ),
+        op_rule!(
+            ( Equal ( LessThan x y ) 0 ), true,
+            dest => Instr::Binop(dest, crate::ast::Binop::LessEqual, y, x)
+        ),
+        op_rule!(
+            ( Equal ( ULessThan x y ) 0 ), true,
+            dest => Instr::Binop(dest, crate::ast::Binop::ULessEqual, y, x)
+        ),
+        op_rule!(
+            ( Equal 0 ( LessEqual x y ) ), true,
+            dest => Instr::Binop(dest, crate::ast::Binop::LessThan, y, x)
+        ),
+        op_rule!(
+            ( Equal 0 ( ULessEqual x y ) ), true,
+            dest => Instr::Binop(dest, crate::ast::Binop::ULessThan, y, x)
+        ),
+        op_rule!(
+            ( Equal ( LessEqual x y ) 0 ), true,
+            dest => Instr::Binop(dest, crate::ast::Binop::LessThan, y, x)
+        ),
+        op_rule!(
+            ( Equal ( ULessEqual x y ) 0 ), true,
+            dest => Instr::Binop(dest, crate::ast::Binop::ULessThan, y, x)
+        ),
+
+        op_rule!(
+            ( Sub 1 (Equal x y) ), true,
+            dest => Instr::Binop(dest, crate::ast::Binop::NotEqual, x, y)
+        ),
+        op_rule!(
+            ( Sub 1 (NotEqual x y) ), true,
+            dest => Instr::Binop(dest, crate::ast::Binop::Equal, x, y)
+        ),
+        op_rule!(
+            ( Sub 1 (LessEqual x y) ), true,
+            dest => Instr::Binop(dest, crate::ast::Binop::LessThan, y, x)
+        ),
+        op_rule!(
+            ( Sub 1 (ULessEqual x y) ), true,
+            dest => Instr::Binop(dest, crate::ast::Binop::ULessThan, y, x)
+        ),
+        op_rule!(
+            ( Sub 1 (LessThan x y) ), true,
+            dest => Instr::Binop(dest, crate::ast::Binop::LessEqual, y, x)
+        ),
+        op_rule!(
+            ( Sub 1 (ULessThan x y) ), true,
+            dest => Instr::Binop(dest, crate::ast::Binop::ULessEqual, y, x)
+        ),
     ];
 
     let cond_rules = vec![
