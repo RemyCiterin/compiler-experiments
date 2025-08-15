@@ -248,6 +248,13 @@ pub enum VarKind {
     Undef,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
+pub enum SlotKind {
+    Local(usize),
+    Incoming(usize),
+    Outgoing(usize),
+}
+
 /// A control flow graph, each control flow graph is specific to one function or procedure,
 /// it contains an entry point, a set of blocks, and a set of variables
 pub struct Cfg<I: Instruction> {
@@ -268,7 +275,7 @@ pub struct Cfg<I: Instruction> {
     ssa: bool,
 
     /// A set of variables representing stack locations with a size and alignment constraint
-    pub stack: SlotMap<Slot, usize>,
+    pub stack: SlotMap<Slot, SlotKind>,
 
     /// Arguments of the function
     pub args: Vec<Var>,
@@ -399,7 +406,17 @@ impl<I: Instruction> Cfg<I> {
 
     /// Return a fresh stack slot, and allocate it on the stack
     pub fn fresh_stack_var(&mut self, size: usize) -> Slot {
-        self.stack.insert(size)
+        self.stack.insert(SlotKind::Local(size))
+    }
+
+    /// Generate a fresh outgoing stack slot
+    pub fn fresh_outgoing_var(&mut self, num: usize) -> Slot {
+        self.stack.insert(SlotKind::Outgoing(num))
+    }
+
+    /// Generate a fresh incoming stack slot
+    pub fn fresh_incoming_var(&mut self, num: usize) -> Slot {
+        self.stack.insert(SlotKind::Incoming(num))
     }
 
     /// Generate a fresh function argument
@@ -651,7 +668,7 @@ pub struct SymbolTable<I: Instruction> {
 impl std::fmt::Display for Word {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Addr(s, offset) =>  write!(f, "&{s}+{offset}"),
+            Self::Addr(s, offset) =>  write!(f, "{s}+{offset}"),
             Self::Int(i) => write!(f, "{i}"),
         }
     }
@@ -782,8 +799,8 @@ impl<I: Instruction> std::fmt::Display for Cfg<I> {
         }
 
         write!(f, "\nstack:")?;
-        for (slot, size) in self.stack.iter() {
-            write!(f, " [{slot}; {size}]")?;
+        for (slot, kind) in self.stack.iter() {
+            write!(f, " [{slot}; {:?}]", kind)?;
         }
 
         write!(f, "\n")?;

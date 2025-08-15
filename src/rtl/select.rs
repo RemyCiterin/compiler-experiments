@@ -81,8 +81,12 @@ impl<Op: Operation, Cond: Condition> Selection<Op, Cond> {
             vars.insert(*v, new.fresh_arg());
         }
 
-        for (slot, size) in old.stack.iter() {
-            slots.insert(slot, new.fresh_stack_var(*size));
+        for (slot, kind) in old.stack.iter() {
+            match kind {
+                SlotKind::Local(size) =>
+                    _ = slots.insert(slot, new.fresh_stack_var(*size)),
+                _ => panic!("on local stack slots are allowed until `Rtl` representation"),
+            }
         }
 
         for (v, kind) in old.iter_vars() {

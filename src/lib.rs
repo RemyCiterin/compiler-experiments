@@ -5,7 +5,6 @@ pub mod ast;
 pub mod parser;
 pub mod identifiers;
 pub mod union_find;
-pub mod codegen;
 pub mod trie;
 pub mod ssa;
 pub mod liveness;

@@ -108,20 +108,30 @@ pub fn aggressive_coalescing<A: Arch>(
 /// calls/return instructions
 pub fn prepare_coloring<A: Arch>(cfg: &mut Rtl<A::Op, A::Cond>) -> Coloring {
     let mut color: Coloring = Coloring::new();
+    let arg_regs = A::arg_regs();
 
     let args: HashMap<Var, Var> =
         cfg.args.clone().into_iter()
         .map(|v| (v, cfg.fresh_var()))
         .collect();
 
+    let mut incoming: Vec<RInstr<A::Op, A::Cond>> = vec![];
+
     for i in 0..cfg.args.len() {
-        color.insert(cfg.args[i], A::arg_regs()[i].0);
+        if i < arg_regs.len() {
+            color.insert(cfg.args[i], arg_regs[i].0);
+        } else {
+            let slot = cfg.fresh_incoming_var(i - arg_regs.len());
+            incoming.push(RInstr::LoadLocal{dest: cfg.args[i], addr: slot});
+        }
     }
 
     for block in cfg.labels() {
         let mut stmt: Vec<RInstr<A::Op, A::Cond>> = vec![];
 
         if block == cfg.entry() {
+            stmt.extend(incoming.iter().cloned());
+
             for (&old, &new) in args.iter() {
                 stmt.push(RInstr::Move(new, Lit::Var(old)));
             }
@@ -142,12 +152,20 @@ pub fn prepare_coloring<A: Arch>(cfg: &mut Rtl<A::Op, A::Cond>) -> Coloring {
 
             match instr {
                 RInstr::Call(dest, name, args) => {
-                    let new_args: Vec<Var> = args.iter().map(|_| cfg.fresh_var()).collect();
                     let new_dest = cfg.fresh_var();
 
+                    let mut new_args: Vec<Var> = vec![];
+
                     for i in 0..args.len() {
-                        stmt.push(RInstr::Move(new_args[i], Lit::Var(args[i])));
-                        color.insert(new_args[i], A::arg_regs()[i].0);
+                        if i >= arg_regs.len() {
+                            let slot = cfg.fresh_outgoing_var(i - arg_regs.len());
+                            stmt.push(RInstr::StoreLocal{val: args[i], addr: slot});
+                        } else {
+                            let id = cfg.fresh_var();
+                            stmt.push(RInstr::Move(id, Lit::Var(args[i])));
+                            color.insert(id, arg_regs[i].0);
+                            new_args.push(id);
+                        }
                     }
 
                     stmt.push(RInstr::Call(new_dest, name, new_args));

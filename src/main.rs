@@ -125,7 +125,7 @@ fn main() {
     into_ssa(&mut table);
     optimize(&mut table);
 
-    println!("{table}");
+    //println!("{table}");
 
     let mut interp = interpreter::Interpreter::new(&table);
     interp.interpret_function();

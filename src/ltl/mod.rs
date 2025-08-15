@@ -50,7 +50,7 @@ pub enum LInstr<Op, Cond> {
 
 pub struct Ltl<A: Arch> {
     pub blocks: Vec<Vec<LInstr<A::Op, A::Cond>>>,
-    pub stack: SlotMap<Slot, usize>,
+    pub stack: SlotMap<Slot, SlotKind>,
 }
 
 fn write_regs<A: Arch>(cfg: &Rtl<A::Op, A::Cond>, color: &Coloring) -> HashSet<Phys> {
@@ -166,21 +166,64 @@ impl<A: Arch> Ltl<A> {
         }
     }
 
-    pub fn pp(&self, f: &mut std::fmt::Formatter<'_>, prefix: &str) -> std::fmt::Result {
+    pub fn layout(&self) -> (i32, SparseSecondaryMap<Slot, i32>) {
         let mut slots: SparseSecondaryMap<Slot, i32> = SparseSecondaryMap::new();
         let mut stack_size: i32 = 0;
 
-        for (x, sz) in self.stack.iter() {
-            slots.insert(x, stack_size);
-            stack_size += *sz as i32;
+        let mut num_outgoing = 0;
+        for (_, kind) in self.stack.iter() {
+            match kind {
+                SlotKind::Local(size) => {
+                    //slots.insert(slot, stack_size);
+                    stack_size += *size as i32;
+                },
+                SlotKind::Outgoing(num) =>
+                    num_outgoing = usize::max(*num, num_outgoing+1),
+                _ => {}
+            }
         }
+
+        stack_size += num_outgoing as i32 * 4;
+        stack_size += 4;
+
+        if stack_size % 16 != 0 {
+            stack_size += 16 - (stack_size % 16);
+        }
+
+        let mut offset: i32 = 0;
+        for (slot, kind) in self.stack.iter() {
+            match kind {
+                SlotKind::Local(size) => {
+                    slots.insert(slot, stack_size - offset - 4);
+                    offset += *size as i32;
+                }
+                SlotKind::Outgoing(num) =>
+                    _ = slots.insert(slot, 4 * (*num+1) as i32),
+                SlotKind::Incoming(num) =>
+                    _ = slots.insert(slot, stack_size + 4 * (*num+1) as i32),
+            }
+        }
+
+        (stack_size, slots)
+    }
+
+    pub fn pp(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let (stack_size, slots) = self.layout();
 
         write!(f, "\t")?;
         A::pp_push(f, stack_size)?;
         write!(f, "\n")?;
 
         for (i, block) in self.blocks.iter().enumerate() {
-            write!(f, ".{prefix}{}:\n", i)?;
+            let from_label = |j: usize| {
+                if j > i {
+                    format!("{j}f")
+                } else {
+                    format!("{j}b")
+                }
+            };
+
+            write!(f, "{}:\n", i)?;
 
             for instr in block.iter().cloned() {
 
@@ -195,9 +238,9 @@ impl<A: Arch> Ltl<A> {
                     LInstr::Operation(dest, op, args) =>
                         _ = A::pp_op(f, dest, op, args)?,
                     LInstr::Jcc(cond, args, label) =>
-                        _ = A::pp_jcc(f, cond, args, &format!(".{prefix}{label}"))?,
+                        _ = A::pp_jcc(f, cond, args, &from_label(label))?,
                     LInstr::Jump(label) =>
-                        _ = A::pp_jump(f, &format!(".{prefix}{label}"))?,
+                        _ = A::pp_jump(f, &from_label(label))?,
                     LInstr::Move(dest, src) =>
                         _ = A::pp_mv(f, dest, src)?,
                     LInstr::Li(dest, src) =>
@@ -270,22 +313,7 @@ impl<Op: std::fmt::Display, Cond: std::fmt::Display> std::fmt::Display for LInst
 
 impl<A: Arch> std::fmt::Display for Ltl<A> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.pp(f, "label")
-        // write!(f, "stack: ")?;
-        // for (slot, size) in self.stack.iter() {
-        //     write!(f, " [{slot}; {size}]")?;
-        // }
-        // write!(f, "\n")?;
-
-        // for (i, block) in self.blocks.iter().enumerate() {
-        //     write!(f, "{i}:\n")?;
-
-        //     for instr in block.iter() {
-        //         write!(f, "\t{instr}\n")?;
-        //     }
-        // }
-
-        // Ok(())
+        self.pp(f)
     }
 }
 
@@ -342,7 +370,7 @@ impl<A: Arch> std::fmt::Display for LtlSection<A> {
             Self::Text(cfg) =>  write!(f, "{cfg}"),
             Self::Data(items) => {
                 for x in items.iter() {
-                    write!(f, "\n\t{x}")?;
+                    write!(f, "\n\t.word {x}")?;
                 }
 
                 write!(f, "\n")?;
@@ -355,7 +383,15 @@ impl<A: Arch> std::fmt::Display for LtlSection<A> {
 impl<A: Arch> std::fmt::Display for LtlSymbolTable<A> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         for (symbol, section) in self.symbols.iter() {
-            write!(f, ".globl {symbol}:\n{section}\n\n")?;
+            let is_text = matches!(section, LtlSection::Text(..));
+
+            if is_text {
+                write!(f, ".section .text\n")?;
+            } else {
+                write!(f, ".section .data\n")?;
+            }
+
+            write!(f, ".globl {symbol}\n{symbol}:\n{section}\n\n")?;
         }
 
         Ok(())

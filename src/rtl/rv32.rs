@@ -19,7 +19,7 @@ impl Arch for RvArch {
     }
 
     fn pp_from_addr(f: &mut Formatter<'_>, dest: Phys, src: &str) -> Result {
-        write!(f, "li {dest}, {src}")
+        write!(f, "la {dest}, {src}")
     }
 
     fn pp_from_stack(f: &mut Formatter<'_>, dest: Phys, offset: i32) -> Result {
@@ -81,13 +81,13 @@ impl Arch for RvArch {
     }
 
     fn pp_push(f: &mut Formatter<'_>, size: i32) -> Result {
-        write!(f, "addi sp, sp, {}\n", -(size+4))?;
+        write!(f, "addi sp, sp, {}\n", -size)?;
         write!(f, "\tsw ra, {}(sp)", size)
     }
 
     fn pp_pop(f: &mut Formatter<'_>, size: i32) -> Result {
         write!(f, "lw ra, {}(sp)\n", size)?;
-        write!(f, "\taddi sp, sp, {}", size+4)
+        write!(f, "\taddi sp, sp, {}", size)
     }
 
     fn ret_reg() -> Phys {
@@ -175,7 +175,7 @@ impl std::fmt::Display for RvBinop {
             Self::Sll => write!(f, "sll"),
             Self::Sra => write!(f, "sra"),
             Self::Srl => write!(f, "srl"),
-            Self::Slt => write!(f, "stl"),
+            Self::Slt => write!(f, "slt"),
             Self::Sltu => write!(f, "sltu"),
         }
     }
@@ -228,10 +228,10 @@ impl std::fmt::Display for RvOp {
         match self {
             Self::Binop(b) => write!(f, "{b}"),
             Self::Unop(u, x) => write!(f, "{u}({x})"),
-            Self::Seqz => write!(f, "sltiu(1)"),
-            Self::Snez => write!(f, "sltu x0,"),
-            Self::Not => write!(f, "xori(-1)"),
-            Self::Neg => write!(f, "sub x0,"),
+            Self::Seqz => write!(f, "seqz"),
+            Self::Snez => write!(f, "snez"),
+            Self::Not => write!(f, "not"),
+            Self::Neg => write!(f, "neg"),
         }
     }
 }

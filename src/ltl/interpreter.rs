@@ -124,7 +124,7 @@ impl<'a, A: Arch> Interpreter<'a, A> {
             table,
             memory,
             symbols,
-            sp: 0x100_0000,
+            sp: 0x100_FFFC,
             frame: HashMap::new(),
             symbol: "main".to_string(),
             stats: Statistics{
@@ -221,19 +221,15 @@ impl<'a, A: Arch> Interpreter<'a, A> {
     }
 
     pub fn interpret_function(&mut self) {
-        //print!("{}:", self.symbol);
-        //for i in 0..5 {
-        //    let phy = A::arg_regs()[i];
-        //    print!("  {phy} = {}", self.env[&phy]);
-        //}
-        //println!("");
-
         self.stats.calls += 1;
 
-        // Push variables into the stack
+        let (frame_size, layout) = self.cfg().layout();
+
         let sp = self.sp;
-        for (slot, size) in self.cfg().stack.iter() {
-            self.push(slot, *size);
+        self.sp -= frame_size;
+
+        for (slot, offset) in layout {
+            self.frame.insert(slot, self.sp + offset);
         }
 
         let mut label = 0;

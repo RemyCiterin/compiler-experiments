@@ -126,7 +126,7 @@ def main() {
   //let y = 42;
   //swap(&x, &y);
   //print_i32(x);
-  fibo_mem(buf, 100);
+  fibo_mem(buf, 30);
 
   print_i32(buf[20]);
 

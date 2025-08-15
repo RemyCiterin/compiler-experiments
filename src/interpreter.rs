@@ -234,8 +234,11 @@ impl<'a> Interpreter<'a> {
 
         // Push variables into the stack
         let sp = self.sp;
-        for (slot, size) in self.cfg().stack.iter() {
-            self.push(slot, *size);
+        for (slot, kind) in self.cfg().stack.iter() {
+            match kind {
+                SlotKind::Local(size) => self.push(slot, *size),
+                _ => panic!("only local slots are allowed until `Rtl` representation"),
+            }
         }
 
         for (var, _) in self.cfg().iter_vars() {
