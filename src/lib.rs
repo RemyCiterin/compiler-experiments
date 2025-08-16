@@ -25,3 +25,4 @@ pub mod rtl;
 pub mod instcombine;
 pub mod pattern;
 pub mod ltl;
+pub mod licm;

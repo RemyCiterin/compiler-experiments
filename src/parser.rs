@@ -8,18 +8,12 @@ peg::parser!(pub grammar customlang() for str {
         x:(@) _ "&&" _ y:@ {
             let begin = x.begin;
             let end = y.end;
-            let zero = RValue::constant(0, begin, end);
-            let lhs = RValue::binop(Binop::NotEqual, x, zero.clone(), begin, end);
-            let rhs = RValue::binop(Binop::NotEqual, y, zero, begin, end);
-            RValue::binop(Binop::And, lhs, rhs, begin, end)
+            RValue::and(x, y, begin, end)
         }
         x:(@) _ "||" _ y:@ {
             let begin = x.begin;
             let end = y.end;
-            let zero = RValue::constant(0, begin, end);
-            let lhs = RValue::binop(Binop::NotEqual, x, zero.clone(), begin, end);
-            let rhs = RValue::binop(Binop::NotEqual, y, zero, begin, end);
-            RValue::binop(Binop::Or, lhs, rhs, begin, end)
+            RValue::or(x, y, begin, end)
         }
         x:(@) _ "==" _ y:@ {
             let begin = x.begin;
@@ -160,6 +154,9 @@ peg::parser!(pub grammar customlang() for str {
             "if" _ e:rvalue() _ _ "{" _ s1:stmt_core() _ "}" _
             "else" _ "{" _ s2:stmt_core() _ "}" end:location()
             { Stmt::ite(e, s1, s2, begin, end) }
+        begin:location()
+            "if" _ e:rvalue() _ _ "{" _ s1:stmt_core() _ "}" _ end:location()
+            { Stmt::it(e, s1, begin, end) }
         begin:location() "return" _ e:rvalue() _ ";" end:location()
             { Stmt::_return_(e, begin, end) }
         begin:location() lvalue:lvalue() _ "=" _ e:rvalue() _ ";" end:location()

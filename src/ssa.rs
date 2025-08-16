@@ -667,6 +667,16 @@ pub struct SymbolTable<I: Instruction> {
     pub symbols: HashMap<String, Section<I>>,
 }
 
+impl<I: Instruction> SymbolTable<I> {
+    pub fn pp_text(&self) {
+        for (symbol, section) in self.symbols.iter() {
+            if matches!(section, Section::Text(..)) {
+                print!(".globl {symbol}:\n{section}\n\n");
+            }
+        }
+    }
+}
+
 impl std::fmt::Display for Word {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

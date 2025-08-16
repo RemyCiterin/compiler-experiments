@@ -55,6 +55,7 @@ impl InstCombine {
     pub fn new<I: Instruction>(cfg: &Cfg<I>) -> Self {
         let mut worklist = vec![];
 
+
         for block in cfg.preorder() {
             for i in 0..cfg[block].stmt.len() {
                 worklist.push((block,i));
@@ -132,6 +133,10 @@ pub fn combine_instructions(cfg: &mut Cfg<Instr>) {
     let mut combine = InstCombine::new(cfg);
 
     let op_rules = vec![
+        op_rule!(
+            ( Sll x 1 ), true,
+            dest => Instr::Binop(dest, crate::ast::Binop::Add, x.clone(), x)
+        ),
         op_rule!(
             ( Sub x x ), true,
             dest => Instr::Move(dest, Lit::Int(0))
@@ -263,12 +268,10 @@ pub fn combine_instructions(cfg: &mut Cfg<Instr>) {
         ),
     ];
 
+    // We don't have the trivial branch simplification here because we need to propagate the
+    // information to the non-taken Phi's instructions otherwise. This simplification is done
+    // in `copy_prop` instead.
     let cond_rules = vec![
-        cond_rule!(
-            ( int x ), true,
-            l1 l2 =>
-                if x != 0 {Instr::Jump(l1)} else {Instr::Jump(l2)}
-        ),
         cond_rule!(
             ( NotEqual x 0 ), true,
             l1 l2 => Instr::Branch(x, l1, l2)
@@ -410,10 +413,11 @@ pub fn combine_from_patterns<'a>(
 
     // Search for a rule for a branch
     if let Instr::Branch(x, l1, l2) = instr.clone() {
-        let Some(ins) = def_lit(&x) else { return; };
+        //let Some(ins) = def_lit(&x) else { return; };
 
         for rule in cond_rules.iter() {
-            let result = search_pattern(rule.pattern(), cfg, ins);
+            let result =
+                search_pattern_in_lit(rule.pattern(), cfg, x.clone());
             if let Some(occ) = result && rule.test(&occ) {
                 *instr = rule.transform(occ, l1, l2);
             }

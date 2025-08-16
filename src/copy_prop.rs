@@ -51,6 +51,10 @@ pub struct CopyProp {
     /// SSA graph to propagate information
     visited: HashSet<Label>,
 
+    /// The list of successors of each blocks, it is used to replace trivial branch instructions by
+    /// jumps
+    successors: SparseSecondaryMap<Label, HashSet<Label>>,
+
     /// Worklist of SSA nodes to propagate
     ssa_work_list: Vec<InstrId>,
 
@@ -69,8 +73,6 @@ impl CopyProp {
                 _ =>
                     _ = lattice.insert(var, Lattice::Top),
             }
-
-
         }
 
         Self {
@@ -78,6 +80,7 @@ impl CopyProp {
             visited: HashSet::new(),
             ssa_work_list: Vec::new(),
             cfg_work_list: vec![cfg.entry()],
+            successors: SparseSecondaryMap::new(),
             graph: cfg.ssa_graph(),
         }
     }
@@ -122,9 +125,9 @@ impl CopyProp {
             Instr::Move(v, l) =>
                 self.visit_move(v, l),
             Instr::Branch(cond, l1, l2) =>
-                self.visit_branch(cond, l1, l2),
+                self.visit_branch(id.0, cond, l1, l2),
             Instr::Jump(label) =>
-                self.visit_jump(label),
+                self.visit_jump(id.0, label),
             _ => {
                 if let Some(dest) = instr.destination() {
                     self.lattice[dest] = Lattice::Bot;
@@ -162,16 +165,22 @@ impl CopyProp {
     }
 
     /// Visit a jump instruction
-    pub fn visit_jump(&mut self, label: Label) {
+    pub fn visit_jump(&mut self, block: Label, label: Label) {
+        self.successors.insert(block, HashSet::new());
+        self.successors[block].insert(label);
         self.cfg_work_list.push(label);
     }
 
     /// Visit a branch instruction
-    pub fn visit_branch(&mut self, c: Lit, l1: Label, l2: Label) {
+    pub fn visit_branch(&mut self, block: Label, c: Lit, l1: Label, l2: Label) {
 
         macro_rules! push {
             ( $($e:expr),* ) =>
-                {{ $(self.cfg_work_list.push($e);)* }};
+                {{
+                     self.successors.insert(block, HashSet::new());
+                     $(self.successors[block].insert($e);)*
+                     $(self.cfg_work_list.push($e);)*
+                 }};
         }
 
         match c {
@@ -243,26 +252,31 @@ impl CopyProp {
                     }
                 }
 
-                if let Instr::Phi(_, vars) = &mut instr {
+                if let Instr::Phi(dest, vars) = &mut instr {
                     let mut i: usize = 0;
 
                     while i < vars.len() {
-                        if !self.visited.contains(&vars[i].1) {
+                        if !self.visited.contains(&vars[i].1)
+                            || !self.successors[vars[i].1].contains(&block) {
                             vars.remove(i);
                             continue;
                         }
 
                         i += 1;
                     }
+
+                    if vars.len() == 1 {
+                        instr = Instr::Move(*dest, vars[0].0.clone());
+                    }
                 }
 
                 if let Instr::Branch(_, l1, l2) = &instr
-                    && !self.visited.contains(l1) {
+                    && !self.successors[block].contains(l1) {
                     instr = Instr::Jump(*l2);
                 }
 
                 if let Instr::Branch(_, l1, l2) = &instr
-                    && !self.visited.contains(l2) {
+                    && !self.successors[block].contains(l2) {
                     instr = Instr::Jump(*l1);
                 }
 

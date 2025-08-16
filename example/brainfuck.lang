@@ -1,0 +1,92 @@
+
+var stack[100] = 0;
+var memory[100] = 0;
+
+var program = "
+    ++++++++++
+    [>+++++++>++++++++++>+++>+<<<<-]
+    >++.>+.+++++++..+++.>++.<<+++++++++++++++.>.+++.------.--------.>+.>.
+";
+
+var put_char_buf = "?";
+def print_char(x) {
+  put_char_buf[0] = x;
+  puts(put_char_buf);
+}
+
+def exit_loop(prog, pos) {
+  let count = 0;
+  let result = 0;
+
+  while 1 {
+    if prog[pos] == '[' {
+      count = count + 1;
+    }
+
+    if prog[pos] == ']' {
+      if count == 1 {
+        return pos + 1;
+      } else {
+        count = count - 1;
+      }
+    }
+
+    pos = pos + 1;
+  }
+}
+
+def execute(prog) {
+  let index = 0;
+  let pos = 0;
+  let top = 0;
+
+  while prog[pos] != 0 {
+    let char = prog[pos];
+
+    if char == '+' {
+      memory[index] = memory[index] + 1;
+    }
+
+    if char == '-' {
+      memory[index] = memory[index] - 1;
+    }
+
+    if char == '<' {
+      index = index - 1;
+    }
+
+    if char == '>' {
+      index = index + 1;
+    }
+
+    if char == '.' {
+      print_char(memory[index]);
+    }
+
+    if char == '[' {
+      if memory[index] == 0 {
+        pos = exit_loop(prog, pos);
+        continue;
+      }
+
+      stack[top] = pos;
+      top = top + 1;
+    }
+
+    if char == ']' {
+      top = top - 1;
+
+      if memory[index] != 0 {
+        pos = stack[top];
+        continue;
+      }
+    }
+
+    pos = pos + 1;
+  }
+}
+
+
+def main() {
+  execute(program);
+}

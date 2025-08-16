@@ -140,6 +140,40 @@ impl Builder {
                 self.stmt.push(Instr::Move(id, lit));
                 Ok(id)
             }
+            RValueCore::And{lhs, rhs} => {
+                let l1: Label = self.cfg.fresh_label();
+                let l2: Label = self.cfg.fresh_label();
+                let id = self.cfg.fresh_var();
+
+                let id1 = self.gen_rvalue(lhs)?;
+                self.stmt.push(Instr::Move(id, Lit::Var(id1)));
+                self.gen_branch(id1, l1, l2);
+
+                self.label = l1;
+                let id2 = self.gen_rvalue(rhs)?;
+                self.stmt.push(Instr::Move(id, Lit::Var(id2)));
+                self.gen_jump(l2);
+
+                self.label = l2;
+                Ok(id)
+            }
+            RValueCore::Or{lhs, rhs} => {
+                let l1: Label = self.cfg.fresh_label();
+                let l2: Label = self.cfg.fresh_label();
+                let id = self.cfg.fresh_var();
+
+                let id1 = self.gen_rvalue(lhs)?;
+                self.stmt.push(Instr::Move(id, Lit::Var(id1)));
+                self.gen_branch(id1, l1, l2);
+
+                self.label = l2;
+                let id2 = self.gen_rvalue(rhs)?;
+                self.stmt.push(Instr::Move(id, Lit::Var(id2)));
+                self.gen_jump(l1);
+
+                self.label = l1;
+                Ok(id)
+            }
         }
     }
 
@@ -176,6 +210,22 @@ impl Builder {
                 Ok(())
             }
             StmtCore::Nop{} => Ok(()),
+            StmtCore::It{cond, body} => {
+                let id = self.gen_rvalue(cond)?;
+                let l1 = self.cfg.fresh_label();
+                let exit = self.cfg.fresh_label();
+                self.gen_branch(id, l1, exit);
+
+
+                let env = self.env.clone();
+                self.label = l1;
+                self.gen_stmt(body)?;
+                self.gen_jump(exit);
+                self.label = exit;
+                self.env = env;
+
+                Ok(())
+            }
             StmtCore::Ite{cond, lhs, rhs} => {
                 let id = self.gen_rvalue(cond)?;
                 let l1 = self.cfg.fresh_label();

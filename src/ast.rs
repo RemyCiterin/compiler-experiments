@@ -201,6 +201,8 @@ ast!{
     enum RValueCore RValue {
         Constant constant(value: i32),
         Binop binop(binop: Binop, lhs: RValue, rhs: RValue),
+        And and(lhs: RValue, rhs: RValue),
+        Or or(lhs: RValue, rhs: RValue),
         Call call(name: String, args: Vec<RValue>),
         Unop unop(unop: Unop, arg: RValue),
         LValue lvalue(lvalue: LValue),
@@ -218,6 +220,7 @@ ast!{
         Assign assign(lvalue: LValue, rvalue: RValue),
         While _while_(cond: RValue, body: Stmt),
         Ite ite(cond: RValue, lhs: Stmt, rhs: Stmt),
+        It it(cond: RValue, body: Stmt),
         Return _return_(expr: RValue),
         Break _break_(),
         Continue _continue_()

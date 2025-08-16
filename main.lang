@@ -21,8 +21,6 @@ def mult(x, y) {
   while x && y {
     if y & 1 {
       acc = acc + x;
-    } else {
-      nop;
     }
 
     x = x << 1;
@@ -100,7 +98,6 @@ def partition(arr, low, high) {
     }
 
     if i < j { swap(&arr[i], &arr[j]); }
-    else { nop; }
   }
 
   swap(&arr[low], &arr[j]);
@@ -117,14 +114,17 @@ def quickSort(arr, low, high) {
         // half based on Partition Index
         quickSort(arr, low, pi - 1);
         quickSort(arr, pi + 1, high);
-    } else {nop;}
+    }
 }
 
 var stack[100] = 0;
 var memory[100] = 0;
 
-var program =
-  "++++++++++[>+++++++>++++++++++>+++>+<<<<-]>++.>+.+++++++..+++.>++.<<+++++++++++++++.>.+++.------.--------.>+.>.";
+var program = "
+    ++++++++++
+    [>+++++++>++++++++++>+++>+<<<<-]
+    >++.>+.+++++++..+++.>++.<<+++++++++++++++.>.+++.------.--------.>+.>.
+";
 
 var put_char_buf = "?";
 def print_char(x) {
@@ -134,11 +134,12 @@ def print_char(x) {
 
 def exit_loop(prog, pos) {
   let count = 0;
+  let result = 0;
 
   while 1 {
     if prog[pos] == '[' {
       count = count + 1;
-    } else {nop;}
+    }
 
     if prog[pos] == ']' {
       if count == 1 {
@@ -146,14 +147,13 @@ def exit_loop(prog, pos) {
       } else {
         count = count - 1;
       }
-    } else {nop;}
+    }
 
     pos = pos + 1;
   }
 }
 
 def execute(prog) {
-  puts(prog);
   let index = 0;
   let pos = 0;
   let top = 0;
@@ -161,37 +161,35 @@ def execute(prog) {
   while prog[pos] != 0 {
     let char = prog[pos];
 
-    //print_char(char);
-
     if char == '+' {
       memory[index] = memory[index] + 1;
-    } else {nop;}
+    }
 
     if char == '-' {
       memory[index] = memory[index] - 1;
-    } else {nop;}
+    }
 
     if char == '<' {
       index = index - 1;
-    } else {nop;}
+    }
 
     if char == '>' {
       index = index + 1;
-    } else {nop;}
+    }
 
     if char == '.' {
       print_char(memory[index]);
-    } else {nop;}
+    }
 
     if char == '[' {
       if memory[index] == 0 {
         pos = exit_loop(prog, pos);
         continue;
-      } else {nop;}
+      }
 
       stack[top] = pos;
       top = top + 1;
-    } else {nop;}
+    }
 
     if char == ']' {
       top = top - 1;
@@ -199,16 +197,24 @@ def execute(prog) {
       if memory[index] != 0 {
         pos = stack[top];
         continue;
-      } else {nop;}
-    } else {nop;}
+      }
+    }
 
     pos = pos + 1;
   }
 }
 
+def foo() {
+  execute(program);
+}
+
+def foo2() {
+  execute2(program);
+}
 
 def main() {
-  execute(program);
+  puts(program);
+  foo();
   //let x = 0;
   //let y = 42;
   //swap(&x, &y);

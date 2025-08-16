@@ -1,0 +1,11 @@
+def fibo(x) {
+  if x < 2 {
+    return x;
+  } else {
+    return fibo(x-1) + fibo(x-2);
+  }
+}
+
+def main() {
+  print_i32(fibo(20));
+}

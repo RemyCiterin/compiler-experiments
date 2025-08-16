@@ -38,6 +38,8 @@ pub fn optimize(table: &mut ssa::SymbolTable<ssa::Instr>) {
                 let mut copy = copy_prop::CopyProp::new(&cfg);
                 copy.run(cfg);
 
+                //licm::licm(cfg);
+
                 cfg.gc();
             }
             _ => {}
@@ -54,12 +56,11 @@ pub fn translate(table: ssa::SymbolTable<ssa::Instr>) -> ssa::SymbolTable<rtl::r
 
                 let mut cfg = rtl::rv32::translate(cfg);
 
-                if name == "execute" {
-                    println!("{cfg}\n");
-                    let mut gvn = rtl::gvn::ValueTable::new();
-                    gvn.run(&mut cfg);
-                    println!("\n{cfg}");
-                }
+                let mut gvn = rtl::gvn::ValueTable::new();
+                gvn.run(&mut cfg);
+
+                let mut dce = rtl::dce::Dce::new();
+                dce.run(&mut cfg);
 
                 let mut conv = out_of_ssa::Conventionalize::new(&cfg);
                 conv.run(&mut cfg);
@@ -114,7 +115,7 @@ fn main() {
     into_ssa(&mut table);
     optimize(&mut table);
 
-    //println!("{table}");
+    //table.pp_text();
 
     let mut interp = interpreter::Interpreter::new(&table);
     interp.interpret_function();
@@ -122,7 +123,7 @@ fn main() {
 
     let rtl_table = translate(table);
 
-    //println!("{}", rtl_table);
+    //rtl_table.pp_text();
 
     let ltl_table: ltl::LtlSymbolTable<rtl::rv32::RvArch>
         = ltl::LtlSymbolTable::new(rtl_table);

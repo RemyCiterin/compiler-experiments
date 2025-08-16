@@ -112,15 +112,14 @@ impl<Op: Operation> ValueTable<Op> {
     pub fn insert_instr<Cond: Condition>(&mut self, instr: RInstr<Op, Cond>) -> RInstr<Op, Cond> {
         match &instr {
             RInstr::Operation(dest, op, args) => {
+                if op.may_have_side_effect() { return instr; }
+
                 let vals = args.iter().map(|v| self.insert_var(*v)).collect();
                 let expr = Expr::Operation(op.clone(), vals);
 
-                if !op.may_have_side_effect() {
-                    if let Some(value) = self.exprs.get(&expr) {
-
-                        self.vars.insert(*dest, *value);
-                        return RInstr::Move(*dest, Lit::Var(self.values[*value].clone()));
-                    }
+                if let Some(value) = self.exprs.get(&expr) {
+                    self.vars.insert(*dest, *value);
+                    return RInstr::Move(*dest, Lit::Var(self.values[*value].clone()));
                 }
 
                 let v = self.insert(expr, *dest);
