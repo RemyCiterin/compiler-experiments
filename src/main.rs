@@ -120,7 +120,7 @@ fn main() {
 
     let rtl_table = translate(table);
 
-    //rtl_table.pp_text();
+    rtl_table.pp_text();
 
     let ltl_table: ltl::LtlSymbolTable<rtl::rv32::RvArch>
         = ltl::LtlSymbolTable::new(rtl_table);

@@ -82,11 +82,11 @@ impl Arch for RvArch {
 
     fn pp_push(f: &mut Formatter<'_>, size: i32) -> Result {
         write!(f, "addi sp, sp, {}\n", -size)?;
-        write!(f, "\tsw ra, {}(sp)", size)
+        write!(f, "\tsw ra, {}(sp)", (size-4))
     }
 
     fn pp_pop(f: &mut Formatter<'_>, size: i32) -> Result {
-        write!(f, "lw ra, {}(sp)\n", size)?;
+        write!(f, "lw ra, {}(sp)\n", (size-4))?;
         write!(f, "\taddi sp, sp, {}", size)
     }
 

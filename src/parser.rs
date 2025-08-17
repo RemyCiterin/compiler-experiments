@@ -1,5 +1,10 @@
 use crate::ast::*;
 
+pub enum Binding{
+    Array(String, usize),
+    Var(String),
+}
+
 peg::parser!(pub grammar customlang() for str {
     rule location() -> peg::str::LineCol =
         #{|input, pos| peg::RuleResult::Matched(pos, peg::Parse::position_repr(input, pos))}
@@ -141,11 +146,16 @@ peg::parser!(pub grammar customlang() for str {
                 end
             )
         }
-        begin:location() "let" _ vars:(_variable_() ** ",") _ ";" end:location() {
+        begin:location() "let" _ vars:(binding() ** ",") _ ";" end:location() {
             let mut decls = Stmt::nop(begin, end);
 
-            for v in vars {
-                decls = Stmt::seq(decls, Stmt::decl(v, begin, end), begin, end);
+            for b in vars {
+                match b {
+                    Binding::Array(name, size) => decls =
+                        Stmt::seq(decls, Stmt::decl_array(name, size, begin, end), begin, end),
+                    Binding::Var(name) => decls =
+                        Stmt::seq(decls, Stmt::decl(name, begin, end), begin, end),
+                }
             }
 
             decls
@@ -225,6 +235,13 @@ peg::parser!(pub grammar customlang() for str {
 
     rule _variable_() -> String
         = _ s:variable() _ { s }
+
+    rule binding() -> Binding = precedence!{
+        _ v:variable() _ "[" _ n:number() _ "]" _
+            { Binding::Array(v, n as usize * 4) }
+        _ v:variable() _
+            { Binding::Var(v) }
+    }
 
     rule string() -> String =
         "\"" s:$([^'"']*) "\"" { parse_string(s) }

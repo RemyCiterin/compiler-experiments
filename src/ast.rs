@@ -214,6 +214,7 @@ ast!{
 ast!{
     enum StmtCore Stmt {
         Decl decl(name: String),
+        DeclArray decl_array(name: String, size: usize),
         Nop nop(),
         Expr expr(rvalue: RValue),
         Seq seq(lhs: Stmt, rhs: Stmt),

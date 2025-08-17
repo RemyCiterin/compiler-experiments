@@ -175,11 +175,10 @@ impl<A: Arch> Ltl<A> {
         for (_, kind) in self.stack.iter() {
             match kind {
                 SlotKind::Local(size) => {
-                    //slots.insert(slot, stack_size);
                     stack_size += *size as i32;
                 },
                 SlotKind::Outgoing(num) =>
-                    num_outgoing = usize::max(*num, num_outgoing+1),
+                    num_outgoing = usize::max(*num + 1, num_outgoing),
                 _ => {}
             }
         }
@@ -191,17 +190,17 @@ impl<A: Arch> Ltl<A> {
             stack_size += 16 - (stack_size % 16);
         }
 
-        let mut offset: i32 = 0;
+        let mut offset: i32 = num_outgoing as i32 * 4;
         for (slot, kind) in self.stack.iter() {
             match kind {
                 SlotKind::Local(size) => {
-                    slots.insert(slot, stack_size - offset - 4);
+                    slots.insert(slot, offset);
                     offset += *size as i32;
                 }
                 SlotKind::Outgoing(num) =>
-                    _ = slots.insert(slot, 4 * (*num+1) as i32),
+                    _ = slots.insert(slot, 4 * *num as i32),
                 SlotKind::Incoming(num) =>
-                    _ = slots.insert(slot, stack_size + 4 * (*num+1) as i32),
+                    _ = slots.insert(slot, stack_size + 4 * *num as i32),
             }
         }
 
@@ -247,7 +246,7 @@ impl<A: Arch> Ltl<A> {
                     LInstr::Li(dest, src) =>
                         _ = A::pp_from_int(f, dest, src)?,
                     LInstr::Ls(dest, src) =>
-                        _ = A::pp_from_int(f, dest, slots[src])?,
+                        _ = A::pp_from_stack(f, dest, slots[src])?,
                     LInstr::La(dest, src) =>
                         _ = A::pp_from_addr(f, dest, &src)?,
                     LInstr::Call(name) =>

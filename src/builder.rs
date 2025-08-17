@@ -201,6 +201,15 @@ impl Builder {
 
                 Ok(())
             }
+            StmtCore::DeclArray{name: s, size} => {
+                let slot1 = self.cfg.fresh_stack_var(size);
+                let slot2 = self.cfg.fresh_stack_var(4);
+                self.stmt.push(Instr::Store{volatile: false, addr: Lit::Stack(slot2), val: Lit::Stack(slot1)});
+
+                self.env.insert(s.clone(), Lit::Stack(slot2));
+
+                Ok(())
+            }
             StmtCore::Expr{rvalue} => {
                 self.gen_rvalue(rvalue)?;
                 Ok(())

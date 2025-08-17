@@ -214,7 +214,6 @@ foo2() {
 
 main() {
   puts(program);
-  foo();
   //let x = 0;
   //let y = 42;
   //swap(&x, &y);
@@ -229,6 +228,18 @@ main() {
   print_i32(tail_factorial(12));
   print_i32(loop_factorial(12));
 
+  let buffer[42];
+
+  let x = 0;
+  while hello_world[x] != 0 {
+    buffer[x] = hello_world[x];
+    x = x + 1;
+  }
+
+  buffer[x] = 42;
+  buffer[x+1] = 0;
+
+  puts(buffer);
   puts(hello_world);
 
   quickSort(hello_world, 0, 10);
