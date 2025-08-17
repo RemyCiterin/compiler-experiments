@@ -33,12 +33,12 @@ pub fn optimize(table: &mut ssa::SymbolTable<ssa::Instr>) {
                 let mut gvn = gvn::ValueTable::new();
                 gvn.run(cfg);
 
-                tail_call_elim::tail_call_elim(name, cfg);
-
                 let mut copy = copy_prop::CopyProp::new(&cfg);
                 copy.run(cfg);
 
-                //licm::licm(cfg);
+                tail_call_elim::tail_call_elim(name, cfg);
+
+                licm::licm(cfg);
 
                 cfg.gc();
             }
@@ -61,9 +61,6 @@ pub fn translate(table: ssa::SymbolTable<ssa::Instr>) -> ssa::SymbolTable<rtl::r
 
                 let mut dce = rtl::dce::Dce::new();
                 dce.run(&mut cfg);
-
-                let mut conv = out_of_ssa::Conventionalize::new(&cfg);
-                conv.run(&mut cfg);
 
                 out_of_ssa::out_of_ssa(&mut cfg);
 
@@ -128,11 +125,16 @@ fn main() {
     let ltl_table: ltl::LtlSymbolTable<rtl::rv32::RvArch>
         = ltl::LtlSymbolTable::new(rtl_table);
 
+    //println!("{ltl_table}");
+
     let mut interp =
         ltl::interpreter::Interpreter::new(&ltl_table);
     interp.interpret_function();
 
-    println!("{}", interp.stats);
+
+    for (name, stats) in interp.stats.iter() {
+        println!("function {name}: {stats}\n");
+    }
 
     let file_name = std::env::args().nth(2).unwrap();
     let mut file = std::fs::File::create(file_name).unwrap();

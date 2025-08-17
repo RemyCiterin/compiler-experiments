@@ -222,6 +222,7 @@ ast!{
         Ite ite(cond: RValue, lhs: Stmt, rhs: Stmt),
         It it(cond: RValue, body: Stmt),
         Return _return_(expr: RValue),
+        Scope scope(body: Stmt),
         Break _break_(),
         Continue _continue_()
     }

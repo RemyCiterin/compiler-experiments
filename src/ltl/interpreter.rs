@@ -14,9 +14,6 @@ pub struct Statistics {
     /// Number of stores
     pub stores: usize,
 
-    /// Number of shitf operations
-    pub shifts: usize,
-
     /// Number of call operations
     pub calls: usize,
 
@@ -27,19 +24,31 @@ pub struct Statistics {
     pub non_trivial: usize,
 }
 
+impl Statistics {
+    pub fn new() -> Self {
+        Statistics{
+            instret: 0,
+            loads: 0,
+            stores: 0,
+            branches: 0,
+            calls: 0,
+            non_trivial: 0,
+        }
+    }
+}
+
 impl std::fmt::Display for Statistics {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
 "Statistics:
     instret: {}
-    non trivial ops: {} (including {} bit shifts)
+    non trivial ops: {}
     memop: {} (including {} loads and {} stores)
     conditional jump: {}
     function calls: {}",
             self.instret,
             self.non_trivial,
-            self.shifts,
             self.loads + self.stores,
             self.loads,
             self.stores,
@@ -71,8 +80,7 @@ pub struct Interpreter<'a, A: Arch>{
     /// Base of the current stack frame
     frame: HashMap<Slot, i32>,
 
-    /// Execution statistics
-    pub stats: Statistics,
+    pub stats: HashMap<String, Statistics>,
 }
 
 impl<'a, A: Arch> Interpreter<'a, A> {
@@ -119,6 +127,14 @@ impl<'a, A: Arch> Interpreter<'a, A> {
             env.insert(phy, 0);
         }
 
+        let mut stats: HashMap<String, Statistics> = HashMap::new();
+
+        for (name, section) in table.symbols.iter() {
+            if matches!(section, LtlSection::Text(..)) {
+                stats.insert(name.clone(), Statistics::new());
+            }
+        }
+
         Self {
             env,
             table,
@@ -127,15 +143,7 @@ impl<'a, A: Arch> Interpreter<'a, A> {
             sp: 0x100_FFFC,
             frame: HashMap::new(),
             symbol: "main".to_string(),
-            stats: Statistics{
-                instret: 0,
-                loads: 0,
-                stores: 0,
-                branches: 0,
-                calls: 0,
-                non_trivial: 0,
-                shifts: 0,
-            }
+            stats,
         }
     }
 
@@ -220,8 +228,16 @@ impl<'a, A: Arch> Interpreter<'a, A> {
         self.sp += size as i32;
     }
 
+    pub fn stats_mut(&mut self) -> &mut Statistics {
+        self.stats.get_mut(&self.symbol).unwrap()
+    }
+
+    pub fn stats(&self) -> &Statistics {
+        self.stats.get(&self.symbol).unwrap()
+    }
+
     pub fn interpret_function(&mut self) {
-        self.stats.calls += 1;
+        self.stats_mut().calls += 1;
 
         let (frame_size, layout) = self.cfg().layout();
 
@@ -236,13 +252,13 @@ impl<'a, A: Arch> Interpreter<'a, A> {
 
         'main_loop: loop {
             for instr in self.cfg().blocks[label].iter() {
-                self.stats.instret += 1;
+                self.stats_mut().instret += 1;
                 //println!("{instr}");
                 match instr {
                     LInstr::Operation(dest, op, args) => {
                         let args = args.iter().map(|p|self.env[p]).collect();
                         self.operation(*dest, op.clone(), args);
-                        self.stats.non_trivial += 1;
+                        self.stats_mut().non_trivial += 1;
                     }
                     LInstr::Move(dest, src) => {
                         self.write_var(*dest, self.env[src]);
@@ -257,7 +273,7 @@ impl<'a, A: Arch> Interpreter<'a, A> {
                         self.write_var(*dest, self.symbols[src]);
                     }
                     LInstr::Call(name) => {
-                        self.stats.non_trivial += 1;
+                        self.stats_mut().non_trivial += 1;
                         self.call(name.clone());
                     }
                     LInstr::Return => {
@@ -277,30 +293,30 @@ impl<'a, A: Arch> Interpreter<'a, A> {
                             label = *l;
                             continue 'main_loop;
                         }
-                        self.stats.non_trivial += 1;
-                        self.stats.branches += 1;
+                        self.stats_mut().non_trivial += 1;
+                        self.stats_mut().branches += 1;
                     }
                     LInstr::Load{dest, addr, ..} => {
                         let val = self.load(self.env[addr]);
                         self.write_var(*dest, val);
-                        self.stats.non_trivial += 1;
-                        self.stats.loads += 1;
+                        self.stats_mut().non_trivial += 1;
+                        self.stats_mut().loads += 1;
                     }
                     LInstr::Store{val, addr, ..} => {
                         self.store(self.env[addr], self.env[val]);
-                        self.stats.non_trivial += 1;
-                        self.stats.stores += 1;
+                        self.stats_mut().non_trivial += 1;
+                        self.stats_mut().stores += 1;
                     }
                     LInstr::LoadLocal{dest, addr, ..} => {
                         let val = self.load(self.frame[addr]);
                         self.write_var(*dest, val);
-                        self.stats.non_trivial += 1;
-                        self.stats.loads += 1;
+                        self.stats_mut().non_trivial += 1;
+                        self.stats_mut().loads += 1;
                     }
                     LInstr::StoreLocal{val, addr, ..} => {
                         self.store(self.frame[addr], self.env[val]);
-                        self.stats.non_trivial += 1;
-                        self.stats.stores += 1;
+                        self.stats_mut().non_trivial += 1;
+                        self.stats_mut().stores += 1;
                     }
                 }
             }

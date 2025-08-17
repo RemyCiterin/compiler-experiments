@@ -75,7 +75,6 @@ impl LoopFinder {
 
 pub struct LoopSimplifier {
     cycle: HashSet<Label>,
-    exit: HashSet<Label>,
     header: Label,
 }
 
@@ -85,7 +84,6 @@ impl LoopSimplifier {
         let cycle = finder.run(cfg, dom);
 
         Self {
-            exit: finder.exit,
             cycle,
             header
         }
@@ -95,37 +93,16 @@ impl LoopSimplifier {
         // A variable is defined in a loop if it is a destination of one of it's instruction
         let mut defined: HashSet<Var> = HashSet::new();
 
-        // A variable is used in a loop if it is used by one of it's instructions, or one of
-        // the Phi instructions of it's exits
-        let mut used: HashSet<Var> = HashSet::new();
-
         for &l in self.cycle.iter() {
             for instr in cfg[l].stmt.iter() {
                 if let Some(dest) = instr.destination() {
                     defined.insert(dest);
                 }
-
-                for src in instr.operands() {
-                    used.insert(src);
-                }
-            }
-        }
-
-        for &l in self.exit.iter() {
-            for instr in cfg[l].stmt.iter() {
-                if let Instr::Phi(_, args) = instr {
-                    for (lit, _) in args.iter() {
-                        if let Lit::Var(var) = lit {
-                            used.insert(*var);
-                        }
-                    }
-                }
             }
         }
 
         let mut progress: bool = false;
-        let mut moved_before: Vec<Instr> = vec![];
-        let mut moved_after: Vec<Instr> = vec![];
+        let mut moved: Vec<Instr> = vec![];
 
         for &block in self.cycle.iter() {
             let mut stmt: Vec<Instr> = vec![];
@@ -133,22 +110,14 @@ impl LoopSimplifier {
             for instr in cfg[block].stmt.iter().cloned() {
                 // Phi(...) is the only instruction that depends of variables
                 // undefined at the idom of the block, so we don't add them
-                let can_move_before =
+                let can_move =
                     instr.operands().into_iter().all(|v| !defined.contains(&v))
                     && !matches!(instr, Instr::Phi(..))
                     && !instr.may_have_side_effect();
 
-                let can_move_after =
-                    instr.destination().into_iter().all(|v| !used.contains(&v))
-                    && !matches!(instr, Instr::Phi(..))
-                    && !instr.may_have_side_effect();
-
-                if can_move_after {
+                if can_move {
                     progress = true;
-                    moved_after.push(instr);
-                } else if can_move_before {
-                    progress = true;
-                    moved_before.push(instr);
+                    moved.push(instr);
                 } else {
                     stmt.push(instr);
                 }
@@ -158,38 +127,18 @@ impl LoopSimplifier {
             cfg.set_block_stmt(block, stmt);
         }
 
-        if moved_after.len() > 0 {
-            for &block in self.exit.iter() {
-                let mut stmt: Vec<Instr> = vec![];
-                let mut moved: bool = false;
+        let block = dom.idom(self.header);
+        let mut stmt: Vec<Instr> = vec![];
 
-                for instr in cfg[block].stmt.iter().cloned() {
-                    if !moved && !matches!(instr, Instr::Phi(..)) {
-                        stmt.extend(moved_after.iter().cloned());
-                        moved = true;
-                    }
-
-                    stmt.push(instr);
-                }
-
-                cfg.set_block_stmt(block, stmt);
-            }
-        }
-
-        if moved_before.len() > 0 {
-            let block = dom.idom(self.header);
-            let mut stmt: Vec<Instr> = vec![];
-
-            for instr in cfg[block].stmt.iter().cloned() {
-                if instr.exit_block() {
-                    stmt.extend(moved_before.iter().cloned());
-                }
-
-                stmt.push(instr);
+        for instr in cfg[block].stmt.iter().cloned() {
+            if instr.exit_block() {
+                stmt.extend(moved.iter().cloned());
             }
 
-            cfg.set_block_stmt(block, stmt);
+            stmt.push(instr);
         }
+
+        cfg.set_block_stmt(block, stmt);
 
         progress
     }

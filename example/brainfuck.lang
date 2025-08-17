@@ -9,12 +9,12 @@ var program = "
 ";
 
 var put_char_buf = "?";
-def print_char(x) {
+print_char(x) {
   put_char_buf[0] = x;
   puts(put_char_buf);
 }
 
-def exit_loop(prog, pos) {
+exit_loop(prog, pos) {
   let count = 0;
   let result = 0;
 
@@ -35,7 +35,7 @@ def exit_loop(prog, pos) {
   }
 }
 
-def execute(prog) {
+execute(prog) {
   let index = 0;
   let pos = 0;
   let top = 0;
@@ -87,6 +87,6 @@ def execute(prog) {
 }
 
 
-def main() {
+main() {
   execute(program);
 }

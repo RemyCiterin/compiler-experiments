@@ -6,7 +6,10 @@ example/%.s: example/%.lang
 
 .PHONY: clean
 clean:
-	rm ./example/*.s
+	@rm -f ./example/*.s
 
 .PHONY: test
 test: example/*.s
+
+.PHONY: all
+all: example/brainfuck.s example/fibo.s example/mandelbrot.s example/eratosthene.s

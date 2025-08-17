@@ -37,11 +37,14 @@ impl Simplifier {
 
             for instr in stmt.iter_mut() {
                 // Look if we can keep this phi expression if not already removed
-                if let Instr::Phi(x, args) = instr && self.keep_var(*x) {
+                if let Instr::Phi(x, args) = instr
+                    && self.keep_var(*x) {
+
                     let args: std::collections::BTreeSet<Lit> =
                         args.iter()
                         .map(|(v,_)| self.find(v.clone()))
-                        .filter(|v| v != &Lit::Var(*x))
+                        .filter(|v|
+                            v != &Lit::Var(*x) && v != &Lit::Undef)
                         .collect();
 
                     // If only one literal (except `x`) is used in the phi expression,

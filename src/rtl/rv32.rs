@@ -322,6 +322,30 @@ pub fn translate_operation
             select dest => vec![RvInstr::Operation(dest, RvOp::Unop(RvUnop::Add, y), vec![x])]
         ),
         translate_operation_rule!(
+            ( And x (int y) ), check_riscv_immediate(y),
+            select dest => vec![RvInstr::Operation(dest, RvOp::Unop(RvUnop::And, y), vec![x])]
+        ),
+        translate_operation_rule!(
+            ( And (int y) x ), check_riscv_immediate(y),
+            select dest => vec![RvInstr::Operation(dest, RvOp::Unop(RvUnop::And, y), vec![x])]
+        ),
+        translate_operation_rule!(
+            ( Or x (int y) ), check_riscv_immediate(y),
+            select dest => vec![RvInstr::Operation(dest, RvOp::Unop(RvUnop::Or, y), vec![x])]
+        ),
+        translate_operation_rule!(
+            ( Or (int y) x ), check_riscv_immediate(y),
+            select dest => vec![RvInstr::Operation(dest, RvOp::Unop(RvUnop::Or, y), vec![x])]
+        ),
+        translate_operation_rule!(
+            ( Xor x (int y) ), check_riscv_immediate(y),
+            select dest => vec![RvInstr::Operation(dest, RvOp::Unop(RvUnop::Xor, y), vec![x])]
+        ),
+        translate_operation_rule!(
+            ( Xor (int y) x ), check_riscv_immediate(y),
+            select dest => vec![RvInstr::Operation(dest, RvOp::Unop(RvUnop::Xor, y), vec![x])]
+        ),
+        translate_operation_rule!(
             ( Sub x (int y) ), check_riscv_immediate(y.wrapping_neg()),
             select dest => vec![
                 RvInstr::Operation(dest, RvOp::Unop(RvUnop::Add, y.wrapping_neg()), vec![x])

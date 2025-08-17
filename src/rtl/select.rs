@@ -200,21 +200,21 @@ impl<Op: Operation, Cond: Condition> Selection<Op, Cond> {
                     .map(|(v,l)| (self.eval_lit(v.clone()), *l)).collect();
                 self.stmt.push(RInstr::Phi(*dest, args));
             }
-            Instr::Load{dest, addr: Lit::Stack(slot), ..} => {
+            Instr::Load{dest, addr: Lit::Stack(slot), volatile: false} => {
                 self.stmt.push(RInstr::LoadLocal{dest: *dest, addr: *slot});
             }
-            Instr::Store{val, addr: Lit::Stack(slot), ..} => {
+            Instr::Store{val, addr: Lit::Stack(slot), volatile: false} => {
                 let val = self.eval_lit(val.clone());
                 self.stmt.push(RInstr::StoreLocal{val, addr: *slot});
             }
-            Instr::Load{dest, addr, ..} => {
+            Instr::Load{dest, addr, volatile} => {
                 let addr = self.eval_lit(addr.clone());
-                self.stmt.push(RInstr::Load{dest: *dest, addr});
+                self.stmt.push(RInstr::Load{dest: *dest, addr, volatile: *volatile});
             }
-            Instr::Store{val, addr, ..} => {
+            Instr::Store{val, addr, volatile} => {
                 let val = self.eval_lit(val.clone());
                 let addr = self.eval_lit(addr.clone());
-                self.stmt.push(RInstr::Store{val, addr});
+                self.stmt.push(RInstr::Store{val, addr, volatile: *volatile});
             }
         }
     }

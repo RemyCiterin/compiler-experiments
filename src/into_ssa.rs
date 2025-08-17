@@ -4,6 +4,7 @@
 use crate::ssa::*;
 use crate::dominance::*;
 use std::collections::HashMap;
+use crate::persistent_hash_map::PHashMap;
 use crate::liveness::*;
 use slotmap::*;
 
@@ -84,14 +85,15 @@ pub fn into_ssa(cfg: &mut Cfg<Instr>) {
 
 pub struct IntoSsaTransform {
     phis: SecondaryMap<Label, SparseSecondaryMap<Var, Instr>>,
-    env: SecondaryMap<Var, Var>,
+    //env: SecondaryMap<Var, Var>,
+    env: PHashMap<Var, Var>,
     dom: Dominance,
 }
 
 impl IntoSsaTransform {
     pub fn new(cfg: &Cfg<Instr>) -> Self {
         let mut phis = SecondaryMap::new();
-        let mut env = SecondaryMap::new();
+        let mut env = PHashMap::new();
         let mut dom = Dominance::new(cfg);
         dom.run(cfg);
 
@@ -112,6 +114,10 @@ impl IntoSsaTransform {
         let mut phis =
             std::mem::take(&mut self.phis);
 
+        // Allow to not insert phi instructions for dead variables
+        let mut liveness = Liveness::new(cfg);
+        liveness.run(cfg);
+
         let mut queue: SecondaryMap<Var, Vec<Label>> = SecondaryMap::new();
         for (var, _) in cfg.iter_vars() {
             queue.insert(var, vec![]);
@@ -128,7 +134,8 @@ impl IntoSsaTransform {
         for (var, dirty) in queue.iter_mut() {
             while let Some(block) = dirty.pop() {
                 for &succ in self.dom.frontier(block) {
-                    if !phis[succ].contains_key(var) {
+                    // We only insert the Phi instruction if the variable is still alive
+                    if !phis[succ].contains_key(var) && liveness[succ].inputs.contains(&var) {
                         let phi_args =
                             cfg.preds(succ)
                             .iter()
@@ -144,23 +151,13 @@ impl IntoSsaTransform {
     }
 
     pub fn renaming(&mut self, cfg: &mut Cfg<Instr>, block: Label) {
-        let mut env = self.env.clone();
+        self.env.push();
 
-        let mut useless_phi: Vec<Var> = vec![];
-        for (var, phi) in self.phis[block].iter_mut() {
+        for (_, phi) in self.phis[block].iter_mut() {
             let dest = phi.destination_mut().unwrap();
-
-            if env.contains_key(*dest) {
-                let new_dest = cfg.fresh_var();
-                env.insert(*dest, new_dest);
-                *dest = new_dest;
-            } else {
-                useless_phi.push(var);
-            }
-        }
-
-        for var in useless_phi {
-            self.phis[block].remove(var);
+            let new_dest = cfg.fresh_var();
+            self.env.insert(*dest, new_dest);
+            *dest = new_dest;
         }
 
         let mut stmt = cfg[block].stmt.clone();
@@ -169,12 +166,12 @@ impl IntoSsaTransform {
             for src in instr.operands_mut() {
                 // `src` must be a valid entry in `env`, otherwise the variable `src` doesn't
                 // respect it's `use-after-def` relation
-                *src = env[*src];
+                *src = self.env[src];
             }
 
             if let Some(dest) = instr.destination_mut() {
                 let new_dest = cfg.fresh_var();
-                env.insert(*dest, new_dest);
+                self.env.insert(*dest, new_dest);
                 *dest = new_dest;
             }
         }
@@ -182,29 +179,27 @@ impl IntoSsaTransform {
         cfg.set_block_stmt(block, stmt);
 
         for succ in cfg[block].succs() {
-            for (_, phi) in self.phis[succ].iter_mut() {
+            for (var, phi) in self.phis[succ].iter_mut() {
                 if let Instr::Phi(_, vars) = phi {
                     for (src, label) in vars.iter_mut() {
-                        // If env doesn't contains src, then this phi instruction will be deleted
-                        // later cause all it's variable is not defined at idom(succ) (otherwise it
-                        // must be definde at all it's predecessors)
-                        if *label == block && env.contains_key(src.as_var().unwrap()) {
-                            *src = Lit::Var(env[src.as_var().unwrap()]);
+                        if *label == block {
+                            if self.env.contains_key(&var) {
+                                *src = Lit::Var(self.env[&var]);
+                            } else {
+                                *src = Lit::Undef;
+                            }
                         }
                     }
                 }
             }
         }
 
-        let env_save = std::mem::replace(&mut self.env, env);
-
         let blocks: Vec<Label> = self.dom.childrens(block).iter().cloned().collect();
-
         for b in blocks {
             self.renaming(cfg, b);
         }
 
-        self.env = env_save;
+        self.env.pop();
     }
 
     pub fn run(&mut self, cfg: &mut Cfg<Instr>) {

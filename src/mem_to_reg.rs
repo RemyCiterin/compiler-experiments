@@ -3,6 +3,7 @@
 //! registers.
 
 use std::collections::{HashSet, HashMap};
+use crate::persistent_hash_map::PHashMap;
 
 use slotmap::*;
 use crate::dominance::*;
@@ -17,7 +18,7 @@ pub struct MemToReg {
 
     /// Current environment of variables in removed, as a mapping from stack slots to fresh
     /// variables
-    env: HashMap<Slot, Var>,
+    env: PHashMap<Slot, Var>,
 
     /// Dominance tree/dominance frontier
     dom: Dominance,
@@ -34,7 +35,7 @@ impl MemToReg {
         let mut dom = Dominance::new(cfg);
         dom.run(cfg);
 
-        let env = HashMap::new();
+        let env = PHashMap::new();
         let mut phis = SecondaryMap::new();
 
         for (b, _) in cfg.iter_blocks() {
@@ -113,19 +114,10 @@ impl MemToReg {
     }
 
     pub fn renaming(&mut self, cfg: &mut Cfg<Instr>, block: Label) {
-        let mut env = self.env.clone();
+        self.env.push();
 
-        let mut useless_phi: Vec<Slot> = vec![];
         for (var, (dest, _)) in self.phis[block].iter_mut() {
-            if env.contains_key(var) {
-                env.insert(*var, *dest);
-            } else {
-                useless_phi.push(*var);
-            }
-        }
-
-        for var in useless_phi {
-            self.phis[block].remove(&var);
+            self.env.insert(*var, *dest);
         }
 
         let mut stmt = cfg[block].stmt.clone();
@@ -135,13 +127,13 @@ impl MemToReg {
         for instr in stmt.iter_mut() {
             if let Instr::Load{addr: Lit::Stack(s), dest, ..} = instr
                 && self.removed.contains(s) {
-                *instr = Instr::Move(*dest, Lit::Var(env[s]));
+                *instr = Instr::Move(*dest, Lit::Var(self.env[s]));
             }
 
             if let Instr::Store{addr: Lit::Stack(slot), val, ..} = instr
                 && self.removed.contains(slot) {
                 let new_dest = cfg.fresh_var();
-                env.insert(*slot, new_dest);
+                self.env.insert(*slot, new_dest);
                 *instr = Instr::Move(new_dest, val.clone());
             }
         }
@@ -155,16 +147,18 @@ impl MemToReg {
                     // If env doesn't contains src, then this phi instruction will be deleted
                     // later cause all it's variable is not defined at idom(succ) (otherwise it
                     // must be definde at all it's predecessors)
-                    if let Lit::Stack(slot) = src {
-                        if *label == block && env.contains_key(slot) {
-                            *src = Lit::Var(env[slot]);
+                    if *label == block {
+                        if let Lit::Stack(slot) = src {
+                            if self.env.contains_key(slot) {
+                                *src = Lit::Var(self.env[slot]);
+                            } else {
+                                *src = Lit::Undef;
+                            }
                         }
                     }
                 }
             }
         }
-
-        let env_save = std::mem::replace(&mut self.env, env);
 
         // Recursive call on the dominator tree
         let blocks: Vec<Label> = self.dom.childrens(block).iter().cloned().collect();
@@ -173,7 +167,7 @@ impl MemToReg {
             self.renaming(cfg, b);
         }
 
-        self.env = env_save;
+        self.env.pop();
     }
 
     pub fn run(&mut self, cfg: &mut Cfg<Instr>) {

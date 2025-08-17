@@ -132,16 +132,17 @@ impl<A: Arch> Ltl<A> {
                     RInstr::Move(dst, Lit::Stack(src)) => {
                         stmt.push(LInstr::Ls(phys(dst), src));
                     }
+                    RInstr::Move(_, Lit::Undef) => {}
                     RInstr::LoadLocal{addr, dest} => {
                         stmt.push(LInstr::LoadLocal{addr, dest: phys(dest)});
                     }
-                    RInstr::Load{addr, dest} => {
+                    RInstr::Load{addr, dest, ..} => {
                         stmt.push(LInstr::Load{addr: phys(addr), dest: phys(dest)});
                     }
                     RInstr::StoreLocal{addr, val} => {
                         stmt.push(LInstr::StoreLocal{addr, val: phys(val)});
                     }
-                    RInstr::Store{addr, val} => {
+                    RInstr::Store{addr, val, ..} => {
                         stmt.push(LInstr::Store{addr: phys(addr), val: phys(val)});
                     }
                     RInstr::Call(_, name, _) => {

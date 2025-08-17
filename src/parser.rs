@@ -141,6 +141,15 @@ peg::parser!(pub grammar customlang() for str {
                 end
             )
         }
+        begin:location() "let" _ vars:(_variable_() ** ",") _ ";" end:location() {
+            let mut decls = Stmt::nop(begin, end);
+
+            for v in vars {
+                decls = Stmt::seq(decls, Stmt::decl(v, begin, end), begin, end);
+            }
+
+            decls
+        }
         s1:(@) _ s2:@ {
             let begin = s1.begin;
             let end = s2.end;
@@ -167,6 +176,8 @@ peg::parser!(pub grammar customlang() for str {
             { Stmt::_continue_(begin, end) }
         begin:location() rvalue:rvalue() _ ";" end:location()
             { Stmt::expr(rvalue, begin, end) }
+        begin:location() "{" _ body:stmt_core() _ "}" end:location()
+            { Stmt::scope(body, begin, end) }
     }
 
     pub rule stmt() -> Stmt =
@@ -178,7 +189,7 @@ peg::parser!(pub grammar customlang() for str {
             let end = d2.end;
             Decl::seq(d1, d2, begin, end)
         }
-        begin:location() "def" _ s:variable() _ "(" args:(_variable_() ** ",") ")" _
+        begin:location() s:variable() _ "(" args:(_variable_() ** ",") ")" _
             "{" body:stmt() "}" end:location()
             { Decl::function(s, args, body, begin, end) }
         begin:location() "var" _ s:variable() _ "=" _ n:number() _ ";" end:location()

@@ -114,6 +114,9 @@ impl ValueTable {
                 self.vars.insert(v, val);
                 val
             },
+            Lit::Undef => {
+                self.values.insert(Lit::Undef)
+            }
         }
     }
 

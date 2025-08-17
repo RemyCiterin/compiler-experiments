@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use crate::ssa::*;
 use crate::ast::*;
+use slotmap::*;
 
 pub struct Statistics {
     /// Number of instructions
@@ -59,7 +60,7 @@ pub struct Interpreter<'a>{
     memory: HashMap<i32, i32>,
 
     /// Environment of variables
-    envs: Vec<HashMap<Var, i32>>,
+    envs: Vec<SecondaryMap<Var, i32>>,
 
     /// Current symbol
     symbol: String,
@@ -68,7 +69,7 @@ pub struct Interpreter<'a>{
     sp: i32,
 
     /// Base of the current stack frame
-    frame: HashMap<Slot, i32>,
+    frame: SecondaryMap<Slot, i32>,
 
     /// Execution statistics
     pub stats: Statistics,
@@ -113,8 +114,8 @@ impl<'a> Interpreter<'a> {
             memory,
             symbols,
             sp: 0x100_0000,
-            frame: HashMap::new(),
-            envs: vec![HashMap::new()],
+            frame: SecondaryMap::new(),
+            envs: vec![SecondaryMap::new()],
             symbol: "main".to_string(),
             stats: Statistics{
                 instret: 0,
@@ -133,7 +134,7 @@ impl<'a> Interpreter<'a> {
     }
 
     pub fn read_var(&self, var: Var) -> Option<i32> {
-        self.envs.last().unwrap().get(&var).cloned()
+        self.envs.last().unwrap().get(var).cloned()
     }
 
     pub fn write_var(&mut self, var: Var, val: i32) {
@@ -179,7 +180,7 @@ impl<'a> Interpreter<'a> {
     pub fn call(&mut self, dest: Var, name: String, args: Vec<i32>) {
         if self.builtin(dest, name.clone(), args.clone()) { return; }
 
-        self.envs.push(HashMap::new());
+        self.envs.push(SecondaryMap::new());
         let symbol = std::mem::replace(&mut self.symbol, name);
 
         for i in 0..args.len() {
@@ -200,7 +201,8 @@ impl<'a> Interpreter<'a> {
             Lit::Int(i) => *i,
             Lit::Var(v) => self.read_var(*v).unwrap(),
             Lit::Addr(s) => self.symbols[s],
-            Lit::Stack(slot) => self.frame[slot]
+            Lit::Stack(slot) => self.frame[*slot],
+            Lit::Undef => 0xaaaaaaaau32.cast_signed(),
         }
     }
 

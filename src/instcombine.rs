@@ -268,10 +268,12 @@ pub fn combine_instructions(cfg: &mut Cfg<Instr>) {
         ),
     ];
 
-    // We don't have the trivial branch simplification here because we need to propagate the
-    // information to the non-taken Phi's instructions otherwise. This simplification is done
-    // in `copy_prop` instead.
     let cond_rules = vec![
+        cond_rule!(
+            ( int x ), true,
+            l1 l2 => if x != 0 { Instr::Jump(l1) }
+            else { Instr::Jump(l2) }
+        ),
         cond_rule!(
             ( NotEqual x 0 ), true,
             l1 l2 => Instr::Branch(x, l1, l2)

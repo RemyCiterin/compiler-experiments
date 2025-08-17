@@ -161,6 +161,7 @@ impl CopyProp {
             Lit::Stack(off) => Lattice::Stack(off),
             Lit::Addr(a) => Lattice::Addr(a.clone()),
             Lit::Int(i) => Lattice::Int(i),
+            Lit::Undef => Lattice::Top,
         };
     }
 
@@ -204,6 +205,7 @@ impl CopyProp {
                 Lit::Int(x) => Lattice::Int(x),
                 Lit::Addr(s) => Lattice::Addr(s.clone()),
                 Lit::Stack(off) => Lattice::Stack(off),
+                Lit::Undef => Lattice::Top,
             };
 
             ret = match (ret, elem.clone()) {

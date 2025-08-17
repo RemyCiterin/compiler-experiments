@@ -6,6 +6,8 @@ use slotmap::*;
 
 use crate::persistent_hash_map::*;
 
+use std::collections::HashSet;
+
 new_key_type!{
     pub struct Value;
 }
@@ -36,11 +38,15 @@ pub enum Expr<Op> {
 
     /// Binary operation
     Operation(Op, Vec<Value>),
+
+    /// A copy from a register
+    Reg(Var),
 }
 
 impl<Op: Operation> std::fmt::Display for Expr<Op> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::Reg(v) => write!(f, "{v}"),
             Self::Int(i) => write!(f, "{i}"),
             Self::Addr(a) => write!(f, "{a}"),
             Self::Stack(s) => write!(f, "{s}"),
@@ -60,16 +66,21 @@ pub struct ValueTable<Op> {
     /// Associate a value to each known expression
     exprs: PHashMap<Expr<Op>, Value>,
 
-    /// A map from variables to values
-    vars: PHashMap<Var, Value>,
+    /// A set of locations where we must kills all the loads
+    kill_loads: HashSet<Label>,
+
+    /// A map from load addresses to their values, must be cleared at each store or at the
+    /// begining of each block in the `self.kill_loads` set
+    loads: PHashMap<Expr<Op>, Value>,
 }
 
 impl<Op: Operation> ValueTable<Op> {
     pub fn new() -> Self {
         Self {
             values: SlotMap::with_key(),
+            kill_loads: HashSet::new(),
+            loads: PHashMap::new(),
             exprs: PHashMap::new(),
-            vars: PHashMap::new(),
         }
     }
 
@@ -81,20 +92,13 @@ impl<Op: Operation> ValueTable<Op> {
         value
     }
 
-    pub fn insert_var(&mut self, v: Var) -> Value {
-        if let Some(val) = self.vars.get(&v) { return *val; }
-
-        let val = self.values.insert(v);
-        self.vars.insert(v, val);
-        val
-    }
-
     pub fn insert_move(&mut self, dest: Var, lit: Lit) -> Value {
         match lit {
             Lit::Int(i) => self.insert(Expr::Int(i), dest),
             Lit::Addr(s) => self.insert(Expr::Addr(s.clone()), dest),
             Lit::Stack(slot) => self.insert(Expr::Stack(slot), dest),
-            Lit::Var(v) => self.insert_var(v),
+            Lit::Var(v) => self.insert(Expr::Reg(v), v),
+            Lit::Undef => self.insert(Expr::Reg(dest), dest),
         }
     }
 
@@ -103,8 +107,13 @@ impl<Op: Operation> ValueTable<Op> {
             Lit::Int(i) => self.exprs.get(&Expr::Int(i)).cloned(),
             Lit::Addr(a) => self.exprs.get(&Expr::Addr(a)).cloned(),
             Lit::Stack(s) => self.exprs.get(&Expr::Stack(s)).cloned(),
-            Lit::Var(v) => self.vars.get(&v).cloned(),
+            Lit::Var(v) => self.exprs.get(&Expr::Reg(v)).cloned(),
+            Lit::Undef => None,
         }
+    }
+
+    pub fn insert_var(&mut self, v: Var)-> Value {
+        self.insert(Expr::Reg(v), v)
     }
 
     /// Evaluate and register an instruction, and replace it by a move if the instruction is
@@ -117,23 +126,73 @@ impl<Op: Operation> ValueTable<Op> {
                 let vals = args.iter().map(|v| self.insert_var(*v)).collect();
                 let expr = Expr::Operation(op.clone(), vals);
 
-                if let Some(value) = self.exprs.get(&expr) {
-                    self.vars.insert(*dest, *value);
-                    return RInstr::Move(*dest, Lit::Var(self.values[*value].clone()));
+                if let Some(value) = self.exprs.get(&expr).cloned() {
+                    self.exprs.insert(Expr::Reg(*dest), value);
+                    return RInstr::Move(*dest, Lit::Var(self.values[value].clone()));
                 }
 
                 let v = self.insert(expr, *dest);
-                self.vars.insert(*dest, v);
+                self.exprs.insert(Expr::Reg(*dest), v);
                 instr
             }
             RInstr::Move(dest, lit) => {
                 if let Some(value) = self.get_lit(lit.clone()) {
-                    self.vars.insert(*dest, value);
+                    self.exprs.insert(Expr::Reg(*dest), value);
                     return RInstr::Move(*dest, Lit::Var(self.values[value].clone()));
                 }
 
                 let v = self.insert_move(*dest, lit.clone());
-                self.vars.insert(*dest, v);
+                self.exprs.insert(Expr::Reg(*dest), v);
+                instr
+            }
+            RInstr::Load{addr, dest, volatile: false} => {
+                if let Some(value) = self.loads.get(&Expr::Reg(*addr)) {
+                    self.exprs.insert(Expr::Reg(*dest), *value);
+                    return RInstr::Move(*dest, Lit::Var(self.values[*value].clone()));
+                }
+
+                let v = self.values.insert(*dest);
+                self.loads.insert(Expr::Reg(*addr), v);
+                self.exprs.insert(Expr::Reg(*dest), v);
+                instr
+            }
+            RInstr::LoadLocal{addr, dest} => {
+                let mut addr_expr = Expr::Stack(*addr);
+
+                if let Some(value) = self.exprs.get(&addr_expr) {
+                    addr_expr = Expr::Reg(self.values[*value].clone());
+                }
+
+                if let Some(value) = self.loads.get(&addr_expr) {
+                    self.exprs.insert(Expr::Reg(*dest), *value);
+                    return RInstr::Move(*dest, Lit::Var(self.values[*value].clone()));
+                }
+
+                let v = self.values.insert(*dest);
+                self.loads.insert(addr_expr, v);
+                self.exprs.insert(Expr::Reg(*dest), v);
+                instr
+            }
+            RInstr::StoreLocal{addr, val} => {
+                let mut addr_expr = Expr::Stack(*addr);
+
+                if let Some(value) = self.exprs.get(&addr_expr) {
+                    addr_expr = Expr::Reg(self.values[*value].clone());
+                }
+
+                self.loads.clear();
+                let value = self.insert_var(*val);
+                self.loads.insert(addr_expr, value);
+                instr
+            }
+            RInstr::Store{addr, val, volatile: false} => {
+                self.loads.clear();
+                let value = self.insert_var(*val);
+                self.loads.insert(Expr::Reg(*addr), value);
+                instr
+            }
+            RInstr::Call(..) | RInstr::Store{..} => {
+                self.loads.clear();
                 instr
             }
             _ => instr,
@@ -141,7 +200,7 @@ impl<Op: Operation> ValueTable<Op> {
     }
 
     pub fn update_operand(&self, var: Var) -> Var {
-        if let Some(value) = self.vars.get(&var) {
+        if let Some(value) = self.exprs.get(&Expr::Reg(var)) {
             return self.values[*value].clone();
         }
 
@@ -150,8 +209,12 @@ impl<Op: Operation> ValueTable<Op> {
 
     pub fn run_on_block<Cond: Condition>
         (&mut self, cfg: &mut Rtl<Op, Cond>, dom: &Dominance, block: Label) {
-        self.vars.push();
+
+        self.loads.push();
         self.exprs.push();
+
+        if self.kill_loads.contains(&block) { self.loads.clear(); }
+
         let mut stmt = vec![];
 
         for mut instr in cfg[block].stmt.clone() {
@@ -164,29 +227,52 @@ impl<Op: Operation> ValueTable<Op> {
 
         cfg.set_block_stmt(block, stmt);
 
-
         for &child in dom.childrens(block).iter() {
             self.run_on_block(cfg, dom, child);
         }
 
         self.exprs.pop();
-        self.vars.pop();
+        self.loads.pop();
+    }
 
+    pub fn set_kill_loads<Cond: Condition>(&mut self, cfg: &Rtl<Op, Cond>, dom: &Dominance) {
+        let mut dirty: Vec<Label> = Vec::new();
+
+        for (label, block) in cfg.iter_blocks() {
+            for instr in block.stmt.iter() {
+                if matches!(instr, RInstr::Store{..}) || matches!(instr, RInstr::Call(..)) {
+                    dirty.push(label);
+                }
+            }
+        }
+
+        let mut set = HashSet::new();
+
+        while let Some(block) = dirty.pop() {
+            for &succ in dom.frontier(block) {
+                // We only insert the Phi instruction if the variable is still alive
+                if set.contains(&succ) { continue; }
+                set.insert(succ);
+                dirty.push(succ);
+            }
+        }
+
+        self.kill_loads = set;
     }
 
     pub fn run<Cond: Condition>(&mut self, cfg: &mut Rtl<Op, Cond>) {
         for &arg in cfg.args.iter() {
             let val = self.values.insert(arg);
-            self.vars.insert(arg, val);
+            self.exprs.insert(Expr::Reg(arg), val);
         }
 
         self.exprs.push();
-        self.vars.push();
+        self.loads.push();
 
         let mut dom = Dominance::new(cfg);
         dom.run(cfg);
 
-
+        self.set_kill_loads(cfg, &dom);
 
         self.run_on_block(cfg, &dom, cfg.entry());
 

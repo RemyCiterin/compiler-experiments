@@ -3,7 +3,7 @@ var A = 42;
 var buf[100] = 0;
 
 // Fibo function using memoisation with a given buffer
-def fibo_mem(buffer, size) {
+fibo_mem(buffer, size) {
   let y = 2;
   buffer[0] = 0;
   buffer[1] = 1;
@@ -15,7 +15,7 @@ def fibo_mem(buffer, size) {
 }
 
 // Integer mltiplication
-def mult(x, y) {
+mult(x, y) {
   let acc = 0;
 
   while x && y {
@@ -31,7 +31,7 @@ def mult(x, y) {
 }
 
 // Recursive factorial function
-def factorial(x) {
+factorial(x) {
   if x == 0 {
     return 1;
   } else {
@@ -40,7 +40,7 @@ def factorial(x) {
 }
 
 // Loop based factorial function
-def loop_factorial(x) {
+loop_factorial(x) {
   let acc = 1;
   let i = 1;
 
@@ -53,7 +53,7 @@ def loop_factorial(x) {
 }
 
 // Factorial intermediate function using tail calls
-def tail_factorial_aux(acc, x) {
+tail_factorial_aux(acc, x) {
   if x == 0 {
     return acc;
   } else {
@@ -62,12 +62,12 @@ def tail_factorial_aux(acc, x) {
 }
 
 // Factorial using tail calls
-def tail_factorial(x) {
+tail_factorial(x) {
   return tail_factorial_aux(1, x);
 }
 
 // Fibonachi function using recursive calls
-def fibo(x) {
+fibo(x) {
   if (x == 0) | (x == 1) {
     return x;
   } else {
@@ -77,13 +77,13 @@ def fibo(x) {
 
 var hello_world = "hello world\n";
 
-def swap(a, b) {
+swap(a, b) {
   let tmp = *a;
   *a = *b;
   *b = tmp;
 }
 
-def partition(arr, low, high) {
+partition(arr, low, high) {
   let p = arr[low];
   let i = low;
   let j = high;
@@ -104,7 +104,7 @@ def partition(arr, low, high) {
   return j;
 }
 
-def quickSort(arr, low, high) {
+quickSort(arr, low, high) {
     if (low < high) {
 
         // call partition function to find Partition Index
@@ -127,12 +127,12 @@ var program = "
 ";
 
 var put_char_buf = "?";
-def print_char(x) {
+print_char(x) {
   put_char_buf[0] = x;
   puts(put_char_buf);
 }
 
-def exit_loop(prog, pos) {
+exit_loop(prog, pos) {
   let count = 0;
   let result = 0;
 
@@ -153,7 +153,7 @@ def exit_loop(prog, pos) {
   }
 }
 
-def execute(prog) {
+execute(prog) {
   let index = 0;
   let pos = 0;
   let top = 0;
@@ -204,15 +204,15 @@ def execute(prog) {
   }
 }
 
-def foo() {
+foo() {
   execute(program);
 }
 
-def foo2() {
+foo2() {
   execute2(program);
 }
 
-def main() {
+main() {
   puts(program);
   foo();
   //let x = 0;

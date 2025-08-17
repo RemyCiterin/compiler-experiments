@@ -1,4 +1,4 @@
-def fibo(x) {
+fibo(x) {
   if x < 2 {
     return x;
   } else {
@@ -6,6 +6,6 @@ def fibo(x) {
   }
 }
 
-def main() {
+main() {
   print_i32(fibo(20));
 }

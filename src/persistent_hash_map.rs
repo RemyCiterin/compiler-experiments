@@ -75,6 +75,14 @@ impl<K: std::hash::Hash+std::cmp::Eq+Clone,V: Clone + std::cmp::Eq> PHashMap<K,V
         result
     }
 
+    pub fn clear(&mut self) {
+        let map = std::mem::take(&mut self.map);
+
+        for (k, v) in map.into_iter() {
+            self.added.push((k, Some(v)));
+        }
+    }
+
     pub fn contains_key(&self, key: &K) -> bool {
         self.map.contains_key(key)
     }

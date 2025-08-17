@@ -1,5 +1,5 @@
 
-def mult(x, y) {
+mult(x, y) {
   let acc = 0;
 
   while x && y {
@@ -15,26 +15,13 @@ def mult(x, y) {
 }
 
 var put_char_buf = "?";
-def print_char(x) {
+print_char(x) {
   put_char_buf[0] = x;
   puts(put_char_buf);
 }
 
-def mandelbrot() {
-  let cx = 0;
-  let cy = 0;
-  let x = 0;
-  let y = 0;
-  let x2 = 0;
-  let y2 = 0;
-  let iter = 0;
-  let xmin = 0;
-  let xmax = 0;
-  let ymin = 0;
-  let ymax = 0;
-  let maxiter = 0;
-  let dx = 0;
-  let dy = 0;
+mandelbrot() {
+  let cx, cy, x, y, x2, y2, iter, xmin, xmax, ymin, ymax, maxiter, dx, dy;
 
   xmin = -8601;
   xmax =  2867;
@@ -75,6 +62,6 @@ def mandelbrot() {
   return(0);
 }
 
-def main() {
+main() {
   mandelbrot();
 }

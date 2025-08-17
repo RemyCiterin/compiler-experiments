@@ -1,0 +1,59 @@
+mult(x, y) {
+  let acc = 0;
+
+  while x && y {
+    if y & 1 {
+      acc = acc + x;
+    }
+
+    x = x << 1;
+    y = y >> 1;
+  }
+
+  return acc;
+}
+
+var buffer[100] = 1;
+
+eratosthene(N) {
+  let i, j;
+  i = 0;
+
+  while i < N {
+    buffer[i] = 1;
+    i = i + 1;
+  }
+
+  buffer[1] = 0;
+
+  i = 2;
+  while i < N {
+    if !buffer[i] {
+      i = i + 1;
+      continue;
+    }
+
+    j = mult(i, i);
+
+    while j < N {
+      buffer[j] = 0;
+      j = j + i;
+    }
+
+    i = i + 1;
+  }
+}
+
+main() {
+  eratosthene(100);
+
+  let x;
+  x = 1;
+  while x < 100 {
+    if buffer[x] {
+      print_i32(x);
+    }
+
+    x = x + 1;
+  }
+}

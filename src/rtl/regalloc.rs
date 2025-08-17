@@ -262,7 +262,6 @@ pub fn solve_coloring<A: Arch>(
             }
         }
 
-
         // Allocation succede without spilling the variable
         if let Some(c) = avail.difference(&others).into_iter().next() {
             coloring.insert(var, *c);

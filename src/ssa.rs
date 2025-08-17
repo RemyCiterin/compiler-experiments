@@ -27,6 +27,9 @@ pub enum Lit {
 
     /// A reference to the local stack frame
     Stack(Slot),
+
+    /// Undefined value
+    Undef,
 }
 
 impl Lit {
@@ -758,6 +761,7 @@ impl std::fmt::Display for Lit {
             Lit::Int(i) => write!(f, "{}", i),
             Lit::Var(v) => write!(f, "{}", v),
             Lit::Stack(off) => write!(f, "stack({off})"),
+            Lit::Undef => write!(f, "undef"),
         }
     }
 }

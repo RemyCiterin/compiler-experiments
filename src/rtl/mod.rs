@@ -121,10 +121,10 @@ pub enum RInstr<Op, Cond> {
     StoreLocal{val: Var, addr: Slot},
 
     /// A load instruction
-    Load{dest: Var, addr: Var},
+    Load{dest: Var, addr: Var, volatile: bool},
 
     /// A store instruction
-    Store{val: Var, addr: Var},
+    Store{val: Var, addr: Var, volatile: bool},
 
     /// A return instruction
     Return(Var),
@@ -150,7 +150,7 @@ impl<Op: std::fmt::Display, Cond: std::fmt::Display> std::fmt::Display for RInst
                 for v in args { write!(f, " {v}")?; }
                 write!(f, " to {l1} {l2}")
             }
-            Self::Load{dest, addr} =>
+            Self::Load{dest, addr, ..} =>
                 write!(f, "{} := [{}]", dest, addr),
             Self::Store{addr, val, ..} =>
                 write!(f, "[{}] := {}", addr, val),
@@ -267,7 +267,7 @@ impl<Op: Operation, Cond: Condition> Instruction for RInstr<Op, Cond> {
             Self::Branch(_, args, _, _) => args.clone(),
             Self::Move(_, Lit::Var(v)) => vec![*v],
             Self::Load{addr, ..} => vec![*addr],
-            Self::Store{val, addr} => vec![*addr, *val],
+            Self::Store{val, addr, ..} => vec![*addr, *val],
             Self::LoadLocal{..} => vec![],
             Self::StoreLocal{val, ..} => vec![*val],
             Self::Return(var) => vec![*var],
@@ -285,7 +285,7 @@ impl<Op: Operation, Cond: Condition> Instruction for RInstr<Op, Cond> {
             Self::Branch(_, args, _, _) => args.iter_mut().collect(),
             Self::Move(_, Lit::Var(v)) => vec![v],
             Self::Load{addr, ..} => vec![addr],
-            Self::Store{val, addr} => vec![addr, val],
+            Self::Store{val, addr, ..} => vec![addr, val],
             Self::LoadLocal{..} => vec![],
             Self::StoreLocal{val, ..} => vec![val],
             Self::Return(var) => vec![var],

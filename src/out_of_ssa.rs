@@ -96,6 +96,9 @@ impl Conventionalize {
 }
 
 pub fn out_of_ssa<I: HasPhi + HasMove>(cfg: &mut Cfg<I>) {
+    let mut conv = Conventionalize::new(cfg);
+    conv.run(cfg);
+
     cfg.end_ssa();
 
     let mut uf: UnionFind<Var> = UnionFind::new();
