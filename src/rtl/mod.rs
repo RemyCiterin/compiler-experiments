@@ -79,6 +79,14 @@ pub trait Arch {
 
     /// Pop some variables from the stack
     fn pp_pop(f: &mut Formatter<'_>, size: i32) -> Result;
+
+    /// Generate the stack layout for the architecture and the instructions to push/pop the stack
+    /// frame at the entry of a function. In case push and pop contains multiple instruction, it's
+    /// better to use one level of identation. It also take a boolean as argument to known if the
+    /// procedure contains call instruction, otherwise some architecture may not store the return
+    /// address and save some space in the stack
+    fn gen_layout(stack: &slotmap::SlotMap<Slot, SlotKind>, contain_calls: bool) ->
+        (String, String, slotmap::SparseSecondaryMap<Slot, i32>);
 }
 
 /// Define the basic operations of an architecture

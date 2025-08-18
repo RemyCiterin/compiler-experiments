@@ -1,3 +1,8 @@
+//! "Localtion Transfer Language" is the last representation of programs before assemly generation.
+//! This representation use machine/physical registers and linear block placement. The type of
+//! operation ```LInstr<Op, Cond>``` it use is very similar to the Rtl representation making the
+//! translation relatively easy.
+
 pub mod interpreter;
 
 use std::collections::{HashMap, HashSet};
@@ -6,6 +11,10 @@ use crate::rtl::*;
 use crate::ssa::*;
 use slotmap::*;
 
+/// Type of operation, it use phisical registers instead of virtual ones (like in
+/// [crate::rtl::RInstr]). It also doesn't have a branch instruction but a conditional
+/// jump instead. And it use the calling conventions of the architecture instead of
+/// generic call instructions.
 #[derive(Clone)]
 pub enum LInstr<Op, Cond> {
     /// A generic architecture specific operation
@@ -167,6 +176,16 @@ impl<A: Arch> Ltl<A> {
         }
     }
 
+    pub fn contains_call(&self) -> bool {
+        for block in self.blocks.iter() {
+            for instr in block.iter() {
+                if matches!(instr, LInstr::Call(..)) { return true; }
+            }
+        }
+
+        return false;
+    }
+
     pub fn layout(&self) -> (i32, SparseSecondaryMap<Slot, i32>) {
         let mut slots: SparseSecondaryMap<Slot, i32> = SparseSecondaryMap::new();
         let mut stack_size: i32 = 0;
@@ -208,11 +227,11 @@ impl<A: Arch> Ltl<A> {
     }
 
     pub fn pp(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let (stack_size, slots) = self.layout();
+        let (push, pop, slots) =
+            A::gen_layout(&self.stack, self.contains_call());
+        //let (stack_size, slots) = self.layout();
 
-        write!(f, "\t")?;
-        A::pp_push(f, stack_size)?;
-        write!(f, "\n")?;
+        write!(f, "\t{push}\n")?;
 
         for (i, block) in self.blocks.iter().enumerate() {
             let from_label = |j: usize| {
@@ -228,9 +247,7 @@ impl<A: Arch> Ltl<A> {
             for instr in block.iter().cloned() {
 
                 if matches!(instr, LInstr::Return) {
-                    write!(f, "\t")?;
-                    A::pp_pop(f, stack_size)?;
-                    write!(f, "\n")?;
+                    write!(f, "\t{pop}\n")?;
                 }
 
                 write!(f, "\t")?;

@@ -3,6 +3,7 @@ use super::select::*;
 use crate::*;
 use crate::ssa::*;
 use crate::pattern::*;
+use slotmap::*;
 
 pub struct RvArch;
 
@@ -145,6 +146,71 @@ impl Arch for RvArch {
             Phys(30),
             Phys(31),
         ]
+    }
+
+    fn gen_layout(stack: &slotmap::SlotMap<Slot, SlotKind>, contains_calls: bool) ->
+        (String, String, slotmap::SparseSecondaryMap<Slot, i32>)
+    {
+        let mut slots: SparseSecondaryMap<Slot, i32> = SparseSecondaryMap::new();
+        let mut stack_size: i32 = 0;
+
+        let mut num_outgoing = 0;
+        for (_, kind) in stack.iter() {
+            match kind {
+                SlotKind::Local(size) => {
+                    stack_size += *size as i32;
+                },
+                SlotKind::Outgoing(num) =>
+                    num_outgoing = usize::max(*num + 1, num_outgoing),
+                _ => {}
+            }
+        }
+
+        stack_size += num_outgoing as i32 * 4;
+
+        if contains_calls {
+            stack_size += 4;
+        }
+
+        if stack_size % 16 != 0 {
+            stack_size += 16 - (stack_size % 16);
+        }
+
+        let mut offset: i32 = num_outgoing as i32 * 4;
+        for (slot, kind) in stack.iter() {
+            match kind {
+                SlotKind::Local(size) => {
+                    slots.insert(slot, offset);
+                    offset += *size as i32;
+                }
+                SlotKind::Outgoing(num) =>
+                    _ = slots.insert(slot, 4 * *num as i32),
+                SlotKind::Incoming(num) =>
+                    _ = slots.insert(slot, stack_size + 4 * *num as i32),
+            }
+        }
+
+        if contains_calls {
+            let push =
+                format!("addi sp, sp, {}\n\tsw ra, {}(sp)", -stack_size, stack_size-4);
+
+            let pop =
+                format!("lw ra, {}(sp)\n\taddi sp, sp, {}", stack_size-4, stack_size);
+
+            (push, pop, slots)
+        } else {
+            if stack_size == 0 {
+                return ("".to_string(), "".to_string(), slots);
+            }
+
+            let push =
+                format!("addi sp, sp, {}", -stack_size);
+
+            let pop =
+                format!("addi sp, sp, {}", stack_size);
+
+            (push, pop, slots)
+        }
     }
 }
 
