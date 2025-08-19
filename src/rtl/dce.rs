@@ -17,7 +17,7 @@ impl Dce {
         }
     }
 
-    pub fn search<Op: Operation, Cond: Condition>(&mut self, cfg: &Rtl<Op, Cond>) {
+    pub fn search<Op: Operation, Cond: Condition>(&mut self, cfg: &Cfg<Op, Cond>) {
         let mut blocks_worklist: Vec<Label> = vec![cfg.entry()];
         let mut vars_worklist: Vec<Var> = vec![];
 
@@ -63,7 +63,7 @@ impl Dce {
         }
     }
 
-    pub fn run<Op: Operation, Cond: Condition>(&mut self, cfg: &mut Rtl<Op, Cond>) {
+    pub fn run<Op: Operation, Cond: Condition>(&mut self, cfg: &mut Cfg<Op, Cond>) {
         self.search(cfg);
 
         for block in cfg.labels() {
@@ -75,7 +75,7 @@ impl Dce {
             }
 
             let preds = cfg.preds(block);
-            let mut stmt: Vec<RInstr<Op, Cond>> = vec![];
+            let mut stmt: Vec<Instr<Op, Cond>> = vec![];
 
             for mut instr in cfg[block].stmt.iter().cloned() {
                 if let Some(x) = instr.destination() && !self.used_vars.contains(&x) {
@@ -83,7 +83,7 @@ impl Dce {
                 }
 
                 // Remove all the meaningless arguments of phi expressions
-                if let RInstr::Phi(_, args) = &mut instr {
+                if let Instr::Phi(_, args) = &mut instr {
                     let mut i: usize = 0;
 
                     while i < args.len() {

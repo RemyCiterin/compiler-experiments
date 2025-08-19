@@ -20,7 +20,7 @@ impl std::ops::Index<Label> for Liveness {
 }
 
 impl Liveness {
-    pub fn new<I: Instruction>(cfg: &Cfg<I>) -> Self {
+    pub fn new<Op: Operation, Cond: Condition>(cfg: &Cfg<Op, Cond>) -> Self {
         let mut this = Self {
             lives: SecondaryMap::new(),
         };
@@ -33,7 +33,8 @@ impl Liveness {
         this
     }
 
-    pub fn compute_live_out<I: Instruction>(&self, cfg: &Cfg<I>, block: Label) -> BTreeSet<Var> {
+    pub fn compute_live_out<Op: Operation, Cond: Condition>
+        (&self, cfg: &Cfg<Op, Cond>, block: Label) -> BTreeSet<Var> {
         let mut result = BTreeSet::new();
 
         for instr in cfg[block].stmt.iter() {
@@ -46,7 +47,8 @@ impl Liveness {
         return result;
     }
 
-    pub fn compute_live_in<I: Instruction>(&self, cfg: &Cfg<I>, block: Label) -> BTreeSet<Var> {
+    pub fn compute_live_in<Op: Operation, Cond: Condition>
+        (&self, cfg: &Cfg<Op, Cond>, block: Label) -> BTreeSet<Var> {
         let mut result = self.lives[block].outputs.clone();
 
         for instr in cfg[block].stmt.iter().rev() {
@@ -60,7 +62,8 @@ impl Liveness {
         return result;
     }
 
-    pub fn step<I: Instruction>(&mut self, cfg: &Cfg<I>, block: Label) -> bool {
+    pub fn step<Op: Operation, Cond: Condition>
+        (&mut self, cfg: &Cfg<Op, Cond>, block: Label) -> bool {
         self.lives[block].outputs = self.compute_live_out(cfg, block);
 
         let new_lives_in = self.compute_live_in(cfg, block);
@@ -71,7 +74,7 @@ impl Liveness {
         return progress;
     }
 
-    pub fn run<I: Instruction>(&mut self, cfg: &Cfg<I>) {
+    pub fn run<Op: Operation, Cond: Condition>(&mut self, cfg: &Cfg<Op, Cond>) {
         let mut dirty = cfg.preorder();
 
         while let Some(block) = dirty.pop() {

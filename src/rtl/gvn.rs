@@ -118,9 +118,9 @@ impl<Op: Operation> ValueTable<Op> {
 
     /// Evaluate and register an instruction, and replace it by a move if the instruction is
     /// redondant
-    pub fn insert_instr<Cond: Condition>(&mut self, instr: RInstr<Op, Cond>) -> RInstr<Op, Cond> {
+    pub fn insert_instr<Cond: Condition>(&mut self, instr: Instr<Op, Cond>) -> Instr<Op, Cond> {
         match &instr {
-            RInstr::Operation(dest, op, args) => {
+            Instr::Operation(dest, op, args) => {
                 if op.may_have_side_effect() { return instr; }
 
                 let vals = args.iter().map(|v| self.insert_var(*v)).collect();
@@ -128,27 +128,27 @@ impl<Op: Operation> ValueTable<Op> {
 
                 if let Some(value) = self.exprs.get(&expr).cloned() {
                     self.exprs.insert(Expr::Reg(*dest), value);
-                    return RInstr::Move(*dest, Lit::Var(self.values[value].clone()));
+                    return Instr::Move(*dest, Lit::Var(self.values[value].clone()));
                 }
 
                 let v = self.insert(expr, *dest);
                 self.exprs.insert(Expr::Reg(*dest), v);
                 instr
             }
-            RInstr::Move(dest, lit) => {
+            Instr::Move(dest, lit) => {
                 if let Some(value) = self.get_lit(lit.clone()) {
                     self.exprs.insert(Expr::Reg(*dest), value);
-                    return RInstr::Move(*dest, Lit::Var(self.values[value].clone()));
+                    return Instr::Move(*dest, Lit::Var(self.values[value].clone()));
                 }
 
                 let v = self.insert_move(*dest, lit.clone());
                 self.exprs.insert(Expr::Reg(*dest), v);
                 instr
             }
-            RInstr::Load{addr, dest, volatile: false} => {
+            Instr::Load{addr, dest, volatile: false} => {
                 if let Some(value) = self.loads.get(&Expr::Reg(*addr)) {
                     self.exprs.insert(Expr::Reg(*dest), *value);
-                    return RInstr::Move(*dest, Lit::Var(self.values[*value].clone()));
+                    return Instr::Move(*dest, Lit::Var(self.values[*value].clone()));
                 }
 
                 let v = self.values.insert(*dest);
@@ -156,7 +156,7 @@ impl<Op: Operation> ValueTable<Op> {
                 self.exprs.insert(Expr::Reg(*dest), v);
                 instr
             }
-            RInstr::LoadLocal{addr, dest} => {
+            Instr::LoadLocal{addr, dest} => {
                 let mut addr_expr = Expr::Stack(*addr);
 
                 if let Some(value) = self.exprs.get(&addr_expr) {
@@ -165,7 +165,7 @@ impl<Op: Operation> ValueTable<Op> {
 
                 if let Some(value) = self.loads.get(&addr_expr) {
                     self.exprs.insert(Expr::Reg(*dest), *value);
-                    return RInstr::Move(*dest, Lit::Var(self.values[*value].clone()));
+                    return Instr::Move(*dest, Lit::Var(self.values[*value].clone()));
                 }
 
                 let v = self.values.insert(*dest);
@@ -173,7 +173,7 @@ impl<Op: Operation> ValueTable<Op> {
                 self.exprs.insert(Expr::Reg(*dest), v);
                 instr
             }
-            RInstr::StoreLocal{addr, val} => {
+            Instr::StoreLocal{addr, val} => {
                 let mut addr_expr = Expr::Stack(*addr);
 
                 if let Some(value) = self.exprs.get(&addr_expr) {
@@ -185,13 +185,13 @@ impl<Op: Operation> ValueTable<Op> {
                 self.loads.insert(addr_expr, value);
                 instr
             }
-            RInstr::Store{addr, val, volatile: false} => {
+            Instr::Store{addr, val, volatile: false} => {
                 self.loads.clear();
                 let value = self.insert_var(*val);
                 self.loads.insert(Expr::Reg(*addr), value);
                 instr
             }
-            RInstr::Call(..) | RInstr::Store{..} => {
+            Instr::Call(..) | Instr::Store{..} => {
                 self.loads.clear();
                 instr
             }
@@ -208,7 +208,7 @@ impl<Op: Operation> ValueTable<Op> {
     }
 
     pub fn run_on_block<Cond: Condition>
-        (&mut self, cfg: &mut Rtl<Op, Cond>, dom: &Dominance, block: Label) {
+        (&mut self, cfg: &mut Cfg<Op, Cond>, dom: &Dominance, block: Label) {
 
         self.loads.push();
         self.exprs.push();
@@ -235,12 +235,12 @@ impl<Op: Operation> ValueTable<Op> {
         self.loads.pop();
     }
 
-    pub fn set_kill_loads<Cond: Condition>(&mut self, cfg: &Rtl<Op, Cond>, dom: &Dominance) {
+    pub fn set_kill_loads<Cond: Condition>(&mut self, cfg: &Cfg<Op, Cond>, dom: &Dominance) {
         let mut dirty: Vec<Label> = Vec::new();
 
         for (label, block) in cfg.iter_blocks() {
             for instr in block.stmt.iter() {
-                if matches!(instr, RInstr::Store{..}) || matches!(instr, RInstr::Call(..)) {
+                if matches!(instr, Instr::Store{..}) || matches!(instr, Instr::Call(..)) {
                     dirty.push(label);
                 }
             }
@@ -260,7 +260,7 @@ impl<Op: Operation> ValueTable<Op> {
         self.kill_loads = set;
     }
 
-    pub fn run<Cond: Condition>(&mut self, cfg: &mut Rtl<Op, Cond>) {
+    pub fn run<Cond: Condition>(&mut self, cfg: &mut Cfg<Op, Cond>) {
         for &arg in cfg.args.iter() {
             let val = self.values.insert(arg);
             self.exprs.insert(Expr::Reg(arg), val);
@@ -280,7 +280,7 @@ impl<Op: Operation> ValueTable<Op> {
     }
 }
 
-pub fn elim_unused_instructions<I: Instruction>(cfg: &mut Cfg<I>) {
+pub fn elim_unused_instructions<Op: Operation, Cond: Condition>(cfg: &mut Cfg<Op, Cond>) {
     let graph = cfg.ssa_graph();
 
     for label in cfg.labels() {

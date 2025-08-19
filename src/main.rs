@@ -6,7 +6,9 @@ use std::io::prelude::*;
 
 use builder;
 
-pub fn into_ssa(table: &mut ssa::SymbolTable<ssa::Instr>) {
+use ssa::*;
+
+pub fn into_ssa(table: &mut ssa::SymbolTable<COp, CCond>) {
     for (_, section) in table.symbols.iter_mut() {
         match section {
             ssa::Section::Text(cfg) => {
@@ -18,7 +20,7 @@ pub fn into_ssa(table: &mut ssa::SymbolTable<ssa::Instr>) {
     }
 }
 
-pub fn optimize(table: &mut ssa::SymbolTable<ssa::Instr>) {
+pub fn optimize(table: &mut ssa::SymbolTable<COp, CCond>) {
     for (name, section) in table.symbols.iter_mut() {
         match section {
             ssa::Section::Text(cfg) => {
@@ -28,13 +30,7 @@ pub fn optimize(table: &mut ssa::SymbolTable<ssa::Instr>) {
                 let mut simplifier = simplify_ssa::Simplifier::new(&cfg);
                 simplifier.run(cfg);
 
-                instcombine::combine_instructions(cfg);
-
-                let mut gvn = gvn::ValueTable::new();
-                gvn.run(cfg);
-
-                let mut copy = copy_prop::CopyProp::new(&cfg);
-                copy.run(cfg);
+                //instcombine::combine_instructions(cfg);
 
                 tail_call_elim::tail_call_elim(name, cfg);
 
@@ -47,32 +43,33 @@ pub fn optimize(table: &mut ssa::SymbolTable<ssa::Instr>) {
     }
 }
 
-pub fn translate(table: ssa::SymbolTable<ssa::Instr>) -> ssa::SymbolTable<rtl::rv32::RvInstr> {
-    let mut symbols = HashMap::new();
-
-    for (name, section) in table.symbols.into_iter() {
-        match section {
-            ssa::Section::Text(cfg) => {
-
-                let mut cfg = rtl::rv32::translate(cfg);
-
-                let mut gvn = rtl::gvn::ValueTable::new();
-                gvn.run(&mut cfg);
-
-                let mut dce = rtl::dce::Dce::new();
-                dce.run(&mut cfg);
-
-                out_of_ssa::out_of_ssa(&mut cfg);
-
-                symbols.insert(name, ssa::Section::Text(cfg));
-            }
-            ssa::Section::Data(v) =>
-                _ = symbols.insert(name, ssa::Section::Data(v.clone())),
-        }
-    }
-
-    ssa::SymbolTable{symbols}
-}
+//pub fn translate(table: ssa::SymbolTable<COp, CCond>) ->
+//    ssa::SymbolTable<rtl::rv32::RvOp, rtl::rv32::RvCond> {
+//    let mut symbols = HashMap::new();
+//
+//    for (name, section) in table.symbols.into_iter() {
+//        match section {
+//            ssa::Section::Text(cfg) => {
+//
+//                let mut cfg = rtl::rv32::translate(cfg);
+//
+//                let mut gvn = rtl::gvn::ValueTable::new();
+//                gvn.run(&mut cfg);
+//
+//                let mut dce = rtl::dce::Dce::new();
+//                dce.run(&mut cfg);
+//
+//                out_of_ssa::out_of_ssa(&mut cfg);
+//
+//                symbols.insert(name, ssa::Section::Text(cfg));
+//            }
+//            ssa::Section::Data(v) =>
+//                _ = symbols.insert(name, ssa::Section::Data(v.clone())),
+//        }
+//    }
+//
+//    ssa::SymbolTable{symbols}
+//}
 
 pub fn fibo(x: i32) -> i32 {
     if x < 2 { x }
@@ -112,32 +109,32 @@ fn main() {
     into_ssa(&mut table);
     optimize(&mut table);
 
-    //table.pp_text();
+    table.pp_text();
 
     let mut interp = interpreter::Interpreter::new(&table);
     interp.interpret_function();
     println!("{}", interp.stats);
 
-    let rtl_table = translate(table);
+    //let rtl_table = translate(table);
 
-    //rtl_table.pp_text();
+    ////rtl_table.pp_text();
 
-    let ltl_table: ltl::LtlSymbolTable<rtl::rv32::RvArch>
-        = ltl::LtlSymbolTable::new(rtl_table);
+    //let ltl_table: ltl::LtlSymbolTable<rtl::rv32::RvArch>
+    //    = ltl::LtlSymbolTable::new(rtl_table);
 
-    //println!("{ltl_table}");
+    ////println!("{ltl_table}");
 
-    let mut interp =
-        ltl::interpreter::Interpreter::new(&ltl_table);
-    interp.interpret_function();
+    //let mut interp =
+    //    ltl::interpreter::Interpreter::new(&ltl_table);
+    //interp.interpret_function();
 
 
-    for (name, stats) in interp.stats.iter() {
-        println!("function {name}: {stats}\n");
-    }
+    //for (name, stats) in interp.stats.iter() {
+    //    println!("function {name}: {stats}\n");
+    //}
 
-    let file_name = std::env::args().nth(2).unwrap();
-    let mut file = std::fs::File::create(file_name).unwrap();
+    //let file_name = std::env::args().nth(2).unwrap();
+    //let mut file = std::fs::File::create(file_name).unwrap();
 
-    file.write_all(format!("{ltl_table}").as_bytes()).unwrap();
+    //file.write_all(format!("{ltl_table}").as_bytes()).unwrap();
 }

@@ -1,8 +1,8 @@
 //! Instruction selection, it take as input a C.F.G. using the ```Instr``` type of instructions
-//! and return a Rtl using a custom type of operations/conditions, it take as input:
+//! and return a Cfg using a custom type of operations/conditions, it take as input:
 //!
-//! - A closure to transform an operation (binop/unop) into a vector or Rtl instructions.
-//! - A closure to transform a condition (in case of a branch) into a vector of Rtl instructions.
+//! - A closure to transform an operation (binop/unop) into a vector or Cfg instructions.
+//! - A closure to transform a condition (in case of a branch) into a vector of Cfg instructions.
 //!
 //! These closures have access to the instruction selector itself, as example to interpret the
 //! literals presents in the original CFG into variables (e.g. replacing a literal
@@ -42,22 +42,23 @@
 use crate::ssa::*;
 
 use slotmap::*;
-use crate::pattern::*;
-use super::*;
+use super::pattern::*;
 
 
-pub struct Selection<Op: Operation, Cond: Condition> {
-    new: Rtl<Op, Cond>,
-    pub old: Cfg<Instr>,
+pub struct Selection<Op1, Op2, Cond1, Cond2> {
+    new: Cfg<Op2, Cond2>,
+    pub old: Cfg<Op1, Cond1>,
     labels: SecondaryMap<Label, Label>,
     vars: SparseSecondaryMap<Var, Var>,
     slots: SparseSecondaryMap<Slot, Slot>,
-    stmt: Vec<RInstr<Op, Cond>>,
+    stmt: Vec<Instr<Op2, Cond2>>,
     label: Label,
+    patterns: SparseSecondaryMap<Var, Pattern<Op1>>,
 }
 
-impl<Op: Operation, Cond: Condition> Selection<Op, Cond> {
-    pub fn new(mut old: Cfg<Instr>) -> Self {
+impl<Op1: Operation, Op2: Operation, Cond1: Condition, Cond2: Condition>
+Selection<Op1, Op2, Cond1, Cond2> {
+    pub fn new(mut old: Cfg<Op1, Cond1>) -> Self {
 
         // Ensure phi expressions only depende on variables (no need to have instructions before
         // the phis of the generated block...)
@@ -85,7 +86,7 @@ impl<Op: Operation, Cond: Condition> Selection<Op, Cond> {
             match kind {
                 SlotKind::Local(size) =>
                     _ = slots.insert(slot, new.fresh_stack_var(*size)),
-                _ => panic!("on local stack slots are allowed until `Rtl` representation"),
+                _ => panic!("on local stack slots are allowed until `Cfg` representation"),
             }
         }
 
@@ -99,6 +100,7 @@ impl<Op: Operation, Cond: Condition> Selection<Op, Cond> {
         }
 
         Self {
+            patterns: as_patterns(&old),
             label: new.entry(),
             stmt: vec![],
             labels,
@@ -120,7 +122,7 @@ impl<Op: Operation, Cond: Condition> Selection<Op, Cond> {
         if let Lit::Var(v) = lit { return v; }
         let id = self.fresh();
 
-        self.stmt.push(RInstr::Move(id, lit.clone()));
+        self.stmt.push(Instr::Move(id, lit.clone()));
         id
     }
 
@@ -140,21 +142,24 @@ impl<Op: Operation, Cond: Condition> Selection<Op, Cond> {
                 *dest = self.vars[*dest];
             }
 
-            if let RInstr::Phi(_, args) = instr {
-                for (_, label) in args.iter_mut() {
+            if let Instr::Phi(_, args) = instr {
+                for (lit, label) in args.iter_mut() {
+                    if let Lit::Stack(slot) = lit {
+                        *slot = self.slots[*slot];
+                    }
                     *label = self.labels[*label];
                 }
             }
 
-            if let RInstr::LoadLocal{addr, ..} = instr {
+            if let Instr::LoadLocal{addr, ..} = instr {
                 *addr = self.slots[*addr];
             }
 
-            if let RInstr::StoreLocal{addr, ..} = instr {
+            if let Instr::StoreLocal{addr, ..} = instr {
                 *addr = self.slots[*addr];
             }
 
-            if let RInstr::Move(_, Lit::Stack(slot)) = instr {
+            if let Instr::Move(_, Lit::Stack(slot)) = instr {
                 *slot = self.slots[*slot];
             }
         }
@@ -162,59 +167,52 @@ impl<Op: Operation, Cond: Condition> Selection<Op, Cond> {
         self.new.set_block_stmt(self.labels[self.label], stmt);
     }
 
+    pub fn pattern_of(&self, var: Var) -> Pattern<Op1> {
+        self.patterns.get(var).unwrap_or(&Pattern::Leaf(Lit::Var(var))).clone()
+    }
+
     fn translate_instr<F1, F2>
-        (&mut self, instr: &Instr, tr_op: F1, tr_cond: F2)
+        (&mut self, instr: &Instr<Op1, Cond1>, tr_op: F1, tr_cond: F2)
     where
-        F1: Fn (&mut Self, &Instr, Var) -> Vec<RInstr<Op, Cond>>,
-        F2: Fn (&mut Self, Lit, Label, Label) -> Vec<RInstr<Op, Cond>> {
+        F1: Fn (&mut Self, Var, Pattern<Op1>) -> Vec<Instr<Op2, Cond2>>,
+        F2: Fn (&mut Self, Cond1, Vec<Pattern<Op1>>, Label, Label) -> Vec<Instr<Op2, Cond2>> {
 
         match instr {
-            Instr::Binop(dest, _, _, _) => {
-                let ops = tr_op(self, instr, *dest);
+            Instr::Operation(dest, _, _) => {
+                let ops = tr_op(self, *dest, self.pattern_of(*dest));
                 self.stmt.extend(ops)
             }
-            Instr::Branch(lit, l1, l2) => {
-                let ops = tr_cond(self, lit.clone(), *l1, *l2);
+            Instr::Branch(cond, args, l1, l2) => {
+                let pats =
+                    args.iter().map(|v| self.pattern_of(*v)).collect();
+                let ops =
+                    tr_cond(self, cond.clone(), pats, *l1, *l2);
                 self.stmt.extend(ops)
             }
-            Instr::Unop(dest, _, _) => {
-                let ops = tr_op(self, instr, *dest);
-                self.stmt.extend(ops)
-            }
-            Instr::Return(lit) => {
-                let id = self.eval_lit(lit.clone());
-                self.stmt.push(RInstr::Return(id));
+            Instr::Return(id) => {
+                self.stmt.push(Instr::Return(*id));
             }
             Instr::Move(dest, lit) =>
-                self.stmt.push(RInstr::Move(*dest, lit.clone())),
+                self.stmt.push(Instr::Move(*dest, lit.clone())),
             Instr::Call(dest, name, args) => {
-                let args =
-                    args.iter().map(|l|self.eval_lit(l.clone())).collect();
-                self.stmt.push(RInstr::Call(*dest, name.clone(), args));
+                self.stmt.push(Instr::Call(*dest, name.clone(), args.clone()));
             }
             Instr::Jump(label) =>
-                self.stmt.push(RInstr::Jump(*label)),
+                self.stmt.push(Instr::Jump(*label)),
             Instr::Phi(dest, args) => {
-                let args =
-                    args.iter()
-                    .map(|(v,l)| (self.eval_lit(v.clone()), *l)).collect();
-                self.stmt.push(RInstr::Phi(*dest, args));
+                self.stmt.push(Instr::Phi(*dest, args.clone()));
             }
-            Instr::Load{dest, addr: Lit::Stack(slot), volatile: false} => {
-                self.stmt.push(RInstr::LoadLocal{dest: *dest, addr: *slot});
+            Instr::LoadLocal{dest, addr: slot} => {
+                self.stmt.push(Instr::LoadLocal{dest: *dest, addr: *slot});
             }
-            Instr::Store{val, addr: Lit::Stack(slot), volatile: false} => {
-                let val = self.eval_lit(val.clone());
-                self.stmt.push(RInstr::StoreLocal{val, addr: *slot});
+            Instr::StoreLocal{val, addr: slot} => {
+                self.stmt.push(Instr::StoreLocal{val: *val, addr: *slot});
             }
             Instr::Load{dest, addr, volatile} => {
-                let addr = self.eval_lit(addr.clone());
-                self.stmt.push(RInstr::Load{dest: *dest, addr, volatile: *volatile});
+                self.stmt.push(Instr::Load{dest: *dest, addr: *addr, volatile: *volatile});
             }
             Instr::Store{val, addr, volatile} => {
-                let val = self.eval_lit(val.clone());
-                let addr = self.eval_lit(addr.clone());
-                self.stmt.push(RInstr::Store{val, addr, volatile: *volatile});
+                self.stmt.push(Instr::Store{val: *val, addr: *addr, volatile: *volatile});
             }
         }
     }
@@ -222,8 +220,8 @@ impl<Op: Operation, Cond: Condition> Selection<Op, Cond> {
     pub fn run<F1, F2>
         (&mut self, tr_op: F1, tr_cond: F2)
     where
-        F1: Fn (&mut Self, &Instr, Var) -> Vec<RInstr<Op, Cond>>,
-        F2: Fn (&mut Self, Lit, Label, Label) -> Vec<RInstr<Op, Cond>> {
+        F1: Fn (&mut Self, Var, Pattern<Op1>) -> Vec<Instr<Op2, Cond2>>,
+        F2: Fn (&mut Self, Cond1, Vec<Pattern<Op1>>, Label, Label) -> Vec<Instr<Op2, Cond2>> {
 
         for label in self.old.labels() {
             self.label = label;
@@ -236,124 +234,5 @@ impl<Op: Operation, Cond: Condition> Selection<Op, Cond> {
         }
     }
 
-    pub fn rtl(self) -> Rtl<Op, Cond> { self.new }
-}
-
-#[macro_export]
-macro_rules! translate_operation_rule {
-    ( $p:tt , $test:expr , $select:ident $dest:ident =>  $transform:expr ) => {
-        OpRule::new(
-            pattern!($p),
-            |occ| {declare_pattern_vars!(occ, $p); $test},
-            |select, occ, v| {
-                #[allow(unused_variables)]
-                let $dest = v;
-                eval_pattern_vars!(select, occ, $p);
-                #[allow(unused_variables)]
-                let $select = select;
-                $transform
-            }
-        )
-    }
-}
-
-#[macro_export]
-macro_rules! translate_condition_rule {
-    ( $p:tt , $test:expr , $select:ident $l1:ident $l2:ident =>  $transform:expr ) => {
-        CondRule::new(
-            pattern!($p),
-            |occ| {declare_pattern_vars!(occ, $p); $test},
-            |select, occ, l1, l2| {
-                #[allow(unused_variables)]
-                let $l1 = l1;
-                #[allow(unused_variables)]
-                let $l2 = l2;
-                eval_pattern_vars!(select, occ, $p);
-                #[allow(unused_variables)]
-                let $select = select;
-                $transform
-            }
-        )
-    }
-}
-
-
-pub struct OpRule<'a, Op: Operation, Cond: Condition> {
-    pub pattern: Pattern,
-    pub test: Box<dyn Fn(&Occurence) -> bool + 'a>,
-    pub transform:
-        Box<dyn Fn(&mut Selection<Op, Cond>, Occurence, Var) -> Vec<RInstr<Op, Cond>> + 'a>,
-}
-
-impl<'a, Op: Operation, Cond: Condition> OpRule<'a, Op, Cond> {
-    pub fn new<F1, F2>(pattern: Pattern, test: F1, tr: F2) -> Self
-        where
-            F1: Fn(&Occurence) -> bool + 'a,
-            F2: Fn(&mut Selection<Op, Cond>, Occurence, Var) -> Vec<RInstr<Op, Cond>> + 'a {
-        Self {
-            pattern,
-            test: Box::new(test),
-            transform: Box::new(tr),
-        }
-    }
-
-    pub fn pattern(&self) -> Pattern {
-        self.pattern.clone()
-    }
-
-    pub fn test(&self, occ: &Occurence) -> bool {
-        let test = &self.test;
-        test(occ)
-    }
-
-    pub fn transform(
-        &self,
-        select: &mut Selection<Op, Cond>,
-        occ: Occurence,
-        dest: Var
-    ) -> Vec<RInstr<Op, Cond>> {
-        let transform = &self.transform;
-        transform(select, occ, dest)
-    }
-}
-
-pub struct CondRule<'a, Op: Operation, Cond: Condition> {
-    pub pattern: Pattern,
-    pub test: Box<dyn Fn(&Occurence) -> bool + 'a>,
-    pub transform:
-        Box<dyn
-            Fn(&mut Selection<Op, Cond>, Occurence, Label, Label) -> Vec<RInstr<Op, Cond>> + 'a
-        >,
-}
-
-impl<'a, Op: Operation, Cond: Condition> CondRule<'a, Op, Cond> {
-    pub fn new<F1, F2>(pattern: Pattern, test: F1, tr: F2) -> Self
-        where F1: Fn(&Occurence) -> bool + 'a,
-        F2: Fn(&mut Selection<Op, Cond>,Occurence, Label, Label) -> Vec<RInstr<Op, Cond>> + 'a {
-        Self {
-            pattern,
-            test: Box::new(test),
-            transform: Box::new(tr),
-        }
-    }
-
-    pub fn pattern(&self) -> Pattern {
-        self.pattern.clone()
-    }
-
-    pub fn test(&self, occ: &Occurence) -> bool {
-        let test = &self.test;
-        test(occ)
-    }
-
-    pub fn transform(
-        &self,
-        select: &mut Selection<Op, Cond>,
-        occ: Occurence,
-        l1: Label,
-        l2: Label
-    ) -> Vec<RInstr<Op, Cond>> {
-        let transform = &self.transform;
-        transform(select, occ, l1, l2)
-    }
+    pub fn rtl(self) -> Cfg<Op2, Cond2> { self.new }
 }

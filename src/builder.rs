@@ -4,10 +4,10 @@ use std::collections::{HashMap, HashSet};
 
 pub struct Builder {
     /// Output control flow graph
-    cfg: Cfg<Instr>,
+    cfg: Cfg<COp, CCond>,
 
     /// Instructions of the block we are currently building
-    stmt: Vec<Instr>,
+    stmt: Vec<Instr<COp, CCond>>,
 
     /// Label of the block we are currently building
     label: Label,
@@ -38,7 +38,7 @@ pub fn show_builder_error(program: &str, err: BuilderError) {
 impl Builder {
     pub fn new(args: Vec<String>, globals: HashSet<String>) -> Self {
         let mut cfg = Cfg::new(false);
-        let mut stmt: Vec<Instr> = vec![];
+        let mut stmt: Vec<Instr<COp, CCond>> = vec![];
         let label = cfg.entry();
 
         let mut env = HashMap::new();
@@ -46,12 +46,12 @@ impl Builder {
         // We start by pushing arguments to the stack in case we dereference them
         for arg in args {
             let slot = cfg.fresh_stack_var(4);
-            let slot = Lit::Stack( slot );
+            let slot = slot;
             let id: Var = cfg.fresh_arg();
-            env.insert(arg, slot.clone());
+            env.insert(arg, Lit::Stack(slot));
 
             stmt.push(
-                Instr::Store{volatile: false, val: Lit::Var(id), addr: slot.clone()});
+                Instr::StoreLocal{val: id, addr: slot});
         }
 
         Builder {
@@ -66,7 +66,7 @@ impl Builder {
     }
 
     /// Return the current control flow graph
-    pub fn cfg(mut self) -> Cfg<Instr> {
+    pub fn cfg(mut self) -> Cfg<COp, CCond> {
         let id = self.cfg.fresh_var();
         self.stmt.push(Instr::Move(id, Lit::Int(0)));
         self.gen_return(id);
@@ -103,8 +103,8 @@ impl Builder {
     pub fn gen_rvalue(&mut self, expr: RValue) -> Result<Var, BuilderError> {
         match *expr.core {
             RValueCore::Call{name, args} => {
-                let mut ids: Vec<Lit> = vec![];
-                for arg in args { ids.push(Lit::Var(self.gen_rvalue(arg)?)); }
+                let mut ids: Vec<Var> = vec![];
+                for arg in args { ids.push(self.gen_rvalue(arg)?); }
                 let id: Var = self.cfg.fresh_var();
                 self.stmt.push(Instr::Call(id, name, ids));
                 Ok(id)
@@ -117,21 +117,29 @@ impl Builder {
             RValueCore::LValue{lvalue} => {
                 let x = self.cfg.fresh_var();
                 let addr = self.gen_lvalue(lvalue)?;
-                self.stmt.push(
-                    Instr::Load{dest: x, addr, volatile: false});
+
+                if let Lit::Stack(slot) = addr {
+                    self.stmt.push(Instr::LoadLocal{addr: slot, dest: x});
+                } else {
+                    let tmp = self.cfg.fresh_var();
+                    self.stmt.push(Instr::Move(tmp, addr));
+                    self.stmt.push(
+                        Instr::Load{dest: x, addr: tmp, volatile: false});
+                }
+
                 Ok(x)
             }
             RValueCore::Binop{binop, lhs, rhs} => {
                 let l: Var = self.gen_rvalue(lhs)?;
                 let r: Var  = self.gen_rvalue(rhs)?;
                 let id: Var = self.cfg.fresh_var();
-                self.stmt.push(Instr::Binop(id, binop, Lit::Var(l), Lit::Var(r)));
+                self.stmt.push(Instr::Operation(id, COp::from_binop(binop), vec![l, r]));
                 Ok(id)
             }
             RValueCore::Unop{unop,arg} => {
                 let y: Var = self.gen_rvalue(arg)?;
                 let id: Var = self.cfg.fresh_var();
-                self.stmt.push(Instr::Unop(id, unop, Lit::Var(y)));
+                self.stmt.push(Instr::Operation(id, COp::from_unop(unop), vec![y]));
                 Ok(id)
             }
             RValueCore::Ref{lvalue} => {
@@ -175,7 +183,7 @@ impl Builder {
 
     /// End a block by generating a branch instruction
     pub fn gen_branch(&mut self, cond: Var, l1: Label, l2: Label) {
-        self.stmt.push(Instr::Branch(Lit::Var(cond), l1, l2));
+        self.stmt.push(Instr::Branch(CCond::Nez, vec![cond], l1, l2));
         self.cfg.set_block_stmt(self.label, std::mem::take(&mut self.stmt));
     }
 
@@ -187,7 +195,7 @@ impl Builder {
 
     /// End a block by generating a return instruction
     pub fn gen_return(&mut self, id: Var) {
-        self.stmt.push(Instr::Return(Lit::Var(id)));
+        self.stmt.push(Instr::Return(id));
         self.cfg.set_block_stmt(self.label, std::mem::take(&mut self.stmt));
     }
 
@@ -204,7 +212,10 @@ impl Builder {
             StmtCore::DeclArray{name: s, size} => {
                 let slot1 = self.cfg.fresh_stack_var(size);
                 let slot2 = self.cfg.fresh_stack_var(4);
-                self.stmt.push(Instr::Store{volatile: false, addr: Lit::Stack(slot2), val: Lit::Stack(slot1)});
+
+                let tmp = self.cfg.fresh_var();
+                self.stmt.push(Instr::Move(tmp, Lit::Stack(slot1)));
+                self.stmt.push(Instr::StoreLocal{addr: slot2, val: tmp});
 
                 self.env.insert(s.clone(), Lit::Stack(slot2));
 
@@ -304,8 +315,15 @@ impl Builder {
                 let id = self.gen_rvalue(rvalue)?;
                 let addr = self.gen_lvalue(lvalue)?;
 
-                self.stmt.push(
-                    Instr::Store{addr, val: Lit::Var(id), volatile: false});
+                if let Lit::Stack(slot) = addr {
+                    self.stmt.push(Instr::StoreLocal{addr: slot, val: id});
+                } else {
+                    let tmp = self.cfg.fresh_var();
+                    self.stmt.push(Instr::Move(tmp, addr));
+                    self.stmt.push(
+                        Instr::Store{val: id, addr: tmp, volatile: false});
+                }
+
                 Ok(())
             }
             StmtCore::Break{} => {
@@ -372,7 +390,7 @@ fn get_symbols(program: Decl, symbols: &mut HashSet<String>) -> Result<(), Build
     Ok(())
 }
 
-fn fill_table(program: Decl, symbols: &HashSet<String>, table: &mut SymbolTable<Instr>)
+fn fill_table(program: Decl, symbols: &HashSet<String>, table: &mut SymbolTable<COp, CCond>)
     -> Result<(), BuilderError> {
 
     match *program.core {
@@ -399,7 +417,7 @@ fn fill_table(program: Decl, symbols: &HashSet<String>, table: &mut SymbolTable<
     Ok(())
 }
 
-pub fn build(program: Decl) -> Result<SymbolTable<Instr>, BuilderError> {
+pub fn build(program: Decl) -> Result<SymbolTable<COp, CCond>, BuilderError> {
     let mut table = SymbolTable{ symbols: HashMap::new() };
 
     let mut symbols = HashSet::new();

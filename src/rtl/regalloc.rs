@@ -17,7 +17,7 @@ pub fn show_coloring(color: &Coloring) {
 }
 
 pub fn aggressive_coalescing<A: Arch>(
-    cfg: &mut Rtl<A::Op, A::Cond>,
+    cfg: &mut Cfg<A::Op, A::Cond>,
     color: &mut Coloring,
 ) -> InterferenceGraph {
     let mut liveness = Liveness::new(cfg);
@@ -34,7 +34,7 @@ pub fn aggressive_coalescing<A: Arch>(
 
     for (_, block) in cfg.iter_blocks() {
         for instr in block.stmt.iter() {
-            if let RInstr::Move(new, Lit::Var(old)) = instr {
+            if let Instr::Move(new, Lit::Var(old)) = instr {
                 let new = uf.find(*new);
                 let old = uf.find(*old);
 
@@ -77,10 +77,10 @@ pub fn aggressive_coalescing<A: Arch>(
     }
 
     for label in cfg.labels() {
-        let mut stmt: Vec<RInstr<A::Op, A::Cond>> = vec![];
+        let mut stmt: Vec<Instr<A::Op, A::Cond>> = vec![];
 
         for mut instr in cfg[label].stmt.iter().cloned() {
-            if let RInstr::Move(new, Lit::Var(old)) = instr
+            if let Instr::Move(new, Lit::Var(old)) = instr
                 && uf.find(new) == uf.find(old) {
                 continue;
             }
@@ -102,7 +102,7 @@ pub fn aggressive_coalescing<A: Arch>(
     graph
 }
 
-pub fn search_caller_saved<A: Arch>(cfg: &Rtl<A::Op, A::Cond>) -> BTreeSet<Var> {
+pub fn search_caller_saved<A: Arch>(cfg: &Cfg<A::Op, A::Cond>) -> BTreeSet<Var> {
     let mut liveness = Liveness::new(cfg);
     liveness.run(cfg);
 
@@ -116,7 +116,7 @@ pub fn search_caller_saved<A: Arch>(cfg: &Rtl<A::Op, A::Cond>) -> BTreeSet<Var> 
                 lives.remove(&dest);
             }
 
-            if matches!(instr, RInstr::Call(..)) {
+            if matches!(instr, Instr::Call(..)) {
                 for &v in lives.iter() {
                     set.insert(v);
                 }
@@ -133,7 +133,7 @@ pub fn search_caller_saved<A: Arch>(cfg: &Rtl<A::Op, A::Cond>) -> BTreeSet<Var> 
 
 /// Prepare coloring, in particular it introduce copies and precolor registers for
 /// calls/return instructions
-pub fn prepare_coloring<A: Arch>(cfg: &mut Rtl<A::Op, A::Cond>) -> Coloring {
+pub fn prepare_coloring<A: Arch>(cfg: &mut Cfg<A::Op, A::Cond>) -> Coloring {
     let mut color: Coloring = Coloring::new();
     let arg_regs = A::arg_regs();
 
@@ -142,25 +142,25 @@ pub fn prepare_coloring<A: Arch>(cfg: &mut Rtl<A::Op, A::Cond>) -> Coloring {
         .map(|v| (v, cfg.fresh_var()))
         .collect();
 
-    let mut incoming: Vec<RInstr<A::Op, A::Cond>> = vec![];
+    let mut incoming: Vec<Instr<A::Op, A::Cond>> = vec![];
 
     for i in 0..cfg.args.len() {
         if i < arg_regs.len() {
             color.insert(cfg.args[i], arg_regs[i].0);
         } else {
             let slot = cfg.fresh_incoming_var(i - arg_regs.len());
-            incoming.push(RInstr::LoadLocal{dest: cfg.args[i], addr: slot});
+            incoming.push(Instr::LoadLocal{dest: cfg.args[i], addr: slot});
         }
     }
 
     for block in cfg.labels() {
-        let mut stmt: Vec<RInstr<A::Op, A::Cond>> = vec![];
+        let mut stmt: Vec<Instr<A::Op, A::Cond>> = vec![];
 
         if block == cfg.entry() {
             stmt.extend(incoming.iter().cloned());
 
             for (&old, &new) in args.iter() {
-                stmt.push(RInstr::Move(new, Lit::Var(old)));
+                stmt.push(Instr::Move(new, Lit::Var(old)));
             }
         }
 
@@ -178,7 +178,7 @@ pub fn prepare_coloring<A: Arch>(cfg: &mut Rtl<A::Op, A::Cond>) -> Coloring {
             }
 
             match instr {
-                RInstr::Call(dest, name, args) => {
+                Instr::Call(dest, name, args) => {
                     let new_dest = cfg.fresh_var();
 
                     let mut new_args: Vec<Var> = vec![];
@@ -186,25 +186,25 @@ pub fn prepare_coloring<A: Arch>(cfg: &mut Rtl<A::Op, A::Cond>) -> Coloring {
                     for i in 0..args.len() {
                         if i >= arg_regs.len() {
                             let slot = cfg.fresh_outgoing_var(i - arg_regs.len());
-                            stmt.push(RInstr::StoreLocal{val: args[i], addr: slot});
+                            stmt.push(Instr::StoreLocal{val: args[i], addr: slot});
                         } else {
                             let id = cfg.fresh_var();
-                            stmt.push(RInstr::Move(id, Lit::Var(args[i])));
+                            stmt.push(Instr::Move(id, Lit::Var(args[i])));
                             color.insert(id, arg_regs[i].0);
                             new_args.push(id);
                         }
                     }
 
-                    stmt.push(RInstr::Call(new_dest, name, new_args));
+                    stmt.push(Instr::Call(new_dest, name, new_args));
 
                     color.insert(new_dest, A::ret_reg().0);
-                    stmt.push(RInstr::Move(dest, Lit::Var(new_dest)));
+                    stmt.push(Instr::Move(dest, Lit::Var(new_dest)));
 
                 }
-                RInstr::Return(var) => {
+                Instr::Return(var) => {
                     let id = cfg.fresh_var();
-                    stmt.push(RInstr::Move(id, Lit::Var(var)));
-                    stmt.push(RInstr::Return(id));
+                    stmt.push(Instr::Move(id, Lit::Var(var)));
+                    stmt.push(Instr::Return(id));
                     color.insert(id, A::ret_reg().0);
                 }
                 _ => stmt.push(instr),
@@ -218,7 +218,7 @@ pub fn prepare_coloring<A: Arch>(cfg: &mut Rtl<A::Op, A::Cond>) -> Coloring {
 }
 
 pub fn solve_coloring<A: Arch>(
-    cfg: &Cfg<RInstr<A::Op, A::Cond>>,
+    cfg: &Cfg<A::Op, A::Cond>,
     coloring: &mut Coloring,
     graph: InterferenceGraph,
 ) -> BTreeSet<Var> {
@@ -275,7 +275,7 @@ pub fn solve_coloring<A: Arch>(
     spill_set
 }
 
-pub fn spill_vars<A: Arch>(cfg: &mut Rtl<A::Op, A::Cond>, spill: BTreeSet<Var>) {
+pub fn spill_vars<A: Arch>(cfg: &mut Cfg<A::Op, A::Cond>, spill: BTreeSet<Var>) {
 
     let slots: HashMap<Var, Slot> =
         spill.iter()
@@ -283,14 +283,14 @@ pub fn spill_vars<A: Arch>(cfg: &mut Rtl<A::Op, A::Cond>, spill: BTreeSet<Var>) 
         .collect();
 
     for block in cfg.labels() {
-        let mut stmt: Vec<RInstr<A::Op, A::Cond>> = vec![];
+        let mut stmt: Vec<Instr<A::Op, A::Cond>> = vec![];
 
         for mut instr in cfg[block].stmt.clone() {
 
             for v in instr.operands_mut() {
                 if spill.contains(v) {
                     let id = cfg.fresh_var();
-                    stmt.push(RInstr::LoadLocal{addr: slots[v], dest: id});
+                    stmt.push(Instr::LoadLocal{addr: slots[v], dest: id});
                     *v = id;
                 }
             }
@@ -298,7 +298,7 @@ pub fn spill_vars<A: Arch>(cfg: &mut Rtl<A::Op, A::Cond>, spill: BTreeSet<Var>) 
             if let Some(dest) = instr.destination_mut() && spill.contains(dest) {
                 let id = cfg.fresh_var();
                 let store =
-                    RInstr::StoreLocal{val: id, addr: slots[dest]};
+                    Instr::StoreLocal{val: id, addr: slots[dest]};
                 *dest = id;
                 stmt.push(instr);
                 stmt.push(store);
@@ -311,7 +311,7 @@ pub fn spill_vars<A: Arch>(cfg: &mut Rtl<A::Op, A::Cond>, spill: BTreeSet<Var>) 
     }
 }
 
-pub fn alloc_register<A:Arch>(cfg: &mut Rtl<A::Op, A::Cond>) -> Coloring {
+pub fn alloc_register<A:Arch>(cfg: &mut Cfg<A::Op, A::Cond>) -> Coloring {
     let color = prepare_coloring::<A>(cfg);
 
     loop {
@@ -334,14 +334,15 @@ pub fn alloc_register<A:Arch>(cfg: &mut Rtl<A::Op, A::Cond>) -> Coloring {
     }
 }
 
-pub fn save_caller_saved<A: Arch>(cfg: &mut Rtl<A::Op, A::Cond>, color: &Coloring, saved: BTreeSet<Phys>) {
+pub fn save_caller_saved<A: Arch>
+    (cfg: &mut Cfg<A::Op, A::Cond>, color: &Coloring, saved: BTreeSet<Phys>) {
     let mut liveness = Liveness::new(cfg);
     liveness.run(cfg);
 
     let mut slots: Vec<Slot> = vec![];
 
     for block in cfg.labels() {
-        let mut stmt: Vec<RInstr<A::Op, A::Cond>> = vec![];
+        let mut stmt: Vec<Instr<A::Op, A::Cond>> = vec![];
         let mut lives = liveness[block].outputs.clone();
 
         for instr in cfg[block].stmt.clone().into_iter().rev() {
@@ -349,14 +350,14 @@ pub fn save_caller_saved<A: Arch>(cfg: &mut Rtl<A::Op, A::Cond>, color: &Colorin
                 lives.remove(&dest);
             }
 
-            let is_call = matches!(instr, RInstr::Call(..));
+            let is_call = matches!(instr, Instr::Call(..));
 
             if is_call {
                 let mut i: usize = 0;
                 for &v in lives.iter() {
                     if saved.contains(&Phys(color[v])) {
                         if slots.len() == i { slots.push(cfg.fresh_stack_var(4)); }
-                        stmt.push( RInstr::LoadLocal{addr: slots[i], dest: v} );
+                        stmt.push( Instr::LoadLocal{addr: slots[i], dest: v} );
 
                         i += 1;
                     }
@@ -369,7 +370,7 @@ pub fn save_caller_saved<A: Arch>(cfg: &mut Rtl<A::Op, A::Cond>, color: &Colorin
                 let mut i: usize = 0;
                 for &v in lives.iter() {
                     if saved.contains(&Phys(color[v])) {
-                        stmt.push( RInstr::StoreLocal{addr: slots[i], val: v} );
+                        stmt.push( Instr::StoreLocal{addr: slots[i], val: v} );
 
                         i += 1;
                     }

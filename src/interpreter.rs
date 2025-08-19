@@ -50,8 +50,8 @@ impl std::fmt::Display for Statistics {
     }
 }
 
-pub struct Interpreter<'a>{
-    table: &'a SymbolTable<Instr>,
+pub struct Interpreter<'a, Op, Cond>{
+    table: &'a SymbolTable<Op, Cond>,
 
     /// Associate a pointer to each symbol
     symbols: HashMap<String, i32>,
@@ -75,8 +75,8 @@ pub struct Interpreter<'a>{
     pub stats: Statistics,
 }
 
-impl<'a> Interpreter<'a> {
-    pub fn new(table: &'a SymbolTable<Instr>) -> Self {
+impl<'a, Op: Operation, Cond: Condition> Interpreter<'a, Op, Cond> {
+    pub fn new(table: &'a SymbolTable<Op, Cond>) -> Self {
         let mut symbols: HashMap<String, i32> = HashMap::new();
         let mut memory: HashMap<i32, i32> = HashMap::new();
 
@@ -129,7 +129,7 @@ impl<'a> Interpreter<'a> {
         }
     }
 
-    pub fn cfg(&self) -> &'a Cfg<Instr> {
+    pub fn cfg(&self) -> &'a Cfg<Op, Cond> {
         self.table.symbols[&self.symbol].as_text().unwrap()
     }
 
@@ -194,6 +194,10 @@ impl<'a> Interpreter<'a> {
         self.envs.pop();
 
         self.write_var(dest, result);
+    }
+
+    pub fn var(&self, var: Var) -> i32 {
+        self.read_var(var).unwrap()
     }
 
     pub fn lit(&self, lit: &Lit) -> i32 {
@@ -261,22 +265,22 @@ impl<'a> Interpreter<'a> {
                             args.iter().rfind(|(_, l)| *l == prev_label).unwrap();
                         self.write_var(*dest, self.lit(l))
                     }
-                    Instr::Binop(dest, binop, l1, l2) => {
-                        self.binop(*dest, *binop, self.lit(l1), self.lit(l2));
-                        self.stats.non_trivial += 1;
+                    //Instr::Binop(dest, binop, l1, l2) => {
+                    //    self.binop(*dest, *binop, self.lit(l1), self.lit(l2));
+                    //    self.stats.non_trivial += 1;
 
-                        match binop {
-                            Binop::Sll
-                                | Binop::Srl
-                                | Binop::Sra
-                                => self.stats.shifts += 1,
-                            _ => {}
-                        }
-                    }
-                    Instr::Unop(dest, unop, l) => {
-                        self.unop(*dest, *unop, self.lit(l));
-                        self.stats.non_trivial += 1;
-                    }
+                    //    match binop {
+                    //        Binop::Sll
+                    //            | Binop::Srl
+                    //            | Binop::Sra
+                    //            => self.stats.shifts += 1,
+                    //        _ => {}
+                    //    }
+                    //}
+                    //Instr::Unop(dest, unop, l) => {
+                    //    self.unop(*dest, *unop, self.lit(l));
+                    //    self.stats.non_trivial += 1;
+                    //}
                     Instr::Move(dest, l) => {
                         self.write_var(*dest, self.lit(l));
                     }
@@ -285,33 +289,49 @@ impl<'a> Interpreter<'a> {
                         self.call(
                             *dest,
                             name.clone(),
-                            args.iter().map(|x|self.lit(x)).collect()
+                            args.iter().map(|&x|self.var(x)).collect()
                          );
                     }
                     Instr::Return(l) => {
                         self.sp = sp;
-                        return self.lit(l)
+                        return self.var(*l)
                     },
                     Instr::Jump(l) => {
                         prev_label = label;
                         label = *l;
                         continue;
                     }
-                    Instr::Branch(cond, l1, l2) => {
+                    Instr::Operation(dest, op, args) => {
+                        let values = args.iter().map(|v|self.var(*v)).collect();
+                        self.write_var(*dest, op.eval(values).unwrap());
+                    }
+                    Instr::Branch(cond, args, l1, l2) => {
+                        let values = args.iter().map(|v|self.var(*v)).collect();
                         prev_label = label;
-                        label = if self.lit(cond) != 0 {*l1} else {*l2};
+                        label = if cond.eval(values).unwrap() {*l1} else {*l2};
                         self.stats.non_trivial += 1;
                         self.stats.branches += 1;
                         continue;
                     }
                     Instr::Load{dest, addr, ..} => {
-                        let val = self.load(self.lit(addr));
+                        let val = self.load(self.var(*addr));
                         self.write_var(*dest, val);
                         self.stats.non_trivial += 1;
                         self.stats.loads += 1;
                     }
                     Instr::Store{val, addr, ..} => {
-                        self.store(self.lit(addr), self.lit(val));
+                        self.store(self.var(*addr), self.var(*val));
+                        self.stats.non_trivial += 1;
+                        self.stats.stores += 1;
+                    }
+                    Instr::LoadLocal{dest, addr, ..} => {
+                        let val = self.load(self.lit(&Lit::Stack(*addr)));
+                        self.write_var(*dest, val);
+                        self.stats.non_trivial += 1;
+                        self.stats.loads += 1;
+                    }
+                    Instr::StoreLocal{val, addr, ..} => {
+                        self.store(self.lit(&Lit::Stack(*addr)), self.var(*val));
                         self.stats.non_trivial += 1;
                         self.stats.stores += 1;
                     }

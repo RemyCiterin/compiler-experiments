@@ -28,7 +28,7 @@
 use crate::ssa::*;
 use slotmap::*;
 
-pub fn tail_call_elim(name: &str, cfg: &mut Cfg<Instr>) {
+pub fn tail_call_elim<Op: Operation, Cond: Condition>(name: &str, cfg: &mut Cfg<Op, Cond>) {
     let mut tail_calls: Vec<InstrId> = vec![];
 
     for (label, block) in cfg.iter_blocks() {
@@ -46,7 +46,7 @@ pub fn tail_call_elim(name: &str, cfg: &mut Cfg<Instr>) {
                 }
             }
 
-            if let Instr::Return(Lit::Var(x)) = &cfg[id] && Some(*x) == found {
+            if let Instr::Return(x) = &cfg[id] && Some(*x) == found {
                 tail_calls.push(candidate.unwrap());
                 continue;
             }
@@ -60,7 +60,7 @@ pub fn tail_call_elim(name: &str, cfg: &mut Cfg<Instr>) {
     }
 }
 
-fn do_tail_elim(calls: Vec<InstrId>, cfg: &mut Cfg<Instr>) {
+fn do_tail_elim<Op: Operation, Cond: Condition>(calls: Vec<InstrId>, cfg: &mut Cfg<Op, Cond>) {
 
     // First copy the entry block into a new one, and add phi symbols for the arguments
     let mut env: SparseSecondaryMap<Var, Var> = SparseSecondaryMap::new();
@@ -77,14 +77,14 @@ fn do_tail_elim(calls: Vec<InstrId>, cfg: &mut Cfg<Instr>) {
 
     for &call in calls.iter() {
         let label = cfg.label_instr(call);
-        let mut stmt: Vec<Instr> = vec![];
+        let mut stmt: Vec<Instr<Op, Cond>> = vec![];
 
         let mut found: Option<Var> = None;
 
         let body = cfg[label].stmt.clone();
         for (pos, instr) in body.into_iter().enumerate() {
             if let Some(id) = found {
-                assert!(instr == Instr::Return(Lit::Var(id)));
+                assert!(instr == Instr::Return(id));
                 continue;
             }
 
@@ -93,10 +93,10 @@ fn do_tail_elim(calls: Vec<InstrId>, cfg: &mut Cfg<Instr>) {
                 let Instr::Call(dest, _, args) = instr else { panic!() };
                 found = Some(dest);
 
-                for (i, lit) in args.iter().enumerate() {
+                for (i, var) in args.iter().enumerate() {
                     let id = cfg.fresh_var();
                     phis[i].push((Lit::Var(id), cfg.label_instr(call)));
-                    stmt.push(Instr::Move(id, lit.clone()));
+                    stmt.push(Instr::Move(id, Lit::Var(*var)));
                 }
 
                 stmt.push(Instr::Jump(entry_copy));
@@ -108,7 +108,7 @@ fn do_tail_elim(calls: Vec<InstrId>, cfg: &mut Cfg<Instr>) {
         cfg.set_block_stmt(label, stmt);
     }
 
-    let mut stmt: Vec<Instr> = vec![];
+    let mut stmt: Vec<Instr<Op, Cond>> = vec![];
 
     for (i, args) in phis.into_iter().enumerate() {
         let id = cfg.fresh_var();
@@ -117,7 +117,7 @@ fn do_tail_elim(calls: Vec<InstrId>, cfg: &mut Cfg<Instr>) {
     }
 
     for block in cfg.labels() {
-        let mut stmt: Vec<Instr> = vec![];
+        let mut stmt: Vec<Instr<Op, Cond>> = vec![];
 
         for mut instr in cfg[block].stmt.iter().cloned() {
             for x in instr.operands_mut() {
