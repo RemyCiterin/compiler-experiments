@@ -54,7 +54,6 @@ impl std::fmt::Display for Statistics {
             self.branches,
             self.calls,
         )
-
     }
 }
 

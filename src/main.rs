@@ -31,7 +31,7 @@ pub fn optimize(table: &mut ssa::SymbolTable<COp, CCond>) {
                 let mut simplifier = simplify_ssa::Simplifier::new(&cfg);
                 simplifier.run(cfg);
 
-                //instcombine::combine_instructions(cfg);
+                instcombine::combine_instructions(cfg);
 
                 tail_call_elim::tail_call_elim(name, cfg);
 
@@ -51,7 +51,6 @@ pub fn translate(table: ssa::SymbolTable<COp, CCond>) ->
     for (name, section) in table.symbols.into_iter() {
         match section {
             ssa::Section::Text(cfg) => {
-
                 let mut cfg = arch::rv32::translate(cfg);
 
                 let mut gvn = gvn::ValueTable::new();
@@ -118,12 +117,16 @@ fn main() {
 
     let rtl_table = translate(table);
 
-    //rtl_table.pp_text();
+    rtl_table.pp_text();
+
+    let mut interp = interpreter::Interpreter::new(&rtl_table);
+    interp.interpret_function();
+    //println!("{}", interp.stats);
 
     let ltl_table: ltl::LtlSymbolTable<arch::rv32::RvArch>
         = ltl::LtlSymbolTable::new(rtl_table);
 
-    //println!("{ltl_table}");
+    println!("{ltl_table}");
 
     let mut interp =
         ltl::interpreter::Interpreter::new(&ltl_table);
