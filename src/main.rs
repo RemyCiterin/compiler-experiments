@@ -45,19 +45,19 @@ pub fn optimize(table: &mut ssa::SymbolTable<COp, CCond>) {
 }
 
 pub fn translate(table: ssa::SymbolTable<COp, CCond>) ->
-    ssa::SymbolTable<rtl::rv32::RvOp, rtl::rv32::RvCond> {
+    ssa::SymbolTable<arch::rv32::RvOp, arch::rv32::RvCond> {
     let mut symbols = HashMap::new();
 
     for (name, section) in table.symbols.into_iter() {
         match section {
             ssa::Section::Text(cfg) => {
 
-                let mut cfg = rtl::rv32::translate(cfg);
+                let mut cfg = arch::rv32::translate(cfg);
 
-                let mut gvn = rtl::gvn::ValueTable::new();
+                let mut gvn = gvn::ValueTable::new();
                 gvn.run(&mut cfg);
 
-                let mut dce = rtl::dce::Dce::new();
+                let mut dce = dce::Dce::new();
                 dce.run(&mut cfg);
 
                 out_of_ssa::out_of_ssa(&mut cfg);
@@ -120,7 +120,7 @@ fn main() {
 
     //rtl_table.pp_text();
 
-    let ltl_table: ltl::LtlSymbolTable<rtl::rv32::RvArch>
+    let ltl_table: ltl::LtlSymbolTable<arch::rv32::RvArch>
         = ltl::LtlSymbolTable::new(rtl_table);
 
     //println!("{ltl_table}");

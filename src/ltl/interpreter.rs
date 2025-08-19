@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::ssa::*;
-use crate::rtl::*;
+use crate::arch::*;
 use super::*;
 
 pub struct Statistics {

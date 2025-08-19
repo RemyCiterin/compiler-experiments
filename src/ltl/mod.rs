@@ -6,8 +6,8 @@
 pub mod interpreter;
 
 use std::collections::{HashMap, HashSet};
-use crate::rtl::regalloc::*;
-use crate::rtl::*;
+use crate::arch::regalloc::*;
+use crate::arch::*;
 use crate::ssa::*;
 use slotmap::*;
 
@@ -370,7 +370,6 @@ impl<A: Arch> LtlSymbolTable<A> {
                 Section::Data(words) =>
                     _ = symbols.insert(name, LtlSection::Data(words)),
                 Section::Text(mut cfg) => {
-                    use crate::rtl::regalloc::*;
                     let coloring = alloc_register::<A>(&mut cfg);
                     _ = symbols.insert(name, LtlSection::Text(Ltl::new(cfg, coloring)));
                 }

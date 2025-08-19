@@ -4,7 +4,7 @@ use crate::union_find::*;
 use crate::interference::*;
 use crate::liveness::*;
 use crate::ssa::*;
-use super::*;
+use crate::arch::*;
 
 use slotmap::*;
 

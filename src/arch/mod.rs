@@ -1,9 +1,5 @@
-pub mod gvn;
-pub mod select;
-pub mod rv32;
 pub mod regalloc;
-pub mod dce;
-pub mod pattern;
+pub mod rv32;
 
 use crate::ssa::*;
 use std::fmt::*;

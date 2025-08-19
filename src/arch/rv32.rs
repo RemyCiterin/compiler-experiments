@@ -1,5 +1,5 @@
 use super::*;
-use super::select::*;
+use crate::instselect::*;
 use crate::*;
 use crate::ssa::*;
 use slotmap::*;

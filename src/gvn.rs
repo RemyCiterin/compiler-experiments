@@ -1,4 +1,3 @@
-use crate::rtl::*;
 use crate::ssa::*;
 
 use crate::dominance::*;
