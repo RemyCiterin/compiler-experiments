@@ -879,6 +879,11 @@ pub enum COp {
     ULessThan,
     LessEqual,
     ULessEqual,
+    Mul,
+    UDiv,
+    URem,
+    SDiv,
+    SRem,
     Not,
     Neg,
 }
@@ -900,6 +905,11 @@ impl COp {
             Binop::ULessThan => Self::ULessThan,
             Binop::LessEqual => Self::LessEqual,
             Binop::ULessEqual => Self::ULessEqual,
+            Binop::Mul => Self::Mul,
+            Binop::SDiv => Self::SDiv,
+            Binop::UDiv => Self::UDiv,
+            Binop::SRem => Self::SRem,
+            Binop::URem => Self::URem,
         }
     }
 
@@ -946,6 +956,11 @@ impl Operation for COp {
             Self::LessEqual => (args[0] <= args[1]) as i32,
             Self::ULessThan => (args[0].cast_unsigned() < args[1].cast_unsigned()) as i32,
             Self::ULessEqual => (args[0].cast_unsigned() <= args[1].cast_unsigned()) as i32,
+            Self::Mul => args[0].wrapping_mul(args[1]),
+            Self::SDiv => args[0].wrapping_div(args[1]),
+            Self::SRem => args[0].wrapping_rem(args[1]),
+            Self::UDiv => (args[0].cast_unsigned() / args[1].cast_unsigned()) as i32,
+            Self::URem => (args[0].cast_unsigned() % args[1].cast_unsigned()) as i32,
         })
     }
 }

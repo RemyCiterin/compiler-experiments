@@ -1,4 +1,3 @@
-use crate::ast::*;
 use crate::ssa::*;
 use std::collections::HashMap;
 
@@ -58,6 +57,9 @@ pub enum Pattern<Op> {
     /// A variable of any kind
     Leaf(String),
 
+    /// A variable of kind `register`
+    Reg(String),
+
     /// A constant integer
     Const(i32),
 }
@@ -76,6 +78,10 @@ macro_rules! declare_pattern_vars {
     ( $occ:ident, ( slot $i:ident) ) => {
         #[allow(unused_variables)]
         let $i: Slot = $occ.slots[stringify!($i)].clone();
+    };
+    ( $occ:ident, ( reg $i:ident) ) => {
+        #[allow(unused_variables)]
+        let $i: Var = $occ.vars[stringify!($i)].clone();
     };
     ( $occ:ident, $i:ident ) => {
         #[allow(unused_variables)]
@@ -103,7 +109,11 @@ macro_rules! eval_pattern_vars {
     };
     ( $eval:ident, $occ:ident, ( slot $i:ident) ) => {
         #[allow(unused_variables)]
-        let $i: Var = $eval.eval_lit(Int::Stack($occ.slots[stringify!($i)].clone()));
+        let $i: Var = $eval.eval_lit(Lit::Stack($occ.slots[stringify!($i)].clone()));
+    };
+    ( $eval:ident, $occ:ident, ( var $i:ident) ) => {
+        #[allow(unused_variables)]
+        let $i: Var = $occ.vars[stringify!($i)];
     };
     ( $eval:ident, $occ:ident, $i:ident ) => {
         #[allow(unused_variables)]
@@ -126,11 +136,12 @@ macro_rules! pattern {
     ( (int $i:ident) ) => { crate::pattern::Pattern::Int( stringify!($i).to_string() ) };
     ( (addr $i:ident) ) => { crate::pattern::Pattern::Addr( stringify!($i).to_string() ) };
     ( (slot $i:ident) ) => { crate::pattern::Pattern::Stack( stringify!($i).to_string() ) };
-    ( ($b:ident $($p:tt)* ) ) => {{
+    ( (reg $i:ident) ) => { crate::pattern::Pattern::Reg( stringify!($i).to_string() ) };
+    ( ($op:ident $($p:tt)* ) ) => {{
         let mut patterns = vec![];
         $(patterns.push(pattern!($p));)*
         crate::pattern::Pattern::Operation(
-            binop!($b),
+            crate::ssa::COp::$op,
             patterns
         )
     }};
@@ -142,6 +153,7 @@ pub struct Occurence {
     pub lits: HashMap<String, Lit>,
     pub ints: HashMap<String, i32>,
     pub slots: HashMap<String, Slot>,
+    pub vars: HashMap<String, Var>,
     pub addrs: HashMap<String, String>,
 }
 
@@ -173,6 +185,7 @@ impl Occurence {
     pub fn new() -> Self {
         Self {
             lits: HashMap::new(),
+            vars: HashMap::new(),
             ints: HashMap::new(),
             slots: HashMap::new(),
             addrs: HashMap::new(),
@@ -202,6 +215,11 @@ impl Occurence {
                 self.slots.insert(i.clone(), *x);
                 true
             }
+            (Pattern::Reg(i), Lit::Var(x)) => {
+                if self.vars.contains_key(i) && &self.vars[i] != x { return false; }
+                self.vars.insert(i.clone(), *x);
+                true
+            }
             (Pattern::Leaf(i), _) => {
                 if self.lits.contains_key(i) && &self.lits[i] != lit { return false; }
                 self.lits.insert(i.clone(), lit.clone());
@@ -221,6 +239,12 @@ impl Occurence {
         (&mut self, cfg: &Cfg<Op, Cond>, pattern: &Pattern<Op>, instr: &Instr<Op, Cond>) -> bool {
         match (pattern, instr) {
             //(_, Instr::Move(_, lit)) => self.search_lit(cfg, pattern, lit),
+            (Pattern::Reg(i), _) => {
+                let x = instr.destination().unwrap();
+                if self.vars.contains_key(i) && self.vars[i] != x { return false; }
+                self.vars.insert(i.clone(), x);
+                true
+            }
             (Pattern::Leaf(i), _) => {
                 let x = Lit::Var(instr.destination().unwrap());
                 if self.lits.contains_key(i) && self.lits[i] != x { return false; }

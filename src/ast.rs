@@ -46,7 +46,22 @@ pub enum Binop {
     LessEqual,
 
     /// Unsigned less than or equal, return 1 if true, 0 otherwise
-    ULessEqual
+    ULessEqual,
+
+    /// Integer multiplication
+    Mul,
+
+    /// Unsigned remainder, division by zero is undefined bahaviour
+    URem,
+
+    /// Signed remainder, division by zero and overflow are undefined bahaviour
+    SRem,
+
+    /// Unsigned division, division by zero is undefined bahaviour
+    UDiv,
+
+    /// Signed division, division by zero and overflow are undefined bahaviour
+    SDiv,
 }
 
 #[macro_export]
@@ -116,6 +131,11 @@ impl Binop {
             Binop::LessEqual => (lhs <= rhs) as i32,
             Binop::ULessThan => (lhs.cast_unsigned() < rhs.cast_unsigned()) as i32,
             Binop::ULessEqual => (lhs.cast_unsigned() <= rhs.cast_unsigned()) as i32,
+            Binop::Mul => lhs.wrapping_mul(rhs),
+            Binop::SDiv => lhs.wrapping_div(rhs),
+            Binop::SRem => lhs.wrapping_rem(rhs),
+            Binop::UDiv => (lhs.cast_unsigned() / rhs.cast_unsigned()) as i32,
+            Binop::URem => (lhs.cast_unsigned() % rhs.cast_unsigned()) as i32,
         }
     }
 
@@ -128,6 +148,7 @@ impl Binop {
                 | Binop::Add
                 | Binop::Equal
                 | Binop::NotEqual
+                | Binop::Mul
                 => true,
             _ => false
         }
@@ -151,6 +172,11 @@ impl fmt::Display for Binop {
             Binop::LessEqual => write!(f, "<=s"),
             Binop::ULessThan => write!(f, "<u"),
             Binop::ULessEqual => write!(f, "<=u"),
+            Binop::Mul => write!(f, "*"),
+            Binop::SDiv => write!(f, "`sdiv`"),
+            Binop::UDiv => write!(f, "`udiv`"),
+            Binop::SRem => write!(f, "`srem`"),
+            Binop::URem => write!(f, "`urem`"),
         }
     }
 }
@@ -286,4 +312,3 @@ ast! {
         Empty empty()
     }
 }
-

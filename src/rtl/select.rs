@@ -42,7 +42,7 @@
 use crate::ssa::*;
 
 use slotmap::*;
-use super::pattern::*;
+use crate::pattern::*;
 
 
 pub struct Selection<Op1, Op2, Cond1, Cond2> {
@@ -53,7 +53,6 @@ pub struct Selection<Op1, Op2, Cond1, Cond2> {
     slots: SparseSecondaryMap<Slot, Slot>,
     stmt: Vec<Instr<Op2, Cond2>>,
     label: Label,
-    patterns: SparseSecondaryMap<Var, Pattern<Op1>>,
 }
 
 impl<Op1: Operation, Op2: Operation, Cond1: Condition, Cond2: Condition>
@@ -100,7 +99,6 @@ Selection<Op1, Op2, Cond1, Cond2> {
         }
 
         Self {
-            patterns: as_patterns(&old),
             label: new.entry(),
             stmt: vec![],
             labels,
@@ -167,26 +165,20 @@ Selection<Op1, Op2, Cond1, Cond2> {
         self.new.set_block_stmt(self.labels[self.label], stmt);
     }
 
-    pub fn pattern_of(&self, var: Var) -> Pattern<Op1> {
-        self.patterns.get(var).unwrap_or(&Pattern::Leaf(Lit::Var(var))).clone()
-    }
-
     fn translate_instr<F1, F2>
         (&mut self, instr: &Instr<Op1, Cond1>, tr_op: F1, tr_cond: F2)
     where
-        F1: Fn (&mut Self, Var, Pattern<Op1>) -> Vec<Instr<Op2, Cond2>>,
-        F2: Fn (&mut Self, Cond1, Vec<Pattern<Op1>>, Label, Label) -> Vec<Instr<Op2, Cond2>> {
+        F1: Fn (&mut Self, Var, Instr<Op1, Cond1>) -> Vec<Instr<Op2, Cond2>>,
+        F2: Fn (&mut Self, Cond1, Vec<Var>, Label, Label) -> Vec<Instr<Op2, Cond2>> {
 
         match instr {
             Instr::Operation(dest, _, _) => {
-                let ops = tr_op(self, *dest, self.pattern_of(*dest));
+                let ops = tr_op(self, *dest, instr.clone());
                 self.stmt.extend(ops)
             }
             Instr::Branch(cond, args, l1, l2) => {
-                let pats =
-                    args.iter().map(|v| self.pattern_of(*v)).collect();
                 let ops =
-                    tr_cond(self, cond.clone(), pats, *l1, *l2);
+                    tr_cond(self, cond.clone(), args.clone(), *l1, *l2);
                 self.stmt.extend(ops)
             }
             Instr::Return(id) => {
@@ -220,8 +212,8 @@ Selection<Op1, Op2, Cond1, Cond2> {
     pub fn run<F1, F2>
         (&mut self, tr_op: F1, tr_cond: F2)
     where
-        F1: Fn (&mut Self, Var, Pattern<Op1>) -> Vec<Instr<Op2, Cond2>>,
-        F2: Fn (&mut Self, Cond1, Vec<Pattern<Op1>>, Label, Label) -> Vec<Instr<Op2, Cond2>> {
+        F1: Fn (&mut Self, Var, Instr<Op1, Cond1>) -> Vec<Instr<Op2, Cond2>>,
+        F2: Fn (&mut Self, Cond1, Vec<Var>, Label, Label) -> Vec<Instr<Op2, Cond2>> {
 
         for label in self.old.labels() {
             self.label = label;
@@ -235,4 +227,137 @@ Selection<Op1, Op2, Cond1, Cond2> {
     }
 
     pub fn rtl(self) -> Cfg<Op2, Cond2> { self.new }
+}
+
+
+
+
+
+
+
+
+
+#[macro_export]
+macro_rules! translate_operation_rule {
+    ( $p:tt , $test:expr , $select:ident $dest:ident =>  $transform:expr ) => {
+        OpRule::new(
+            pattern!($p),
+            |occ| {declare_pattern_vars!(occ, $p); $test},
+            |select, occ, v| {
+                #[allow(unused_variables)]
+                let $dest = v;
+                eval_pattern_vars!(select, occ, $p);
+                #[allow(unused_variables)]
+                let $select = select;
+                $transform
+            }
+        )
+    }
+}
+
+#[macro_export]
+macro_rules! translate_condition_rule {
+    ( $p:tt , $test:expr , $select:ident $l1:ident $l2:ident =>  $transform:expr ) => {
+        CondRule::new(
+            pattern!($p),
+            |occ| {declare_pattern_vars!(occ, $p); $test},
+            |select, occ, l1, l2| {
+                #[allow(unused_variables)]
+                let $l1 = l1;
+                #[allow(unused_variables)]
+                let $l2 = l2;
+                eval_pattern_vars!(select, occ, $p);
+                #[allow(unused_variables)]
+                let $select = select;
+                $transform
+            }
+        )
+    }
+}
+
+
+pub struct OpRule<'a, Op1, Op2, Cond1, Cond2> {
+    pub pattern: Pattern<Op1>,
+    pub test: Box<dyn Fn(&Occurence) -> bool + 'a>,
+    pub transform:
+        Box<dyn Fn(&mut Selection<Op1, Op2, Cond1, Cond2>, Occurence, Var)
+            -> Vec<Instr<Op2, Cond2>> + 'a>,
+}
+
+impl<'a, Op1: Operation, Op2: Operation, Cond1: Condition, Cond2: Condition>
+OpRule<'a, Op1, Op2, Cond1, Cond2> {
+    pub fn new<F1, F2>(pattern: Pattern<Op1>, test: F1, tr: F2) -> Self
+        where
+            F1: Fn(&Occurence) -> bool + 'a,
+            F2: Fn(&mut Selection<Op1, Op2, Cond1, Cond2>, Occurence, Var)
+                -> Vec<Instr<Op2, Cond2>> + 'a {
+        Self {
+            pattern,
+            test: Box::new(test),
+            transform: Box::new(tr),
+        }
+    }
+
+    pub fn pattern(&self) -> Pattern<Op1> {
+        self.pattern.clone()
+    }
+
+    pub fn test(&self, occ: &Occurence) -> bool {
+        let test = &self.test;
+        test(occ)
+    }
+
+    pub fn transform(
+        &self,
+        select: &mut Selection<Op1, Op2, Cond1, Cond2>,
+        occ: Occurence,
+        dest: Var
+    ) -> Vec<Instr<Op2, Cond2>> {
+        let transform = &self.transform;
+        transform(select, occ, dest)
+    }
+}
+
+pub struct CondRule<'a, Op1, Op2, Cond1, Cond2> {
+    pub pattern: Pattern<Op1>,
+    pub test: Box<dyn Fn(&Occurence) -> bool + 'a>,
+    pub transform:
+        Box<dyn
+            Fn(&mut Selection<Op1, Op2, Cond1, Cond2>, Occurence, Label, Label)
+            -> Vec<Instr<Op2, Cond2>> + 'a
+        >,
+}
+
+impl<'a, Op1: Operation, Op2: Operation, Cond1: Condition, Cond2: Condition>
+CondRule<'a, Op1, Op2, Cond1, Cond2> {
+    pub fn new<F1, F2>(pattern: Pattern<Op1>, test: F1, tr: F2) -> Self
+        where F1: Fn(&Occurence) -> bool + 'a,
+        F2: Fn(&mut Selection<Op1, Op2, Cond1, Cond2>,Occurence, Label, Label)
+            -> Vec<Instr<Op2, Cond2>> + 'a {
+        Self {
+            pattern,
+            test: Box::new(test),
+            transform: Box::new(tr),
+        }
+    }
+
+    pub fn pattern(&self) -> Pattern<Op1> {
+        self.pattern.clone()
+    }
+
+    pub fn test(&self, occ: &Occurence) -> bool {
+        let test = &self.test;
+        test(occ)
+    }
+
+    pub fn transform(
+        &self,
+        select: &mut Selection<Op1, Op2, Cond1, Cond2>,
+        occ: Occurence,
+        l1: Label,
+        l2: Label
+    ) -> Vec<Instr<Op2, Cond2>> {
+        let transform = &self.transform;
+        transform(select, occ, l1, l2)
+    }
 }

@@ -1,5 +1,4 @@
 use crate::ssa::*;
-use super::*;
 
 use std::collections::HashSet;
 

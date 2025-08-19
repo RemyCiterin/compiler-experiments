@@ -45,10 +45,10 @@ mandelbrot() {
       iter=0;
       while iter < maxiter {
         if x2+y2>16384 { break; }
-        y = (mult(x, y)>>11)+cy;
+        y = ((x*y)>>11)+cy;
         x = x2-y2+cx;
-        x2 = mult(x,x)>>12;
-        y2 = mult(y,y)>>12;
+        x2 = (x*x)>>12;
+        y2 = (y*y)>>12;
         iter = iter + 1;
       }
       print_char(' ' + iter);

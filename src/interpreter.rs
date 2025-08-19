@@ -17,6 +17,12 @@ pub struct Statistics {
     /// Number of shitf operations
     pub shifts: usize,
 
+    /// Number of multiplications
+    pub mults: usize,
+
+    /// Number of divisions/remainders
+    pub divs: usize,
+
     /// Number of call operations
     pub calls: usize,
 
@@ -33,13 +39,15 @@ impl std::fmt::Display for Statistics {
             f,
 "Statistics:
     instret: {}
-    non trivial ops: {} (including {} bit shifts)
+    non trivial ops: {} ({} shifts, {} multiplications and {} divisions)
     memop: {} (including {} loads and {} stores)
     conditional jump: {}
     function calls: {}",
             self.instret,
             self.non_trivial,
             self.shifts,
+            self.mults,
+            self.divs,
             self.loads + self.stores,
             self.loads,
             self.stores,
@@ -118,6 +126,8 @@ impl<'a, Op: Operation, Cond: Condition> Interpreter<'a, Op, Cond> {
             envs: vec![SecondaryMap::new()],
             symbol: "main".to_string(),
             stats: Statistics{
+                mults: 0,
+                divs: 0,
                 instret: 0,
                 loads: 0,
                 stores: 0,
@@ -265,22 +275,6 @@ impl<'a, Op: Operation, Cond: Condition> Interpreter<'a, Op, Cond> {
                             args.iter().rfind(|(_, l)| *l == prev_label).unwrap();
                         self.write_var(*dest, self.lit(l))
                     }
-                    //Instr::Binop(dest, binop, l1, l2) => {
-                    //    self.binop(*dest, *binop, self.lit(l1), self.lit(l2));
-                    //    self.stats.non_trivial += 1;
-
-                    //    match binop {
-                    //        Binop::Sll
-                    //            | Binop::Srl
-                    //            | Binop::Sra
-                    //            => self.stats.shifts += 1,
-                    //        _ => {}
-                    //    }
-                    //}
-                    //Instr::Unop(dest, unop, l) => {
-                    //    self.unop(*dest, *unop, self.lit(l));
-                    //    self.stats.non_trivial += 1;
-                    //}
                     Instr::Move(dest, l) => {
                         self.write_var(*dest, self.lit(l));
                     }
