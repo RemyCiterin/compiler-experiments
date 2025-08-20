@@ -68,8 +68,14 @@ impl Arch for RvArch {
         }
     }
 
-    fn pp_load_local(f: &mut Formatter<'_>, dest: Phys, offset: i32) -> Result {
-        write!(f, "lw {dest}, {offset}(sp)")
+    fn pp_load_local(f: &mut Formatter<'_>, dest: Phys, offset: i32, kind: MemopKind) -> Result {
+        match kind {
+            MemopKind::Word => write!(f, "lw {dest}, {offset}(sp)"),
+            MemopKind::Signed8 => write!(f, "lb {dest}, {offset}(sp)"),
+            MemopKind::Signed16 => write!(f, "lh {dest}, {offset}(sp)"),
+            MemopKind::Unsigned8 => write!(f, "lbu {dest}, {offset}(sp)"),
+            MemopKind::Unsigned16 => write!(f, "lhu {dest}, {offset}(sp)"),
+        }
     }
 
     fn pp_store(f: &mut Formatter<'_>, addr: Phys, val: Phys, kind: MemopKind) -> Result {
@@ -83,8 +89,14 @@ impl Arch for RvArch {
 
     }
 
-    fn pp_store_local(f: &mut Formatter<'_>, offset: i32, val: Phys) -> Result {
-        write!(f, "sw {val}, {offset}(sp)")
+    fn pp_store_local(f: &mut Formatter<'_>, offset: i32, val: Phys, kind: MemopKind) -> Result {
+        match kind {
+            MemopKind::Word => write!(f, "sw {val}, {offset}(sp)"),
+            MemopKind::Signed8 => write!(f, "sb {val}, {offset}(sp)"),
+            MemopKind::Signed16 => write!(f, "sh {val}, {offset}(sp)"),
+            MemopKind::Unsigned8 => write!(f, "sbu {val}, {offset}(sp)"),
+            MemopKind::Unsigned16 => write!(f, "shu {val}, {offset}(sp)"),
+        }
     }
 
     fn pp_return(f: &mut Formatter<'_>) -> Result {
@@ -528,6 +540,10 @@ pub fn translate_operation
         translate_operation_rule!(
             ( URem x y ), true,
             select dest => vec![RvInstr::Operation(dest, RvOp::Binop(RvBinop::URem), vec![x, y])]
+        ),
+        translate_operation_rule!(
+            ( PtrAdd x y ), true,
+            select dest => vec![RvInstr::Operation(dest, RvOp::Binop(RvBinop::Add), vec![x, y])]
         ),
         translate_operation_rule!(
             ( Add x y ), true,

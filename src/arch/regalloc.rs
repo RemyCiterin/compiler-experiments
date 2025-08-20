@@ -149,7 +149,7 @@ pub fn prepare_coloring<A: Arch>(cfg: &mut Cfg<A::Op, A::Cond>) -> Coloring {
             color.insert(cfg.args[i], arg_regs[i].0);
         } else {
             let slot = cfg.fresh_incoming_var(i - arg_regs.len());
-            incoming.push(Instr::LoadLocal{dest: cfg.args[i], addr: slot});
+            incoming.push(Instr::LoadLocal{dest: cfg.args[i], addr: slot, kind: MemopKind::Word});
         }
     }
 
@@ -186,7 +186,8 @@ pub fn prepare_coloring<A: Arch>(cfg: &mut Cfg<A::Op, A::Cond>) -> Coloring {
                     for i in 0..args.len() {
                         if i >= arg_regs.len() {
                             let slot = cfg.fresh_outgoing_var(i - arg_regs.len());
-                            stmt.push(Instr::StoreLocal{val: args[i], addr: slot});
+                            stmt.push(
+                                Instr::StoreLocal{val: args[i], addr: slot, kind: MemopKind::Word});
                         } else {
                             let id = cfg.fresh_var();
                             stmt.push(Instr::Move(id, Lit::Var(args[i])));
@@ -291,7 +292,7 @@ pub fn spill_vars<A: Arch>(cfg: &mut Cfg<A::Op, A::Cond>, spill: BTreeSet<Var>) 
             for v in instr.operands_mut() {
                 if spill.contains(v) {
                     let id = cfg.fresh_var();
-                    stmt.push(Instr::LoadLocal{addr: slots[v], dest: id});
+                    stmt.push(Instr::LoadLocal{addr: slots[v], dest: id, kind: MemopKind::Word});
                     *v = id;
                 }
             }
@@ -299,7 +300,7 @@ pub fn spill_vars<A: Arch>(cfg: &mut Cfg<A::Op, A::Cond>, spill: BTreeSet<Var>) 
             if let Some(dest) = instr.destination_mut() && spill.contains(dest) {
                 let id = cfg.fresh_var();
                 let store =
-                    Instr::StoreLocal{val: id, addr: slots[dest]};
+                    Instr::StoreLocal{val: id, addr: slots[dest], kind: MemopKind::Word};
                 *dest = id;
                 stmt.push(instr);
                 stmt.push(store);
@@ -359,7 +360,7 @@ pub fn save_caller_saved<A: Arch>
                 for &v in lives.iter() {
                     if saved.contains(&Phys(color[v])) {
                         if slots.len() == i { slots.push(cfg.fresh_stack_var(4)); }
-                        stmt.push( Instr::LoadLocal{addr: slots[i], dest: v} );
+                        stmt.push( Instr::LoadLocal{addr: slots[i], dest: v, kind: MemopKind::Word} );
 
                         i += 1;
                     }
@@ -372,7 +373,7 @@ pub fn save_caller_saved<A: Arch>
                 let mut i: usize = 0;
                 for &v in lives.iter() {
                     if saved.contains(&Phys(color[v])) {
-                        stmt.push( Instr::StoreLocal{addr: slots[i], val: v} );
+                        stmt.push( Instr::StoreLocal{addr: slots[i], val: v, kind: MemopKind::Word} );
 
                         i += 1;
                     }

@@ -51,7 +51,7 @@ impl Builder {
             env.insert(arg, Lit::Stack(slot));
 
             stmt.push(
-                Instr::StoreLocal{val: id, addr: slot});
+                Instr::StoreLocal{val: id, addr: slot, kind: MemopKind::Word});
         }
 
         Builder {
@@ -119,7 +119,7 @@ impl Builder {
                 let addr = self.gen_lvalue(lvalue)?;
 
                 if let Lit::Stack(slot) = addr {
-                    self.stmt.push(Instr::LoadLocal{addr: slot, dest: x});
+                    self.stmt.push(Instr::LoadLocal{addr: slot, dest: x, kind: MemopKind::Word});
                 } else {
                     let tmp = self.cfg.fresh_var();
                     self.stmt.push(Instr::Move(tmp, addr));
@@ -215,7 +215,8 @@ impl Builder {
 
                 let tmp = self.cfg.fresh_var();
                 self.stmt.push(Instr::Move(tmp, Lit::Stack(slot1)));
-                self.stmt.push(Instr::StoreLocal{addr: slot2, val: tmp});
+                self.stmt.push(
+                    Instr::StoreLocal{addr: slot2, val: tmp, kind: MemopKind::Word});
 
                 self.env.insert(s.clone(), Lit::Stack(slot2));
 
@@ -316,7 +317,7 @@ impl Builder {
                 let addr = self.gen_lvalue(lvalue)?;
 
                 if let Lit::Stack(slot) = addr {
-                    self.stmt.push(Instr::StoreLocal{addr: slot, val: id});
+                    self.stmt.push(Instr::StoreLocal{addr: slot, val: id, kind: MemopKind::Word});
                 } else {
                     let tmp = self.cfg.fresh_var();
                     self.stmt.push(Instr::Move(tmp, addr));

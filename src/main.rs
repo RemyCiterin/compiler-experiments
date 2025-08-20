@@ -35,6 +35,26 @@ pub fn optimize(table: &mut ssa::SymbolTable<COp, CCond>) {
 
                 tail_call_elim::tail_call_elim(name, cfg);
 
+                let mut gvn = gvn::ValueTable::new();
+                gvn.run(cfg);
+
+                let mut dce = dce::Dce::new();
+                dce.run(cfg);
+
+                cfg.gc();
+
+                println!("
+====================================================
+====================================================
+====================================================
+
+Analyze {name} of cfg\n{cfg}\n
+                ");
+
+                let mut alias = alias::BasicAA::new(cfg);
+                alias.search(cfg);
+                alias.show();
+
                 licm::licm(cfg);
 
                 cfg.gc();

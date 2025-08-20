@@ -155,7 +155,7 @@ impl<Op: Operation> ValueTable<Op> {
                 self.exprs.insert(Expr::Reg(*dest), v);
                 instr
             }
-            Instr::LoadLocal{addr, dest} => {
+            Instr::LoadLocal{addr, dest, kind: MemopKind::Word} => {
                 let mut addr_expr = Expr::Stack(*addr);
 
                 if let Some(value) = self.exprs.get(&addr_expr) {
@@ -172,7 +172,7 @@ impl<Op: Operation> ValueTable<Op> {
                 self.exprs.insert(Expr::Reg(*dest), v);
                 instr
             }
-            Instr::StoreLocal{addr, val} => {
+            Instr::StoreLocal{addr, val, kind: MemopKind::Word} => {
                 let mut addr_expr = Expr::Stack(*addr);
 
                 if let Some(value) = self.exprs.get(&addr_expr) {
@@ -190,7 +190,7 @@ impl<Op: Operation> ValueTable<Op> {
                 self.loads.insert(Expr::Reg(*addr), value);
                 instr
             }
-            Instr::Call(..) | Instr::Store{..} => {
+            Instr::Call(..) | Instr::Store{..} | Instr::StoreLocal{..} => {
                 self.loads.clear();
                 instr
             }

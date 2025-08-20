@@ -145,7 +145,7 @@ peg::parser!(pub grammar customlang() for str {
             let two = RValue::constant(2, begin, end);
             let reference = RValue::lvalue(lvalue, begin, end);
             let offset = RValue::binop(Binop::Sll, rvalue, two, begin ,end);
-            let addr = RValue::binop(Binop::Add, reference, offset, begin, end);
+            let addr = RValue::binop(Binop::PtrAdd, reference, offset, begin, end);
             LValue::defer(addr, begin, end)
         }
         "(" _ lvalue:lvalue() _ ")"

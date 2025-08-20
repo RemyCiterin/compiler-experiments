@@ -48,10 +48,10 @@ pub enum Instr<Op, Cond> {
     Jump(Label),
 
     /// Load from the current stack frame
-    LoadLocal{dest: Var, addr: Slot},
+    LoadLocal{dest: Var, addr: Slot, kind: MemopKind},
 
     /// Load from the current stack frame
-    StoreLocal{val: Var, addr: Slot},
+    StoreLocal{val: Var, addr: Slot, kind: MemopKind},
 
     /// A load instruction
     Load{dest: Var, addr: Var, volatile: bool, kind: MemopKind},
@@ -87,10 +87,10 @@ impl<Op: std::fmt::Display, Cond: std::fmt::Display> std::fmt::Display for Instr
                 write!(f, "{} := [{}] as {kind}", dest, addr),
             Self::Store{addr, val, kind, ..} =>
                 write!(f, "[{}] := {} as {kind}", addr, val),
-            Self::LoadLocal{dest, addr} =>
-                write!(f, "{} := [stack({})]", dest, addr),
-            Self::StoreLocal{addr, val, ..} =>
-                write!(f, "[stack({})] := {}", addr, val),
+            Self::LoadLocal{dest, addr, kind} =>
+                write!(f, "{} := [stack({})] as {kind}", dest, addr),
+            Self::StoreLocal{addr, val, kind, ..} =>
+                write!(f, "[stack({})] := {} as {kind}", addr, val),
             Self::Move(dest, src1) =>
                 write!(f, "{} := {}", dest, src1),
             Self::Jump(l) =>
@@ -884,6 +884,7 @@ pub enum COp {
     Sll,
     Sra,
     Srl,
+    PtrAdd,
     Equal,
     NotEqual,
     LessThan,
@@ -902,6 +903,7 @@ pub enum COp {
 impl COp {
     pub fn from_binop(binop: Binop) -> Self {
         match binop {
+            Binop::PtrAdd => Self::PtrAdd,
             Binop::And => Self::And,
             Binop::Add => Self::Add,
             Binop::Or => Self::Or,
@@ -953,6 +955,7 @@ impl Operation for COp {
         Some(match self {
             Self::Neg => -args[0],
             Self::Not => !args[0],
+            Self::PtrAdd => args[0] + args[1],
             Self::And => args[0] & args[1],
             Self::Or => args[0] | args[1],
             Self::Xor => args[0] ^ args[1],

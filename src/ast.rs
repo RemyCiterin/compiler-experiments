@@ -18,6 +18,9 @@ pub enum Binop {
     /// Addition
     Add,
 
+    /// Addition of a pointer and an integer
+    PtrAdd,
+
     /// Substraction
     Sub,
 
@@ -123,6 +126,7 @@ impl Binop {
             Binop::Add => lhs.wrapping_add(rhs),
             Binop::Sub => lhs.wrapping_sub(rhs),
             Binop::Sll => sll(lhs, rhs),
+            Binop::PtrAdd => lhs + rhs,
             Binop::Sra => lhs.wrapping_shr(rhs.cast_unsigned()),
             Binop::Srl => srl(lhs, rhs),
             Binop::Equal => (lhs == rhs) as i32,
@@ -158,6 +162,7 @@ impl Binop {
 impl fmt::Display for Binop {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match *self {
+            Binop::PtrAdd => write!(f, "&+"),
             Binop::And => write!(f, "&"),
             Binop::Or => write!(f, "|"),
             Binop::Xor => write!(f, "^"),

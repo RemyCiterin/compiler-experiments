@@ -39,10 +39,10 @@ pub enum LInstr<Op, Cond> {
     Jump(usize),
 
     /// Load from the current stack frame
-    LoadLocal{dest: Phys, addr: Slot},
+    LoadLocal{dest: Phys, addr: Slot, kind: MemopKind},
 
     /// Load from the current stack frame
-    StoreLocal{val: Phys, addr: Slot},
+    StoreLocal{val: Phys, addr: Slot, kind: MemopKind},
 
     /// A load instruction
     Load{dest: Phys, addr: Phys, kind: MemopKind},
@@ -102,7 +102,7 @@ impl<A: Arch> Ltl<A> {
 
             if block == cfg.entry() {
                 for (&p, &s) in saved.iter() {
-                    stmt.push(LInstr::StoreLocal{addr: s, val: p});
+                    stmt.push(LInstr::StoreLocal{addr: s, val: p, kind: MemopKind::Word});
                 }
             }
 
@@ -142,14 +142,14 @@ impl<A: Arch> Ltl<A> {
                         stmt.push(LInstr::Ls(phys(dst), src));
                     }
                     Instr::Move(_, Lit::Undef) => {}
-                    Instr::LoadLocal{addr, dest} => {
-                        stmt.push(LInstr::LoadLocal{addr, dest: phys(dest)});
+                    Instr::LoadLocal{addr, dest, kind} => {
+                        stmt.push(LInstr::LoadLocal{addr, dest: phys(dest), kind});
                     }
                     Instr::Load{addr, dest, kind, ..} => {
                         stmt.push(LInstr::Load{addr: phys(addr), dest: phys(dest), kind});
                     }
-                    Instr::StoreLocal{addr, val} => {
-                        stmt.push(LInstr::StoreLocal{addr, val: phys(val)});
+                    Instr::StoreLocal{addr, val, kind} => {
+                        stmt.push(LInstr::StoreLocal{addr, val: phys(val), kind});
                     }
                     Instr::Store{addr, val, kind, ..} => {
                         stmt.push(LInstr::Store{addr: phys(addr), val: phys(val), kind});
@@ -159,7 +159,7 @@ impl<A: Arch> Ltl<A> {
                     }
                     Instr::Return(_) => {
                         for (&p, &s) in saved.iter() {
-                            stmt.push(LInstr::LoadLocal{addr: s, dest: p});
+                            stmt.push(LInstr::LoadLocal{addr: s, dest: p, kind: MemopKind::Word});
                         }
                         stmt.push(LInstr::Return);
                     }
@@ -274,10 +274,10 @@ impl<A: Arch> Ltl<A> {
                         _ = A::pp_load(f, dest, addr, kind)?,
                     LInstr::Store{addr, val, kind} =>
                         _ = A::pp_store(f, addr, val, kind)?,
-                    LInstr::LoadLocal{addr, dest} =>
-                        _ = A::pp_load_local(f, dest, slots[addr])?,
-                    LInstr::StoreLocal{addr, val} =>
-                        _ = A::pp_store_local(f, slots[addr], val)?,
+                    LInstr::LoadLocal{addr, dest, kind} =>
+                        _ = A::pp_load_local(f, dest, slots[addr], kind)?,
+                    LInstr::StoreLocal{addr, val, kind} =>
+                        _ = A::pp_store_local(f, slots[addr], val, kind)?,
                 }
                 write!(f, "\n")?;
             }
@@ -305,10 +305,10 @@ impl<Op: std::fmt::Display, Cond: std::fmt::Display> std::fmt::Display for LInst
                 write!(f, "{} := [{}] as {kind}", dest, addr),
             Self::Store{addr, val, kind, ..} =>
                 write!(f, "[{}] := {} as {kind}", addr, val),
-            Self::LoadLocal{dest, addr} =>
-                write!(f, "{} := [stack({})]", dest, addr),
-            Self::StoreLocal{addr, val, ..} =>
-                write!(f, "[stack({})] := {}", addr, val),
+            Self::LoadLocal{dest, addr, kind} =>
+                write!(f, "{} := [stack({})] as {kind}", dest, addr),
+            Self::StoreLocal{addr, val, kind, ..} =>
+                write!(f, "[stack({})] := {} as {kind}", addr, val),
             Self::Move(dest, src1) =>
                 write!(f, "{} := {}", dest, src1),
             Self::La(dest, src1) =>

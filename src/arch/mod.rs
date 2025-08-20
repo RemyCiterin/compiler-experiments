@@ -54,10 +54,10 @@ pub trait Arch {
     fn pp_jump(f: &mut Formatter<'_>, label: &str) -> Result;
 
     /// Pretty print a load from a local variables at address `sp + offset`
-    fn pp_load_local(f: &mut Formatter<'_>, dest: Phys, offset: i32) -> Result;
+    fn pp_load_local(f: &mut Formatter<'_>, dest: Phys, offset: i32, kind: MemopKind) -> Result;
 
     /// Pretty print a store to a local variables at address `sp + offset`
-    fn pp_store_local(f: &mut Formatter<'_>, offset: i32, val: Phys) -> Result;
+    fn pp_store_local(f: &mut Formatter<'_>, offset: i32, val: Phys, kind: MemopKind) -> Result;
 
     /// Pretty print a load from a variable in a register
     fn pp_load(f: &mut Formatter<'_>, dest: Phys, addr: Phys, kind: MemopKind) -> Result;

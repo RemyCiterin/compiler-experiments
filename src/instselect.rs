@@ -194,11 +194,11 @@ Selection<Op1, Op2, Cond1, Cond2> {
             Instr::Phi(dest, args) => {
                 self.stmt.push(Instr::Phi(*dest, args.clone()));
             }
-            Instr::LoadLocal{dest, addr: slot} => {
-                self.stmt.push(Instr::LoadLocal{dest: *dest, addr: *slot});
+            Instr::LoadLocal{dest, addr: slot, kind} => {
+                self.stmt.push(Instr::LoadLocal{dest: *dest, addr: *slot, kind: *kind});
             }
-            Instr::StoreLocal{val, addr: slot} => {
-                self.stmt.push(Instr::StoreLocal{val: *val, addr: *slot});
+            Instr::StoreLocal{val, addr: slot, kind} => {
+                self.stmt.push(Instr::StoreLocal{val: *val, addr: *slot, kind: *kind});
             }
             Instr::Load{dest, addr, volatile, kind} => {
                 self.stmt.push(
