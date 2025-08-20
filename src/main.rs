@@ -117,7 +117,7 @@ fn main() {
 
     let rtl_table = translate(table);
 
-    rtl_table.pp_text();
+    //rtl_table.pp_text();
 
     let mut interp = interpreter::Interpreter::new(&rtl_table);
     interp.interpret_function();
@@ -126,7 +126,7 @@ fn main() {
     let ltl_table: ltl::LtlSymbolTable<arch::rv32::RvArch>
         = ltl::LtlSymbolTable::new(rtl_table);
 
-    println!("{ltl_table}");
+    //println!("{ltl_table}");
 
     let mut interp =
         ltl::interpreter::Interpreter::new(&ltl_table);

@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use crate::union_find::*;
 use crate::interference::*;
@@ -242,10 +242,11 @@ pub fn solve_coloring<A: Arch>(
 
     while let Some(var) = worklist.pop() {
         if coloring.contains_key(var) { continue; }
-        if !graph.contains(var) { continue; }
 
         let others: BTreeSet<usize> =
-            graph[var].iter()
+            graph.get(var)
+            .unwrap_or(&HashSet::new())
+            .iter()
             .filter_map(|v| {
                 coloring.get(*v).cloned()
             }).collect();
@@ -312,19 +313,20 @@ pub fn spill_vars<A: Arch>(cfg: &mut Cfg<A::Op, A::Cond>, spill: BTreeSet<Var>) 
 }
 
 pub fn alloc_register<A:Arch>(cfg: &mut Cfg<A::Op, A::Cond>) -> Coloring {
-    let color = prepare_coloring::<A>(cfg);
+    let mut color =
+        prepare_coloring::<A>(cfg);
 
     loop {
-        let mut copy = color.clone();
 
         let graph =
-            aggressive_coalescing::<A>(cfg, &mut copy);
+            aggressive_coalescing::<A>(cfg, &mut color);
+
+        let mut copy = color.clone();
 
         let spill_set =
             solve_coloring::<A>(cfg, &mut copy, graph);
 
         if spill_set.is_empty() {
-            //println!("{cfg}");
             let saved = A::caller_saved().into_iter().collect();
             save_caller_saved::<A>(cfg, &copy, saved);
             return copy;

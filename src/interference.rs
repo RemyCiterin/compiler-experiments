@@ -35,6 +35,10 @@ impl InterferenceGraph {
         self.matrix.contains_key(x)
     }
 
+    pub fn get(&self, x: Var) -> Option<&HashSet<Var>> {
+        self.matrix.get(x)
+    }
+
     pub fn merge(&mut self, new: Var, old: Var) {
         assert!(!self.matrix[new].contains(&old));
         assert!(!self.matrix[old].contains(&new));

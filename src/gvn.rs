@@ -227,12 +227,6 @@ impl<Op: Operation> ValueTable<Op> {
         cfg.set_block_stmt(block, stmt);
 
         for &child in dom.childrens(block).iter() {
-            //self.exprs.pop();
-            //self.loads.pop();
-            //self.loads.push();
-            //self.exprs.push();
-            self.exprs.clear();
-            self.loads.clear();
             self.run_on_block(cfg, dom, child);
         }
 

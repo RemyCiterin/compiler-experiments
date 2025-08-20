@@ -237,7 +237,6 @@ impl<'a, A: Arch> Interpreter<'a, A> {
     }
 
     pub fn interpret_function(&mut self) {
-        println!("{}", self.symbol);
         self.stats_mut().calls += 1;
 
         let (frame_size, layout) = self.cfg().layout();
@@ -253,7 +252,6 @@ impl<'a, A: Arch> Interpreter<'a, A> {
 
         'main_loop: loop {
             for instr in self.cfg().blocks[label].iter() {
-                println!("{} {}", label, instr);
                 self.stats_mut().instret += 1;
                 //println!("{instr}");
                 match instr {
