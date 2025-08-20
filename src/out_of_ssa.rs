@@ -6,36 +6,6 @@ pub struct Conventionalize {
     copies: SecondaryMap<Label, Vec<(Var, Lit)>>,
 }
 
-pub trait HasMove: Instruction {
-    fn mv(dest: Var, src: Lit) -> Self;
-}
-
-/// HasPhi must be generate enough such that instructions from the general IR and the machine
-/// specific ISA can use it (even if they don't use Lit directly), this is why `from_phi` take a
-/// list of variables as arguments instead of literals
-pub trait HasPhi: Instruction {
-    fn to_phi(&self) -> Option<(Var, Vec<(Lit, Label)>)>;
-    fn from_phi(dest: Var, args: Vec<(Var, Label)>) -> Self;
-}
-
-impl<Op: Operation, Cond: Condition> HasMove for Instr<Op, Cond> {
-    fn mv(dest: Var, src: Lit) -> Self {
-        Instr::Move(dest, src)
-    }
-}
-
-impl<Op: Operation, Cond: Condition> HasPhi for Instr<Op, Cond> {
-    fn from_phi(dest: Var, args: Vec<(Var, Label)>) -> Self {
-        Instr::Phi(dest, args.into_iter().map(|(v,l)| (Lit::Var(v),l)).collect())
-    }
-
-    fn to_phi(&self) -> Option<(Var, Vec<(Lit, Label)>)> {
-        match self.clone() {
-            Instr::Phi(dest, args) => Some((dest, args)),
-            _ => None
-        }
-    }
-}
 
 impl Conventionalize {
     pub fn new<Op: Operation, Cond: Condition>(cfg: &Cfg<Op, Cond>) -> Self {
@@ -57,15 +27,15 @@ impl Conventionalize {
             let mut stmt = cfg[block].stmt.clone();
 
             for instr in stmt.iter_mut() {
-                if let Some((dest, args)) = instr.to_phi() {
-                    let mut new_vars: Vec<(Var, Label)> = vec![];
+                if let Instr::Phi(dest, args) = instr {
+                    let mut new_vars: Vec<(Lit, Label)> = vec![];
                     for (old_lit, label) in args {
                         let new_var = cfg.fresh_var();
-                        self.copies[label].push((new_var, old_lit));
-                        new_vars.push((new_var, label));
+                        self.copies[*label].push((new_var, old_lit.clone()));
+                        new_vars.push((Lit::Var(new_var), *label));
                     }
 
-                    *instr = Instr::from_phi(dest, new_vars);
+                    *instr = Instr::Phi(*dest, new_vars);
                 }
             }
 
@@ -85,7 +55,7 @@ impl Conventionalize {
                 if instr.exit_block() {
                     body.extend(
                         moves.iter().map(|(v,l)|
-                            Instr::mv(*v,l.clone())));
+                            Instr::Move(*v,l.clone())));
                 }
 
                 body.push(instr.clone());
@@ -110,8 +80,8 @@ pub fn out_of_ssa<Op: Operation, Cond: Condition>(cfg: &mut Cfg<Op, Cond>) {
 
     for (_, block) in cfg.iter_blocks() {
         for instr in block.stmt.iter() {
-            if let Some((dest, args)) = instr.to_phi() {
-                let root = uf.find(dest);
+            if let Instr::Phi(dest, args) = instr {
+                let root = uf.find(*dest);
 
                 for (v, _) in args.iter() {
                     uf.merge(root, uf.find(v.as_var().unwrap()));
@@ -128,7 +98,7 @@ pub fn out_of_ssa<Op: Operation, Cond: Condition>(cfg: &mut Cfg<Op, Cond>) {
         let mut i: usize = 0;
 
         while i < stmt.len() {
-            if let Some(_) = stmt[i].to_phi() {
+            if matches!(stmt[i], Instr::Phi(..)) {
                 stmt.remove(i);
                 continue;
             }

@@ -3,17 +3,6 @@ use std::collections::BTreeSet;
 use std::collections::HashMap;
 use crate::ast::*;
 
-pub trait Instruction: Clone + Eq + Ord + std::fmt::Display + std::hash::Hash {
-    fn operands(&self) -> Vec<Var>;
-    fn operands_mut(&mut self) -> Vec<&mut Var>;
-    fn destination(&self) -> Option<Var>;
-    fn destination_mut(&mut self) -> Option<&mut Var>;
-    fn labels(&self) -> Vec<Label>;
-    fn labels_mut(&mut self) -> Vec<&mut Label>;
-    fn exit_block(&self) -> bool;
-    fn may_have_side_effect(&self) -> bool;
-}
-
 /// Define the basic operations of an architecture
 pub trait Operation: Clone + Eq + Ord + std::fmt::Display + std::hash::Hash {
     /// Number of register arguments of an operation
@@ -170,8 +159,8 @@ impl Lit {
     }
 }
 
-impl<Op: Operation, Cond: Condition> Instruction for Instr<Op, Cond> {
-    fn labels(&self) -> Vec<Label> {
+impl<Op: Operation, Cond: Condition> Instr<Op, Cond> {
+    pub fn labels(&self) -> Vec<Label> {
         match self {
             Self::Branch(_, _, l1, l2) => vec![*l1, *l2],
             Self::Jump(l) => vec![*l],
@@ -180,7 +169,7 @@ impl<Op: Operation, Cond: Condition> Instruction for Instr<Op, Cond> {
         }
     }
 
-    fn labels_mut(&mut self) -> Vec<&mut Label> {
+    pub fn labels_mut(&mut self) -> Vec<&mut Label> {
         match self {
             Self::Branch(_, _, l1, l2) => vec![l1, l2],
             Self::Jump(l) => vec![l],
@@ -189,7 +178,7 @@ impl<Op: Operation, Cond: Condition> Instruction for Instr<Op, Cond> {
         }
     }
 
-    fn may_have_side_effect(&self) -> bool {
+    pub fn may_have_side_effect(&self) -> bool {
         match self {
             Self::Load{..}
                 | Self::Store{..}
@@ -204,7 +193,7 @@ impl<Op: Operation, Cond: Condition> Instruction for Instr<Op, Cond> {
         }
     }
 
-    fn exit_block(&self) -> bool {
+    pub fn exit_block(&self) -> bool {
         match self {
             Self::Branch(..)
                 | Self::Jump(..)
@@ -214,7 +203,7 @@ impl<Op: Operation, Cond: Condition> Instruction for Instr<Op, Cond> {
         }
     }
 
-    fn destination(&self) -> Option<Var> {
+    pub fn destination(&self) -> Option<Var> {
         match self {
             Self::Operation(dest, _, _) => Some(*dest),
             Self::Branch(_, _, _, _) => None,
@@ -230,7 +219,7 @@ impl<Op: Operation, Cond: Condition> Instruction for Instr<Op, Cond> {
         }
     }
 
-    fn destination_mut(&mut self) -> Option<&mut Var> {
+    pub fn destination_mut(&mut self) -> Option<&mut Var> {
         match self {
             Self::Operation(dest, _, _) => Some(dest),
             Self::Branch(_, _, _, _) => None,
@@ -246,7 +235,7 @@ impl<Op: Operation, Cond: Condition> Instruction for Instr<Op, Cond> {
         }
     }
 
-    fn operands(&self) -> Vec<Var> {
+    pub fn operands(&self) -> Vec<Var> {
         match self {
             Self::Operation(_, _, args) => args.clone(),
             Self::Branch(_, args, _, _) => args.clone(),
@@ -267,7 +256,7 @@ impl<Op: Operation, Cond: Condition> Instruction for Instr<Op, Cond> {
         }
     }
 
-    fn operands_mut(&mut self) -> Vec<&mut Var> {
+    pub fn operands_mut(&mut self) -> Vec<&mut Var> {
         match self {
             Self::Operation(_, _, args) => args.iter_mut().collect(),
             Self::Branch(_, args, _, _) => args.iter_mut().collect(),
