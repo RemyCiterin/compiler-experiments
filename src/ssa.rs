@@ -32,6 +32,16 @@ pub trait Condition: Clone + Eq + Ord + std::fmt::Display + std::hash::Hash {
     fn may_have_side_effect(&self) -> bool;
 }
 
+/// In case of a store, indicate the size of the memory chunk being stored, in this case only the
+/// least significant bits of the value are stored.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub enum MemopKind {
+    Signed8,
+    Signed16,
+    Unsigned8,
+    Unsigned16,
+    Word
+}
 
 /// RTL instructions, use architecture specific operations
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -55,10 +65,10 @@ pub enum Instr<Op, Cond> {
     StoreLocal{val: Var, addr: Slot},
 
     /// A load instruction
-    Load{dest: Var, addr: Var, volatile: bool},
+    Load{dest: Var, addr: Var, volatile: bool, kind: MemopKind},
 
     /// A store instruction
-    Store{val: Var, addr: Var, volatile: bool},
+    Store{val: Var, addr: Var, volatile: bool, kind: MemopKind},
 
     /// A return instruction
     Return(Var),
@@ -84,10 +94,10 @@ impl<Op: std::fmt::Display, Cond: std::fmt::Display> std::fmt::Display for Instr
                 for v in args { write!(f, " {v}")?; }
                 write!(f, " to {l1} {l2}")
             }
-            Self::Load{dest, addr, ..} =>
-                write!(f, "{} := [{}]", dest, addr),
-            Self::Store{addr, val, ..} =>
-                write!(f, "[{}] := {}", addr, val),
+            Self::Load{dest, addr, kind, ..} =>
+                write!(f, "{} := [{}] as {kind}", dest, addr),
+            Self::Store{addr, val, kind, ..} =>
+                write!(f, "[{}] := {} as {kind}", addr, val),
             Self::LoadLocal{dest, addr} =>
                 write!(f, "{} := [stack({})]", dest, addr),
             Self::StoreLocal{addr, val, ..} =>
@@ -745,6 +755,18 @@ impl<Op: Operation, Cond: Condition> SymbolTable<Op, Cond> {
             if matches!(section, Section::Text(..)) {
                 print!(".globl {symbol}:\n{section}\n\n");
             }
+        }
+    }
+}
+
+impl std::fmt::Display for MemopKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Signed8 => write!(f, "u8"),
+            Self::Signed16 => write!(f, "u16"),
+            Self::Unsigned16 => write!(f, "i16"),
+            Self::Unsigned8 => write!(f, "u8"),
+            Self::Word => write!(f, "i32"),
         }
     }
 }

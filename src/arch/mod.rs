@@ -60,10 +60,10 @@ pub trait Arch {
     fn pp_store_local(f: &mut Formatter<'_>, offset: i32, val: Phys) -> Result;
 
     /// Pretty print a load from a variable in a register
-    fn pp_load(f: &mut Formatter<'_>, dest: Phys, addr: Phys) -> Result;
+    fn pp_load(f: &mut Formatter<'_>, dest: Phys, addr: Phys, kind: MemopKind) -> Result;
 
     /// Pretty print a store to a variable in a register
-    fn pp_store(f: &mut Formatter<'_>, addr: Phys, val: Phys) -> Result;
+    fn pp_store(f: &mut Formatter<'_>, addr: Phys, val: Phys, kind: MemopKind) -> Result;
 
     /// Pretty print return instruction
     fn pp_return(f: &mut Formatter<'_>) -> Result;

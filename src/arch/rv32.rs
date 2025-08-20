@@ -58,16 +58,29 @@ impl Arch for RvArch {
         write!(f, "j {label}")
     }
 
-    fn pp_load(f: &mut Formatter<'_>, dest: Phys, addr: Phys) -> Result {
-        write!(f, "lw {dest}, ({addr})")
+    fn pp_load(f: &mut Formatter<'_>, dest: Phys, addr: Phys, kind: MemopKind) -> Result {
+        match kind {
+            MemopKind::Word => write!(f, "lw {dest}, ({addr})"),
+            MemopKind::Signed8 => write!(f, "lb {dest}, ({addr})"),
+            MemopKind::Signed16 => write!(f, "lh {dest}, ({addr})"),
+            MemopKind::Unsigned8 => write!(f, "lbu {dest}, ({addr})"),
+            MemopKind::Unsigned16 => write!(f, "lhu {dest}, ({addr})"),
+        }
     }
 
     fn pp_load_local(f: &mut Formatter<'_>, dest: Phys, offset: i32) -> Result {
         write!(f, "lw {dest}, {offset}(sp)")
     }
 
-    fn pp_store(f: &mut Formatter<'_>, addr: Phys, val: Phys) -> Result {
-        write!(f, "sw {val}, ({addr})")
+    fn pp_store(f: &mut Formatter<'_>, addr: Phys, val: Phys, kind: MemopKind) -> Result {
+        match kind {
+            MemopKind::Word => write!(f, "sw {val}, ({addr})"),
+            MemopKind::Signed8 => write!(f, "sb {val}, ({addr})"),
+            MemopKind::Signed16 => write!(f, "sh {val}, ({addr})"),
+            MemopKind::Unsigned8 => write!(f, "sbu {val}, ({addr})"),
+            MemopKind::Unsigned16 => write!(f, "shu {val}, ({addr})"),
+        }
+
     }
 
     fn pp_store_local(f: &mut Formatter<'_>, offset: i32, val: Phys) -> Result {

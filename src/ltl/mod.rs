@@ -45,10 +45,10 @@ pub enum LInstr<Op, Cond> {
     StoreLocal{val: Phys, addr: Slot},
 
     /// A load instruction
-    Load{dest: Phys, addr: Phys},
+    Load{dest: Phys, addr: Phys, kind: MemopKind},
 
     /// A store instruction
-    Store{val: Phys, addr: Phys},
+    Store{val: Phys, addr: Phys, kind: MemopKind},
 
     /// A return instruction
     Return,
@@ -145,14 +145,14 @@ impl<A: Arch> Ltl<A> {
                     Instr::LoadLocal{addr, dest} => {
                         stmt.push(LInstr::LoadLocal{addr, dest: phys(dest)});
                     }
-                    Instr::Load{addr, dest, ..} => {
-                        stmt.push(LInstr::Load{addr: phys(addr), dest: phys(dest)});
+                    Instr::Load{addr, dest, kind, ..} => {
+                        stmt.push(LInstr::Load{addr: phys(addr), dest: phys(dest), kind});
                     }
                     Instr::StoreLocal{addr, val} => {
                         stmt.push(LInstr::StoreLocal{addr, val: phys(val)});
                     }
-                    Instr::Store{addr, val, ..} => {
-                        stmt.push(LInstr::Store{addr: phys(addr), val: phys(val)});
+                    Instr::Store{addr, val, kind, ..} => {
+                        stmt.push(LInstr::Store{addr: phys(addr), val: phys(val), kind});
                     }
                     Instr::Call(_, name, _) => {
                         stmt.push(LInstr::Call(name));
@@ -270,10 +270,10 @@ impl<A: Arch> Ltl<A> {
                         _ = A::pp_call(f, &name)?,
                     LInstr::Return =>
                         _ = A::pp_return(f)?,
-                    LInstr::Load{addr, dest} =>
-                        _ = A::pp_load(f, dest, addr)?,
-                    LInstr::Store{addr, val} =>
-                        _ = A::pp_store(f, addr, val)?,
+                    LInstr::Load{addr, dest, kind} =>
+                        _ = A::pp_load(f, dest, addr, kind)?,
+                    LInstr::Store{addr, val, kind} =>
+                        _ = A::pp_store(f, addr, val, kind)?,
                     LInstr::LoadLocal{addr, dest} =>
                         _ = A::pp_load_local(f, dest, slots[addr])?,
                     LInstr::StoreLocal{addr, val} =>
@@ -301,10 +301,10 @@ impl<Op: std::fmt::Display, Cond: std::fmt::Display> std::fmt::Display for LInst
                 for v in args { write!(f, " {v}")?; }
                 write!(f, " to {l1}")
             }
-            Self::Load{dest, addr} =>
-                write!(f, "{} := [{}]", dest, addr),
-            Self::Store{addr, val, ..} =>
-                write!(f, "[{}] := {}", addr, val),
+            Self::Load{dest, addr, kind} =>
+                write!(f, "{} := [{}] as {kind}", dest, addr),
+            Self::Store{addr, val, kind, ..} =>
+                write!(f, "[{}] := {} as {kind}", addr, val),
             Self::LoadLocal{dest, addr} =>
                 write!(f, "{} := [stack({})]", dest, addr),
             Self::StoreLocal{addr, val, ..} =>

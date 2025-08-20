@@ -200,11 +200,13 @@ Selection<Op1, Op2, Cond1, Cond2> {
             Instr::StoreLocal{val, addr: slot} => {
                 self.stmt.push(Instr::StoreLocal{val: *val, addr: *slot});
             }
-            Instr::Load{dest, addr, volatile} => {
-                self.stmt.push(Instr::Load{dest: *dest, addr: *addr, volatile: *volatile});
+            Instr::Load{dest, addr, volatile, kind} => {
+                self.stmt.push(
+                    Instr::Load{dest: *dest, addr: *addr, volatile: *volatile, kind: *kind});
             }
-            Instr::Store{val, addr, volatile} => {
-                self.stmt.push(Instr::Store{val: *val, addr: *addr, volatile: *volatile});
+            Instr::Store{val, addr, volatile, kind} => {
+                self.stmt.push(
+                    Instr::Store{val: *val, addr: *addr, volatile: *volatile, kind: *kind});
             }
         }
     }

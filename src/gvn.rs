@@ -144,7 +144,7 @@ impl<Op: Operation> ValueTable<Op> {
                 self.exprs.insert(Expr::Reg(*dest), v);
                 instr
             }
-            Instr::Load{addr, dest, volatile: false} => {
+            Instr::Load{addr, dest, volatile: false, kind: MemopKind::Word} => {
                 if let Some(value) = self.loads.get(&Expr::Reg(*addr)) {
                     self.exprs.insert(Expr::Reg(*dest), *value);
                     return Instr::Move(*dest, Lit::Var(self.values[*value].clone()));
@@ -184,7 +184,7 @@ impl<Op: Operation> ValueTable<Op> {
                 self.loads.insert(addr_expr, value);
                 instr
             }
-            Instr::Store{addr, val, volatile: false} => {
+            Instr::Store{addr, val, volatile: false, kind: MemopKind::Word} => {
                 self.loads.clear();
                 let value = self.insert_var(*val);
                 self.loads.insert(Expr::Reg(*addr), value);

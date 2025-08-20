@@ -124,7 +124,7 @@ impl Builder {
                     let tmp = self.cfg.fresh_var();
                     self.stmt.push(Instr::Move(tmp, addr));
                     self.stmt.push(
-                        Instr::Load{dest: x, addr: tmp, volatile: false});
+                        Instr::Load{dest: x, addr: tmp, volatile: false, kind: MemopKind::Word});
                 }
 
                 Ok(x)
@@ -321,7 +321,7 @@ impl Builder {
                     let tmp = self.cfg.fresh_var();
                     self.stmt.push(Instr::Move(tmp, addr));
                     self.stmt.push(
-                        Instr::Store{val: id, addr: tmp, volatile: false});
+                        Instr::Store{val: id, addr: tmp, volatile: false, kind: MemopKind::Word});
                 }
 
                 Ok(())
