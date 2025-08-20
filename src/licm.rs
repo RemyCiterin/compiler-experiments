@@ -23,7 +23,8 @@ impl LoopFinder {
     }
 
     /// Return if we can reach the header from a given block, and write the result in `self.cache`
-    pub fn progress<I: Instruction>(&mut self, cfg: &Cfg<I>, block: Label) -> bool {
+    pub fn progress<Op: Operation, Cond: Condition>
+        (&mut self, cfg: &Cfg<Op, Cond>, block: Label) -> bool {
         if let Some(result) = self.cache.get(&block) { return *result; }
         if !self.allowed.contains(&block) { return false; }
         if self.seen.contains(&block) { return false; }
@@ -40,7 +41,7 @@ impl LoopFinder {
         found
     }
 
-    pub fn search_exit<I: Instruction>(&mut self, cfg: &Cfg<I>) {
+    pub fn search_exit<Op: Operation, Cond: Condition>(&mut self, cfg: &Cfg<Op, Cond>) {
         for block in self.allowed.iter().copied() {
             if self.cache[&block] {
                 for x in cfg[block].succs() {
@@ -53,7 +54,8 @@ impl LoopFinder {
     }
 
     /// Return the loop that start by `self.header` (if one exist) as a set of labels
-    pub fn run<I: Instruction>(&mut self, cfg: &Cfg<I>, dom: &Dominance) -> HashSet<Label> {
+    pub fn run<Op: Operation, Cond: Condition>
+        (&mut self, cfg: &Cfg<Op, Cond>, dom: &Dominance) -> HashSet<Label> {
         let mut worklist: Vec<Label> = vec![self.header];
 
         while let Some(label) = worklist.pop() {
@@ -79,7 +81,8 @@ pub struct LoopSimplifier {
 }
 
 impl LoopSimplifier {
-    pub fn new(header: Label, cfg: &Cfg<Instr>, dom: &Dominance) -> Self {
+    pub fn new<Op: Operation, Cond: Condition>
+        (header: Label, cfg: &Cfg<Op, Cond>, dom: &Dominance) -> Self {
         let mut finder = LoopFinder::new(header);
         let cycle = finder.run(cfg, dom);
 
@@ -89,7 +92,8 @@ impl LoopSimplifier {
         }
     }
 
-    pub fn run(&mut self, cfg: &mut Cfg<Instr>, dom: &Dominance) -> bool {
+    pub fn run<Op: Operation, Cond: Condition>
+        (&mut self, cfg: &mut Cfg<Op, Cond>, dom: &Dominance) -> bool {
         // A variable is defined in a loop if it is a destination of one of it's instruction
         let mut defined: HashSet<Var> = HashSet::new();
 
@@ -102,10 +106,10 @@ impl LoopSimplifier {
         }
 
         let mut progress: bool = false;
-        let mut moved: Vec<Instr> = vec![];
+        let mut moved: Vec<Instr<Op, Cond>> = vec![];
 
         for &block in self.cycle.iter() {
-            let mut stmt: Vec<Instr> = vec![];
+            let mut stmt: Vec<Instr<Op, Cond>> = vec![];
 
             for instr in cfg[block].stmt.iter().cloned() {
                 // Phi(...) is the only instruction that depends of variables
@@ -128,7 +132,7 @@ impl LoopSimplifier {
         }
 
         let block = dom.idom(self.header);
-        let mut stmt: Vec<Instr> = vec![];
+        let mut stmt: Vec<Instr<Op, Cond>> = vec![];
 
         for instr in cfg[block].stmt.iter().cloned() {
             if instr.exit_block() {
@@ -144,7 +148,7 @@ impl LoopSimplifier {
     }
 }
 
-pub fn licm(cfg: &mut Cfg<Instr>) {
+pub fn licm<Op: Operation, Cond: Condition>(cfg: &mut Cfg<Op, Cond>) {
     let mut dom = Dominance::new(cfg);
     dom.run(cfg);
 

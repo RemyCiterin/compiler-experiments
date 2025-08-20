@@ -1,7 +1,9 @@
 use super::*;
-use super::select::*;
+use crate::instselect::*;
 use crate::*;
 use crate::ssa::*;
+use slotmap::*;
+
 use crate::pattern::*;
 
 pub struct RvArch;
@@ -56,16 +58,29 @@ impl Arch for RvArch {
         write!(f, "j {label}")
     }
 
-    fn pp_load(f: &mut Formatter<'_>, dest: Phys, addr: Phys) -> Result {
-        write!(f, "lw {dest}, ({addr})")
+    fn pp_load(f: &mut Formatter<'_>, dest: Phys, addr: Phys, kind: MemopKind) -> Result {
+        match kind {
+            MemopKind::Word => write!(f, "lw {dest}, ({addr})"),
+            MemopKind::Signed8 => write!(f, "lb {dest}, ({addr})"),
+            MemopKind::Signed16 => write!(f, "lh {dest}, ({addr})"),
+            MemopKind::Unsigned8 => write!(f, "lbu {dest}, ({addr})"),
+            MemopKind::Unsigned16 => write!(f, "lhu {dest}, ({addr})"),
+        }
     }
 
     fn pp_load_local(f: &mut Formatter<'_>, dest: Phys, offset: i32) -> Result {
         write!(f, "lw {dest}, {offset}(sp)")
     }
 
-    fn pp_store(f: &mut Formatter<'_>, addr: Phys, val: Phys) -> Result {
-        write!(f, "sw {val}, ({addr})")
+    fn pp_store(f: &mut Formatter<'_>, addr: Phys, val: Phys, kind: MemopKind) -> Result {
+        match kind {
+            MemopKind::Word => write!(f, "sw {val}, ({addr})"),
+            MemopKind::Signed8 => write!(f, "sb {val}, ({addr})"),
+            MemopKind::Signed16 => write!(f, "sh {val}, ({addr})"),
+            MemopKind::Unsigned8 => write!(f, "sbu {val}, ({addr})"),
+            MemopKind::Unsigned16 => write!(f, "shu {val}, ({addr})"),
+        }
+
     }
 
     fn pp_store_local(f: &mut Formatter<'_>, offset: i32, val: Phys) -> Result {
@@ -146,12 +161,77 @@ impl Arch for RvArch {
             Phys(31),
         ]
     }
+
+    fn gen_layout(stack: &slotmap::SlotMap<Slot, SlotKind>, contains_calls: bool) ->
+        (String, String, slotmap::SparseSecondaryMap<Slot, i32>)
+    {
+        let mut slots: SparseSecondaryMap<Slot, i32> = SparseSecondaryMap::new();
+        let mut stack_size: i32 = 0;
+
+        let mut num_outgoing = 0;
+        for (_, kind) in stack.iter() {
+            match kind {
+                SlotKind::Local(size) => {
+                    stack_size += *size as i32;
+                },
+                SlotKind::Outgoing(num) =>
+                    num_outgoing = usize::max(*num + 1, num_outgoing),
+                _ => {}
+            }
+        }
+
+        stack_size += num_outgoing as i32 * 4;
+
+        if contains_calls {
+            stack_size += 4;
+        }
+
+        if stack_size % 16 != 0 {
+            stack_size += 16 - (stack_size % 16);
+        }
+
+        let mut offset: i32 = num_outgoing as i32 * 4;
+        for (slot, kind) in stack.iter() {
+            match kind {
+                SlotKind::Local(size) => {
+                    slots.insert(slot, offset);
+                    offset += *size as i32;
+                }
+                SlotKind::Outgoing(num) =>
+                    _ = slots.insert(slot, 4 * *num as i32),
+                SlotKind::Incoming(num) =>
+                    _ = slots.insert(slot, stack_size + 4 * *num as i32),
+            }
+        }
+
+        if contains_calls {
+            let push =
+                format!("addi sp, sp, {}\n\tsw ra, {}(sp)", -stack_size, stack_size-4);
+
+            let pop =
+                format!("lw ra, {}(sp)\n\taddi sp, sp, {}", stack_size-4, stack_size);
+
+            (push, pop, slots)
+        } else {
+            if stack_size == 0 {
+                return ("".to_string(), "".to_string(), slots);
+            }
+
+            let push =
+                format!("addi sp, sp, {}", -stack_size);
+
+            let pop =
+                format!("addi sp, sp, {}", stack_size);
+
+            (push, pop, slots)
+        }
+    }
 }
 
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum RvBinop {
-    Add, Sub, Slt, Sltu, Sll, Srl, Sra, And, Or, Xor
+    Add, Sub, Slt, Sltu, Sll, Srl, Sra, And, Or, Xor, Mul, SDiv, SRem, UDiv, URem
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
@@ -177,6 +257,11 @@ impl std::fmt::Display for RvBinop {
             Self::Srl => write!(f, "srl"),
             Self::Slt => write!(f, "slt"),
             Self::Sltu => write!(f, "sltu"),
+            Self::Mul => write!(f, "mul"),
+            Self::SDiv => write!(f, "div"),
+            Self::SRem => write!(f, "rem"),
+            Self::UDiv => write!(f, "divu"),
+            Self::URem => write!(f, "remu"),
         }
     }
 }
@@ -273,6 +358,13 @@ impl Operation for RvOp {
             RvOp::Unop(RvUnop::Sll, imm) => Some( crate::ast::sll(v[0], *imm) ),
             RvOp::Unop(RvUnop::Srl, imm) => Some( crate::ast::srl(v[0], *imm) ),
             RvOp::Unop(RvUnop::Sra, imm) => Some( v[0].wrapping_shr(imm.cast_unsigned()) ),
+            RvOp::Binop(RvBinop::Mul) => Some( v[0] * v[1] ),
+            RvOp::Binop(RvBinop::SDiv) => Some( v[0] / v[1] ),
+            RvOp::Binop(RvBinop::SRem) => Some( v[0] % v[1] ),
+            RvOp::Binop(RvBinop::UDiv) =>
+                Some( (v[0].cast_unsigned() / v[1].cast_unsigned()) as i32 ),
+            RvOp::Binop(RvBinop::URem) =>
+                Some( (v[0].cast_unsigned() % v[1].cast_unsigned()) as i32 ),
         }
     }
 }
@@ -306,10 +398,11 @@ pub fn check_riscv_immediate(imm: i32) -> bool {
     imm >= -2048 && imm <= 2047
 }
 
-pub type RvInstr = RInstr<RvOp, RvCond>;
+pub type RvInstr = Instr<RvOp, RvCond>;
 
 pub fn translate_operation
-    (select: &mut Selection<RvOp, RvCond>, instr: &Instr, dest: Var) -> Vec<RvInstr> {
+    (select: &mut Selection<COp, RvOp, CCond, RvCond>, instr: &Instr<COp, CCond>, dest: Var)
+    -> Vec<RvInstr> {
 
     let operation_rules = vec![
         // First: we try to detect some cases where we can propagate the immediate
@@ -417,6 +510,26 @@ pub fn translate_operation
             select dest => vec![RvInstr::Operation(dest, RvOp::Binop(RvBinop::Sltu), vec![x, y])]
         ),
         translate_operation_rule!(
+            ( Mul x y ), true,
+            select dest => vec![RvInstr::Operation(dest, RvOp::Binop(RvBinop::Mul), vec![x, y])]
+        ),
+        translate_operation_rule!(
+            ( SDiv x y ), true,
+            select dest => vec![RvInstr::Operation(dest, RvOp::Binop(RvBinop::SDiv), vec![x, y])]
+        ),
+        translate_operation_rule!(
+            ( UDiv x y ), true,
+            select dest => vec![RvInstr::Operation(dest, RvOp::Binop(RvBinop::UDiv), vec![x, y])]
+        ),
+        translate_operation_rule!(
+            ( SRem x y ), true,
+            select dest => vec![RvInstr::Operation(dest, RvOp::Binop(RvBinop::SRem), vec![x, y])]
+        ),
+        translate_operation_rule!(
+            ( URem x y ), true,
+            select dest => vec![RvInstr::Operation(dest, RvOp::Binop(RvBinop::URem), vec![x, y])]
+        ),
+        translate_operation_rule!(
             ( Add x y ), true,
             select dest => vec![RvInstr::Operation(dest, RvOp::Binop(RvBinop::Add), vec![x, y])]
         ),
@@ -516,7 +629,8 @@ pub fn translate_operation
 }
 
 pub fn translate_condition
-    (select: &mut Selection<RvOp, RvCond>, lit: Lit, l1: Label, l2: Label) -> Vec<RvInstr> {
+    (select: &mut Selection<COp, RvOp, CCond, RvCond>, lit: Lit, l1: Label, l2: Label)
+    -> Vec<RvInstr> {
 
     let condition_rules = vec![
         translate_condition_rule!(
@@ -583,15 +697,15 @@ pub fn translate_condition
 
 }
 
-pub fn translate(cfg: Cfg<Instr>) -> Cfg<RvInstr> {
+pub fn translate(cfg: Cfg<COp, CCond>) -> Cfg<RvOp, RvCond> {
     let mut select = Selection::new(cfg);
 
 
     select.run(
-        |select, instr, dest|
-            translate_operation(select, instr, dest),
-        |select, lit, l1, l2|
-            translate_condition(select, lit, l1, l2),
+        |select, dest, instr|
+            translate_operation(select, &instr, dest),
+        |select, _, args, l1, l2|
+            translate_condition(select, Lit::Var(args[0]), l1, l2),
     );
 
     select.rtl()

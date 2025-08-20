@@ -10,12 +10,12 @@ use slotmap::*;
 
 /// Naive SSA form generation using liveness relation, it rename each variable at the entry of each
 /// block using a phi expression
-pub fn into_ssa(cfg: &mut Cfg<Instr>) {
+pub fn into_ssa<Op: Operation, Cond: Condition>(cfg: &mut Cfg<Op, Cond>) {
     // Used to compute the translation as ssa of the output variables of each block
     let mut globals: HashMap<Label, HashMap<Var, Var>> = HashMap::new();
 
     // Phi expressions to insert in each block
-    let mut phis: HashMap<Label, Vec<Instr>> = HashMap::new();
+    let mut phis: HashMap<Label, Vec<Instr<Op, Cond>>> = HashMap::new();
 
     // Liveness analysis
     let mut liveness = Liveness::new(cfg);
@@ -83,15 +83,15 @@ pub fn into_ssa(cfg: &mut Cfg<Instr>) {
     cfg.start_ssa();
 }
 
-pub struct IntoSsaTransform {
-    phis: SecondaryMap<Label, SparseSecondaryMap<Var, Instr>>,
+pub struct IntoSsaTransform<Op, Cond> {
+    phis: SecondaryMap<Label, SparseSecondaryMap<Var, Instr<Op, Cond>>>,
     //env: SecondaryMap<Var, Var>,
     env: PHashMap<Var, Var>,
     dom: Dominance,
 }
 
-impl IntoSsaTransform {
-    pub fn new(cfg: &Cfg<Instr>) -> Self {
+impl<Op: Operation, Cond: Condition> IntoSsaTransform<Op, Cond> {
+    pub fn new(cfg: &Cfg<Op, Cond>) -> Self {
         let mut phis = SecondaryMap::new();
         let mut env = PHashMap::new();
         let mut dom = Dominance::new(cfg);
@@ -110,7 +110,7 @@ impl IntoSsaTransform {
 
     /// For each update of a variable `v` in a block `b`, insert the instruction
     /// `v := phi (v, ..., v)` at the dominance frontier of `b`
-    pub fn insert_phis(&mut self, cfg: &Cfg<Instr>) {
+    pub fn insert_phis(&mut self, cfg: &Cfg<Op, Cond>) {
         let mut phis =
             std::mem::take(&mut self.phis);
 
@@ -150,7 +150,7 @@ impl IntoSsaTransform {
         self.phis = phis;
     }
 
-    pub fn renaming(&mut self, cfg: &mut Cfg<Instr>, block: Label) {
+    pub fn renaming(&mut self, cfg: &mut Cfg<Op, Cond>, block: Label) {
         self.env.push();
 
         for (_, phi) in self.phis[block].iter_mut() {
@@ -202,14 +202,14 @@ impl IntoSsaTransform {
         self.env.pop();
     }
 
-    pub fn run(&mut self, cfg: &mut Cfg<Instr>) {
+    pub fn run(&mut self, cfg: &mut Cfg<Op, Cond>) {
         self.insert_phis(cfg);
         self.renaming(cfg, cfg.entry());
 
         let blocks: Vec<Label> = cfg.iter_blocks().map(|(b,_)| b).collect();
 
         for block in blocks {
-            let mut stmt: Vec<Instr> =
+            let mut stmt: Vec<Instr<Op, Cond>> =
                 self.phis[block].iter().map(|(_, phi)| phi.clone()).collect();
 
             stmt.extend(cfg[block].stmt.iter().cloned());

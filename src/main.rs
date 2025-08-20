@@ -6,11 +6,14 @@ use std::io::prelude::*;
 
 use builder;
 
-pub fn into_ssa(table: &mut ssa::SymbolTable<ssa::Instr>) {
+use ssa::*;
+
+pub fn into_ssa(table: &mut ssa::SymbolTable<COp, CCond>) {
     for (_, section) in table.symbols.iter_mut() {
         match section {
             ssa::Section::Text(cfg) => {
-                let mut to_ssa = into_ssa::IntoSsaTransform::new(&cfg);
+                let mut to_ssa =
+                    into_ssa::IntoSsaTransform::new(&cfg);
                 to_ssa.run(cfg);
             }
             _ => {}
@@ -18,7 +21,7 @@ pub fn into_ssa(table: &mut ssa::SymbolTable<ssa::Instr>) {
     }
 }
 
-pub fn optimize(table: &mut ssa::SymbolTable<ssa::Instr>) {
+pub fn optimize(table: &mut ssa::SymbolTable<COp, CCond>) {
     for (name, section) in table.symbols.iter_mut() {
         match section {
             ssa::Section::Text(cfg) => {
@@ -29,12 +32,6 @@ pub fn optimize(table: &mut ssa::SymbolTable<ssa::Instr>) {
                 simplifier.run(cfg);
 
                 instcombine::combine_instructions(cfg);
-
-                let mut gvn = gvn::ValueTable::new();
-                gvn.run(cfg);
-
-                let mut copy = copy_prop::CopyProp::new(&cfg);
-                copy.run(cfg);
 
                 tail_call_elim::tail_call_elim(name, cfg);
 
@@ -47,19 +44,19 @@ pub fn optimize(table: &mut ssa::SymbolTable<ssa::Instr>) {
     }
 }
 
-pub fn translate(table: ssa::SymbolTable<ssa::Instr>) -> ssa::SymbolTable<rtl::rv32::RvInstr> {
+pub fn translate(table: ssa::SymbolTable<COp, CCond>) ->
+    ssa::SymbolTable<arch::rv32::RvOp, arch::rv32::RvCond> {
     let mut symbols = HashMap::new();
 
     for (name, section) in table.symbols.into_iter() {
         match section {
             ssa::Section::Text(cfg) => {
+                let mut cfg = arch::rv32::translate(cfg);
 
-                let mut cfg = rtl::rv32::translate(cfg);
-
-                let mut gvn = rtl::gvn::ValueTable::new();
+                let mut gvn = gvn::ValueTable::new();
                 gvn.run(&mut cfg);
 
-                let mut dce = rtl::dce::Dce::new();
+                let mut dce = dce::Dce::new();
                 dce.run(&mut cfg);
 
                 out_of_ssa::out_of_ssa(&mut cfg);
@@ -120,9 +117,13 @@ fn main() {
 
     let rtl_table = translate(table);
 
-    rtl_table.pp_text();
+    //rtl_table.pp_text();
 
-    let ltl_table: ltl::LtlSymbolTable<rtl::rv32::RvArch>
+    let mut interp = interpreter::Interpreter::new(&rtl_table);
+    interp.interpret_function();
+    //println!("{}", interp.stats);
+
+    let ltl_table: ltl::LtlSymbolTable<arch::rv32::RvArch>
         = ltl::LtlSymbolTable::new(rtl_table);
 
     //println!("{ltl_table}");

@@ -2,7 +2,7 @@ use crate::ssa::*;
 use slotmap::*;
 
 use crate::pattern::*;
-use crate::{pattern, unop, binop, declare_pattern_vars};
+use crate::{pattern, declare_pattern_vars};
 
 
 use std::collections::{BTreeSet};
@@ -52,7 +52,7 @@ pub struct InstCombine {
 }
 
 impl InstCombine {
-    pub fn new<I: Instruction>(cfg: &Cfg<I>) -> Self {
+    pub fn new<Op: Operation, Cond: Condition>(cfg: &Cfg<Op, Cond>) -> Self {
         let mut worklist = vec![];
 
 
@@ -68,11 +68,11 @@ impl InstCombine {
         }
     }
 
-    pub fn run<I: Instruction, F>(&mut self, cfg: &mut Cfg<I>, mut f: F)
-    where F: FnMut(&Cfg<I>, &mut I) {
+    pub fn run<Op: Operation, Cond: Condition, F>(&mut self, cfg: &mut Cfg<Op, Cond>, mut f: F)
+    where F: FnMut(&Cfg<Op, Cond>, &mut Instr<Op, Cond>) {
 
         while let Some(id) = self.worklist.pop() {
-            let mut instr: I = cfg[id].clone();
+            let mut instr: Instr<Op, Cond> = cfg[id].clone();
 
             // Simplify the current instruction
             f(cfg, &mut instr);
@@ -129,13 +129,13 @@ macro_rules! cond_rule {
 }
 
 
-pub fn combine_instructions(cfg: &mut Cfg<Instr>) {
+pub fn combine_instructions(cfg: &mut Cfg<COp, CCond>) {
     let mut combine = InstCombine::new(cfg);
 
     let op_rules = vec![
         op_rule!(
-            ( Sll x 1 ), true,
-            dest => Instr::Binop(dest, crate::ast::Binop::Add, x.clone(), x)
+            ( Sll (reg x) 1 ), true,
+            dest => Instr::Operation(dest, COp::Add, vec![x.clone(), x])
         ),
         op_rule!(
             ( Sub x x ), true,
@@ -176,95 +176,95 @@ pub fn combine_instructions(cfg: &mut Cfg<Instr>) {
 
 
         op_rule!(
-            ( NotEqual 0 ( LessThan x y ) ), true,
-            dest => Instr::Binop(dest, crate::ast::Binop::LessThan, x, y)
+            ( NotEqual 0 ( LessThan (reg x) (reg y) ) ), true,
+            dest => Instr::Operation(dest, COp::LessThan, vec![x, y])
         ),
         op_rule!(
-            ( NotEqual 0 ( ULessThan x y ) ), true,
-            dest => Instr::Binop(dest, crate::ast::Binop::ULessThan, x, y)
+            ( NotEqual 0 ( ULessThan (reg x) (reg y) ) ), true,
+            dest => Instr::Operation(dest, COp::ULessThan, vec![x, y])
         ),
         op_rule!(
-            ( NotEqual ( LessThan x y ) 0 ), true,
-            dest => Instr::Binop(dest, crate::ast::Binop::LessThan, x, y)
+            ( NotEqual ( LessThan (reg x) (reg y) ) 0 ), true,
+            dest => Instr::Operation(dest, COp::LessThan, vec![x, y])
         ),
         op_rule!(
-            ( NotEqual ( ULessThan x y ) 0 ), true,
-            dest => Instr::Binop(dest, crate::ast::Binop::ULessThan, x, y)
+            ( NotEqual ( ULessThan (reg x) (reg y) ) 0 ), true,
+            dest => Instr::Operation(dest, COp::ULessThan, vec![x, y])
         ),
         op_rule!(
-            ( NotEqual 0 ( LessEqual x y ) ), true,
-            dest => Instr::Binop(dest, crate::ast::Binop::LessEqual, x, y)
+            ( NotEqual 0 ( LessEqual (reg x) (reg y) ) ), true,
+            dest => Instr::Operation(dest, COp::LessEqual, vec![x, y])
         ),
         op_rule!(
-            ( NotEqual 0 ( ULessEqual x y ) ), true,
-            dest => Instr::Binop(dest, crate::ast::Binop::ULessEqual, x, y)
+            ( NotEqual 0 ( ULessEqual (reg x) (reg y) ) ), true,
+            dest => Instr::Operation(dest, COp::ULessEqual, vec![x, y])
         ),
         op_rule!(
-            ( NotEqual ( LessEqual x y ) 0 ), true,
-            dest => Instr::Binop(dest, crate::ast::Binop::LessEqual, x, y)
+            ( NotEqual ( LessEqual (reg x) (reg y) ) 0 ), true,
+            dest => Instr::Operation(dest, COp::LessEqual, vec![x, y])
         ),
         op_rule!(
-            ( NotEqual ( ULessEqual x y ) 0 ), true,
-            dest => Instr::Binop(dest, crate::ast::Binop::ULessEqual, x, y)
-        ),
-
-
-        op_rule!(
-            ( Equal 0 ( LessThan x y ) ), true,
-            dest => Instr::Binop(dest, crate::ast::Binop::LessEqual, y, x)
-        ),
-        op_rule!(
-            ( Equal 0 ( ULessThan x y ) ), true,
-            dest => Instr::Binop(dest, crate::ast::Binop::ULessEqual, y, x)
-        ),
-        op_rule!(
-            ( Equal ( LessThan x y ) 0 ), true,
-            dest => Instr::Binop(dest, crate::ast::Binop::LessEqual, y, x)
-        ),
-        op_rule!(
-            ( Equal ( ULessThan x y ) 0 ), true,
-            dest => Instr::Binop(dest, crate::ast::Binop::ULessEqual, y, x)
-        ),
-        op_rule!(
-            ( Equal 0 ( LessEqual x y ) ), true,
-            dest => Instr::Binop(dest, crate::ast::Binop::LessThan, y, x)
-        ),
-        op_rule!(
-            ( Equal 0 ( ULessEqual x y ) ), true,
-            dest => Instr::Binop(dest, crate::ast::Binop::ULessThan, y, x)
-        ),
-        op_rule!(
-            ( Equal ( LessEqual x y ) 0 ), true,
-            dest => Instr::Binop(dest, crate::ast::Binop::LessThan, y, x)
-        ),
-        op_rule!(
-            ( Equal ( ULessEqual x y ) 0 ), true,
-            dest => Instr::Binop(dest, crate::ast::Binop::ULessThan, y, x)
+            ( NotEqual ( ULessEqual (reg x) (reg y) ) 0 ), true,
+            dest => Instr::Operation(dest, COp::ULessEqual, vec![x, y])
         ),
 
+
         op_rule!(
-            ( Sub 1 (Equal x y) ), true,
-            dest => Instr::Binop(dest, crate::ast::Binop::NotEqual, x, y)
+            ( Equal 0 ( LessThan (reg x) (reg y) ) ), true,
+            dest => Instr::Operation(dest, COp::LessEqual, vec![y, x])
         ),
         op_rule!(
-            ( Sub 1 (NotEqual x y) ), true,
-            dest => Instr::Binop(dest, crate::ast::Binop::Equal, x, y)
+            ( Equal 0 ( ULessThan (reg x) (reg y) ) ), true,
+            dest => Instr::Operation(dest, COp::ULessEqual, vec![y, x])
         ),
         op_rule!(
-            ( Sub 1 (LessEqual x y) ), true,
-            dest => Instr::Binop(dest, crate::ast::Binop::LessThan, y, x)
+            ( Equal ( LessThan (reg x) (reg y) ) 0 ), true,
+            dest => Instr::Operation(dest, COp::LessEqual, vec![y, x])
         ),
         op_rule!(
-            ( Sub 1 (ULessEqual x y) ), true,
-            dest => Instr::Binop(dest, crate::ast::Binop::ULessThan, y, x)
+            ( Equal ( ULessThan (reg x) (reg y) ) 0 ), true,
+            dest => Instr::Operation(dest, COp::ULessEqual, vec![y, x])
         ),
         op_rule!(
-            ( Sub 1 (LessThan x y) ), true,
-            dest => Instr::Binop(dest, crate::ast::Binop::LessEqual, y, x)
+            ( Equal 0 ( LessEqual (reg x) (reg y) ) ), true,
+            dest => Instr::Operation(dest, COp::LessThan, vec![y, x])
         ),
         op_rule!(
-            ( Sub 1 (ULessThan x y) ), true,
-            dest => Instr::Binop(dest, crate::ast::Binop::ULessEqual, y, x)
+            ( Equal 0 ( ULessEqual (reg x) (reg y) ) ), true,
+            dest => Instr::Operation(dest, COp::ULessThan, vec![y, x])
+        ),
+        op_rule!(
+            ( Equal ( LessEqual (reg x) (reg y) ) 0 ), true,
+            dest => Instr::Operation(dest, COp::LessThan, vec![y, x])
+        ),
+        op_rule!(
+            ( Equal ( ULessEqual (reg x) (reg y) ) 0 ), true,
+            dest => Instr::Operation(dest, COp::ULessThan, vec![y, x])
+        ),
+
+        op_rule!(
+            ( Sub 1 (Equal (reg x) (reg y)) ), true,
+            dest => Instr::Operation(dest, COp::NotEqual, vec![x, y])
+        ),
+        op_rule!(
+            ( Sub 1 (NotEqual (reg x) (reg y)) ), true,
+            dest => Instr::Operation(dest, COp::Equal, vec![x, y])
+        ),
+        op_rule!(
+            ( Sub 1 (LessEqual (reg x) (reg y)) ), true,
+            dest => Instr::Operation(dest, COp::LessThan, vec![y, x])
+        ),
+        op_rule!(
+            ( Sub 1 (ULessEqual (reg x) (reg y)) ), true,
+            dest => Instr::Operation(dest, COp::ULessThan, vec![y, x])
+        ),
+        op_rule!(
+            ( Sub 1 (LessThan (reg x) (reg y)) ), true,
+            dest => Instr::Operation(dest, COp::LessEqual, vec![y, x])
+        ),
+        op_rule!(
+            ( Sub 1 (ULessThan (reg x) (reg y)) ), true,
+            dest => Instr::Operation(dest, COp::ULessEqual, vec![y, x])
         ),
     ];
 
@@ -274,22 +274,22 @@ pub fn combine_instructions(cfg: &mut Cfg<Instr>) {
             l1 l2 => if x != 0 { Instr::Jump(l1) }
             else { Instr::Jump(l2) }
         ),
-        cond_rule!(
-            ( NotEqual x 0 ), true,
-            l1 l2 => Instr::Branch(x, l1, l2)
-        ),
-        cond_rule!(
-            ( NotEqual x 0 ), true,
-            l1 l2 => Instr::Branch(x, l1, l2)
-        ),
-        cond_rule!(
-            ( Equal x 0 ), true,
-            l1 l2 => Instr::Branch(x, l2, l1)
-        ),
-        cond_rule!(
-            ( Equal x 0 ), true,
-            l1 l2 => Instr::Branch(x, l2, l1)
-        ),
+      cond_rule!(
+          ( NotEqual (reg x) 0 ), true,
+          l1 l2 => Instr::Branch(CCond::Nez, vec![x], l1, l2)
+      ),
+      cond_rule!(
+          ( NotEqual (reg x) 0 ), true,
+          l1 l2 => Instr::Branch(CCond::Nez, vec![x], l1, l2)
+      ),
+      cond_rule!(
+          ( Equal (reg x) 0 ), true,
+          l1 l2 => Instr::Branch(CCond::Nez, vec![x], l2, l1)
+      ),
+      cond_rule!(
+          ( Equal (reg x) 0 ), true,
+          l1 l2 => Instr::Branch(CCond::Nez, vec![x], l2, l1)
+      ),
     ];
 
     combine.run(
@@ -300,15 +300,15 @@ pub fn combine_instructions(cfg: &mut Cfg<Instr>) {
 }
 
 pub struct OpRule<'a> {
-    pub pattern: Pattern,
+    pub pattern: Pattern<COp>,
     pub test: Box<dyn Fn(&Occurence) -> bool + 'a>,
-    pub transform: Box<dyn Fn(Occurence, Var) -> Instr + 'a>,
+    pub transform: Box<dyn Fn(Occurence, Var) -> Instr<COp, CCond> + 'a>,
 }
 
 impl<'a> OpRule<'a> {
-    pub fn new<F1, F2>(pattern: Pattern, test: F1, tr: F2) -> Self
+    pub fn new<F1, F2>(pattern: Pattern<COp>, test: F1, tr: F2) -> Self
         where F1: Fn(&Occurence) -> bool + 'a,
-        F2: Fn(Occurence, Var) -> Instr + 'a {
+        F2: Fn(Occurence, Var) -> Instr<COp, CCond> + 'a {
         Self {
             pattern,
             test: Box::new(test),
@@ -316,7 +316,7 @@ impl<'a> OpRule<'a> {
         }
     }
 
-    pub fn pattern(&self) -> Pattern {
+    pub fn pattern(&self) -> Pattern<COp> {
         self.pattern.clone()
     }
 
@@ -325,22 +325,22 @@ impl<'a> OpRule<'a> {
         test(occ)
     }
 
-    pub fn transform(&self, occ: Occurence, dest: Var) -> Instr {
+    pub fn transform(&self, occ: Occurence, dest: Var) -> Instr<COp, CCond> {
         let transform = &self.transform;
         transform(occ, dest)
     }
 }
 
 pub struct CondRule<'a> {
-    pub pattern: Pattern,
+    pub pattern: Pattern<COp>,
     pub test: Box<dyn Fn(&Occurence) -> bool + 'a>,
-    pub transform: Box<dyn Fn(Occurence, Label, Label) -> Instr + 'a>,
+    pub transform: Box<dyn Fn(Occurence, Label, Label) -> Instr<COp, CCond> + 'a>,
 }
 
 impl<'a> CondRule<'a> {
-    pub fn new<F1, F2>(pattern: Pattern, test: F1, tr: F2) -> Self
+    pub fn new<F1, F2>(pattern: Pattern<COp>, test: F1, tr: F2) -> Self
         where F1: Fn(&Occurence) -> bool + 'a,
-        F2: Fn(Occurence, Label, Label) -> Instr + 'a {
+        F2: Fn(Occurence, Label, Label) -> Instr<COp, CCond> + 'a {
         Self {
             pattern,
             test: Box::new(test),
@@ -348,7 +348,7 @@ impl<'a> CondRule<'a> {
         }
     }
 
-    pub fn pattern(&self) -> Pattern {
+    pub fn pattern(&self) -> Pattern<COp> {
         self.pattern.clone()
     }
 
@@ -357,53 +357,28 @@ impl<'a> CondRule<'a> {
         test(occ)
     }
 
-    pub fn transform(&self, occ: Occurence, l1: Label, l2: Label) -> Instr {
+    pub fn transform(&self, occ: Occurence, l1: Label, l2: Label) -> Instr<COp, CCond> {
         let transform = &self.transform;
         transform(occ, l1, l2)
     }
 }
 
 pub fn combine_from_patterns<'a>(
-    cfg: &Cfg<Instr>,
-    instr: &mut Instr,
+    cfg: &Cfg<COp, CCond>,
+    instr: &mut Instr<COp, CCond>,
     op_rules: &Vec<OpRule<'a>>,
     cond_rules: &Vec<CondRule<'a>>) {
 
-    let def_var = |x: Var| {
-        let VarKind::Local(label, pos) = cfg[x] else { return None; };
-        Some(&cfg[(label, pos)])
-    };
+    // TODO constant propagation
+    // // Constant folding in case of a binary operation
+    // if let Instr::Binop(dest, binop, Lit::Int(i1), Lit::Int(i2)) = &instr {
+    //     *instr = Instr::Move(*dest, Lit::Int(binop.eval(*i1, *i2)));
+    // }
 
-    let def_lit = |lit: &Lit| {
-        let Lit::Var(x) = lit else { return None; };
-        def_var(*x)
-    };
-
-    // Constant propagation
-    for lit in instr.literals_mut() {
-        let Some(Instr::Move(_, l)) = def_lit(lit) else { continue; };
-        *lit = l.clone();
-    }
-
-    // Canonicalize commutative binop
-    if let Instr::Binop(dest, binop, l1, l2) = &instr
-        && binop.commutative() {
-        match (l1, l2) {
-            (Lit::Var(_), _) => {}
-            (_, Lit::Var(_)) => *instr = Instr::Binop(*dest, *binop, l2.clone(), l1.clone()),
-            _ => {}
-        }
-    }
-
-    // Constant folding in case of a binary operation
-    if let Instr::Binop(dest, binop, Lit::Int(i1), Lit::Int(i2)) = &instr {
-        *instr = Instr::Move(*dest, Lit::Int(binop.eval(*i1, *i2)));
-    }
-
-    // Constant folding in case of an unary operation
-    if let Instr::Unop(dest, unop, Lit::Int(i)) = &instr {
-        *instr = Instr::Move(*dest, Lit::Int(unop.eval(*i)));
-    }
+    // // Constant folding in case of an unary operation
+    // if let Instr::Unop(dest, unop, Lit::Int(i)) = &instr {
+    //     *instr = Instr::Move(*dest, Lit::Int(unop.eval(*i)));
+    // }
 
     // Search for a rule for an operation
     for rule in op_rules.iter() {
@@ -414,12 +389,13 @@ pub fn combine_from_patterns<'a>(
     }
 
     // Search for a rule for a branch
-    if let Instr::Branch(x, l1, l2) = instr.clone() {
+    if let Instr::Branch(CCond::Nez, args, l1, l2) = instr.clone() {
         //let Some(ins) = def_lit(&x) else { return; };
+        let x = args[0];
 
         for rule in cond_rules.iter() {
             let result =
-                search_pattern_in_lit(rule.pattern(), cfg, x.clone());
+                search_pattern_in_lit(rule.pattern(), cfg, Lit::Var(x));
             if let Some(occ) = result && rule.test(&occ) {
                 *instr = rule.transform(occ, l1, l2);
             }

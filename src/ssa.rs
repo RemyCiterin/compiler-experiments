@@ -14,6 +14,121 @@ pub trait Instruction: Clone + Eq + Ord + std::fmt::Display + std::hash::Hash {
     fn may_have_side_effect(&self) -> bool;
 }
 
+/// Define the basic operations of an architecture
+pub trait Operation: Clone + Eq + Ord + std::fmt::Display + std::hash::Hash {
+    /// Number of register arguments of an operation
+    fn arity(&self) -> usize;
+    fn eval(&self, args: Vec<i32>) -> Option<i32>;
+
+    fn may_have_side_effect(&self) -> bool;
+}
+
+/// Define a branch condition in a specific architecture
+pub trait Condition: Clone + Eq + Ord + std::fmt::Display + std::hash::Hash {
+    /// Number of register arguments of a conditional jump
+    fn arity(&self) -> usize;
+    fn eval(&self, args: Vec<i32>) -> Option<bool>;
+
+    fn may_have_side_effect(&self) -> bool;
+}
+
+/// In case of a store, indicate the size of the memory chunk being stored, in this case only the
+/// least significant bits of the value are stored.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub enum MemopKind {
+    Signed8,
+    Signed16,
+    Unsigned8,
+    Unsigned16,
+    Word
+}
+
+/// RTL instructions, use architecture specific operations
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Instr<Op, Cond> {
+    /// A generic architecture specific operation
+    Operation(Var, Op, Vec<Var>),
+
+    /// A generic architecture specific jump condition
+    Branch(Cond, Vec<Var>, Label, Label),
+
+    /// A move instruction
+    Move(Var, Lit),
+
+    /// A jump
+    Jump(Label),
+
+    /// Load from the current stack frame
+    LoadLocal{dest: Var, addr: Slot},
+
+    /// Load from the current stack frame
+    StoreLocal{val: Var, addr: Slot},
+
+    /// A load instruction
+    Load{dest: Var, addr: Var, volatile: bool, kind: MemopKind},
+
+    /// A store instruction
+    Store{val: Var, addr: Var, volatile: bool, kind: MemopKind},
+
+    /// A return instruction
+    Return(Var),
+
+    /// A phy symbol
+    Phi(Var, Vec<(Lit, Label)>),
+
+    /// Call instruction
+    Call(Var, String, Vec<Var>),
+}
+
+
+impl<Op: std::fmt::Display, Cond: std::fmt::Display> std::fmt::Display for Instr<Op, Cond> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Operation(dest, op, args) => {
+                write!(f, "{dest} := {op}")?;
+                for v in args { write!(f, " {v}")?; }
+                Ok(())
+            }
+            Self::Branch(cond, args, l1, l2) => {
+                write!(f, "{cond}")?;
+                for v in args { write!(f, " {v}")?; }
+                write!(f, " to {l1} {l2}")
+            }
+            Self::Load{dest, addr, kind, ..} =>
+                write!(f, "{} := [{}] as {kind}", dest, addr),
+            Self::Store{addr, val, kind, ..} =>
+                write!(f, "[{}] := {} as {kind}", addr, val),
+            Self::LoadLocal{dest, addr} =>
+                write!(f, "{} := [stack({})]", dest, addr),
+            Self::StoreLocal{addr, val, ..} =>
+                write!(f, "[stack({})] := {}", addr, val),
+            Self::Move(dest, src1) =>
+                write!(f, "{} := {}", dest, src1),
+            Self::Jump(l) =>
+                write!(f, "jump to {}", l),
+            Self::Return(cond) =>
+                write!(f, "return {}", cond),
+            Self::Call(dest, name, args) => {
+                write!(f, "{} := {}(", dest, name)?;
+                for (i, arg) in args.iter().enumerate() {
+                    write!(f, "{}", arg)?;
+                    if i != args.len() - 1 {
+                        write!(f, ", ")?;
+                    }
+                } write!(f, ")")
+            }
+            Self::Phi(dest, args) => {
+                write!(f, "{} := phi", dest)?;
+                for (var, label) in args.iter() {
+                    write!(f, " ({}, {})", var, label)?;
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum Lit {
     /// Define the address of a symbol
@@ -55,119 +170,22 @@ impl Lit {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
-pub enum GenericInstr<Destination, Operand> {
-    /// Binary operations
-    Binop(Destination, Binop, Operand, Operand),
-
-    /// Unary operations
-    Unop(Destination, Unop, Operand),
-
-    /// Return a value from a function call
-    Return(Operand),
-
-    /// Move a value from one position to another
-    Move(Destination, Operand),
-
-    /// Load a value from a pointer
-    Load{dest: Destination, addr: Operand, volatile: bool},
-
-    /// Store a value from a pointer
-    Store{val: Operand, addr: Operand, volatile: bool},
-
-    /// Call a function with a given number of arguments
-    Call(Destination, String, Vec<Operand>),
-
-    /// Jump to a label
-    Jump(Label),
-
-    /// Branch to a lable depending of a value
-    Branch(Operand, Label, Label),
-
-    /// Phi expression, contains the assignation for the predecessors in order
-    Phi(Destination, Vec<(Operand, Label)>),
-}
-
-pub type Instr = GenericInstr<Var, Lit>;
-
-impl<Destination: Clone, Operand: Clone> GenericInstr<Destination, Operand> {
-    /// Return the list of operands the instruction depends on,
-    /// including all the operands in the label arguments
-    pub fn literals(&self) -> Vec<Operand> {
+impl<Op: Operation, Cond: Condition> Instruction for Instr<Op, Cond> {
+    fn labels(&self) -> Vec<Label> {
         match self {
-            Self::Binop(_, _, x, y)
-                | Self::Store{addr: x, val: y, ..}
-                => vec![x.clone(), y.clone()],
-            Self::Unop(_, _, x)
-                | Self::Move(_, x)
-                | Self::Load{addr: x, ..}
-                | Self::Branch(x, _, _)
-                | Self::Return(x)
-                => vec![x.clone()],
-            Self::Jump(_) => vec![],
-            Self::Call(_, _, args) =>
-                args.iter().cloned().collect(),
-            Self::Phi(_, vars) =>
-                vars.iter().map(|(v, _)| v.clone()).collect()
+            Self::Branch(_, _, l1, l2) => vec![*l1, *l2],
+            Self::Jump(l) => vec![*l],
+            _ => vec![],
+
         }
     }
 
-    /// Return the list of operands the instruction depends on,
-    /// including all the operands in the label arguments
-    pub fn literals_mut(&mut self) -> Vec<&mut Operand> {
+    fn labels_mut(&mut self) -> Vec<&mut Label> {
         match self {
-            Self::Binop(_, _, x, y)
-                | Self::Store{addr: x, val: y, ..}
-                => vec![x, y],
-            Self::Unop(_, _, x)
-                | Self::Move(_, x)
-                | Self::Load{addr: x, ..}
-                | Self::Branch(x, _, _)
-                | Self::Return(x)
-                => vec![x],
-            Self::Jump(_) => vec![],
-            Self::Call(_, _, args) =>
-                args.iter_mut().collect(),
-            Self::Phi(_, vars) =>
-                vars.iter_mut().map(|(v, _)| v).collect()
-        }
-    }
-}
+            Self::Branch(_, _, l1, l2) => vec![l1, l2],
+            Self::Jump(l) => vec![l],
+            _ => vec![],
 
-impl Instruction for Instr {
-    fn exit_block(&self) -> bool {
-        match self {
-            Self::Jump(..)
-                | Self::Branch(..)
-                | Self::Return(..)
-                => true,
-            _ => false,
-        }
-    }
-
-    fn destination(&self) -> Option<Var> {
-        match self {
-            Self::Binop(ret, ..)
-                | Self::Unop(ret, ..)
-                | Self::Move(ret, ..)
-                | Self::Load{dest:ret, ..}
-                | Self::Call(ret, ..)
-                | Self::Phi(ret, ..)
-                => Some(*ret),
-            _ => None
-        }
-    }
-
-    fn destination_mut(&mut self) -> Option<&mut Var> {
-        match self {
-            Self::Binop(ret, ..)
-                | Self::Unop(ret, ..)
-                | Self::Move(ret, ..)
-                | Self::Load{dest: ret, ..}
-                | Self::Call(ret, ..)
-                | Self::Phi(ret, ..)
-                => Some(ret),
-            _ => None
         }
     }
 
@@ -175,40 +193,101 @@ impl Instruction for Instr {
         match self {
             Self::Load{..}
                 | Self::Store{..}
+                | Self::LoadLocal{..}
+                | Self::StoreLocal{..}
                 | Self::Call(..)
                 | Self::Return(..)
                 | Self::Branch(..)
                 | Self::Jump(..)
                 => true,
-            _ => false,
+            _ => false
         }
     }
 
-    fn labels(&self) -> Vec<Label> {
+    fn exit_block(&self) -> bool {
         match self {
-            Self::Jump(label) => vec![*label],
-            Self::Branch(_, l1, l2) => vec![*l1, *l2],
-            _ => vec![]
+            Self::Branch(..)
+                | Self::Jump(..)
+                | Self::Return(..)
+                => true,
+            _ => false
         }
     }
 
-    fn labels_mut(&mut self) -> Vec<&mut Label> {
+    fn destination(&self) -> Option<Var> {
         match self {
-            Self::Jump(label) => vec![label],
-            Self::Branch(_, l1, l2) => vec![l1, l2],
-            _ => vec![]
+            Self::Operation(dest, _, _) => Some(*dest),
+            Self::Branch(_, _, _, _) => None,
+            Self::Move(dest, _) => Some(*dest),
+            Self::Load{dest, ..} => Some(*dest),
+            Self::Store{..} => None,
+            Self::LoadLocal{dest, ..} => Some(*dest),
+            Self::StoreLocal{..} => None,
+            Self::Return(_) => None,
+            Self::Call(dest, _, _) => Some(*dest),
+            Self::Phi(dest, _) => Some(*dest),
+            Self::Jump(_) => None,
+        }
+    }
+
+    fn destination_mut(&mut self) -> Option<&mut Var> {
+        match self {
+            Self::Operation(dest, _, _) => Some(dest),
+            Self::Branch(_, _, _, _) => None,
+            Self::Move(dest, _) => Some(dest),
+            Self::Load{dest, ..} => Some(dest),
+            Self::Store{..} => None,
+            Self::LoadLocal{dest, ..} => Some(dest),
+            Self::StoreLocal{..} => None,
+            Self::Return(_) => None,
+            Self::Call(dest, _, _) => Some(dest),
+            Self::Phi(dest, _) => Some(dest),
+            Self::Jump(_) => None,
         }
     }
 
     fn operands(&self) -> Vec<Var> {
-        self.literals().into_iter().filter_map(|v| v.as_var()).collect()
+        match self {
+            Self::Operation(_, _, args) => args.clone(),
+            Self::Branch(_, args, _, _) => args.clone(),
+            Self::Move(_, Lit::Var(v)) => vec![*v],
+            Self::Load{addr, ..} => vec![*addr],
+            Self::Store{val, addr, ..} => vec![*addr, *val],
+            Self::LoadLocal{..} => vec![],
+            Self::StoreLocal{val, ..} => vec![*val],
+            Self::Return(var) => vec![*var],
+            Self::Call(_, _, args) => args.clone(),
+            Self::Phi(_, args) =>
+                args.iter().filter_map(|(lit,_)| {
+                    if let Lit::Var(v) = lit { Some(*v) }
+                    else { None }
+                }).collect(),
+            Self::Jump(_) => vec![],
+            _ => vec![],
+        }
     }
 
     fn operands_mut(&mut self) -> Vec<&mut Var> {
-        self.literals_mut().into_iter().filter_map(|v| v.as_var_mut()).collect()
+        match self {
+            Self::Operation(_, _, args) => args.iter_mut().collect(),
+            Self::Branch(_, args, _, _) => args.iter_mut().collect(),
+            Self::Move(_, Lit::Var(v)) => vec![v],
+            Self::Load{addr, ..} => vec![addr],
+            Self::Store{val, addr, ..} => vec![addr, val],
+            Self::LoadLocal{..} => vec![],
+            Self::StoreLocal{val, ..} => vec![val],
+            Self::Return(var) => vec![var],
+            Self::Call(_, _, args) => args.iter_mut().collect(),
+            Self::Phi(_, args) =>
+                args.iter_mut().filter_map(|(lit,_)| {
+                    if let Lit::Var(v) = lit { Some(v) }
+                    else { None }
+                }).collect(),
+            Self::Jump(_) => vec![],
+            _ => vec![],
+        }
     }
 }
-
 
 new_key_type!{
     pub struct Var;
@@ -224,11 +303,11 @@ new_key_type!{
 
 pub type InstrId = (Label, usize);
 
-pub struct Block<I: Instruction> {
-    pub stmt: Vec<I>,
+pub struct Block<Op, Cond> {
+    pub stmt: Vec<Instr<Op, Cond>>,
 }
 
-impl<I: Instruction> Block<I> {
+impl<Op: Operation, Cond: Condition> Block<Op, Cond> {
     pub fn succs(&self) -> Vec<Label> {
         for instr in self.stmt.iter() {
             if instr.labels().is_empty() { continue; }
@@ -260,10 +339,10 @@ pub enum SlotKind {
 
 /// A control flow graph, each control flow graph is specific to one function or procedure,
 /// it contains an entry point, a set of blocks, and a set of variables
-pub struct Cfg<I: Instruction> {
+pub struct Cfg<Op, Cond> {
     /// Associate for each label the definition of it's
     /// associated block
-    blocks: SlotMap<Label, Block<I>>,
+    blocks: SlotMap<Label, Block<Op, Cond>>,
 
     /// Entry of the control flow graph
     entry: Label,
@@ -284,15 +363,15 @@ pub struct Cfg<I: Instruction> {
     pub args: Vec<Var>,
 }
 
-impl<I: Instruction> std::ops::Index<Label> for Cfg<I> {
-    type Output = Block<I>;
+impl<Op, Cond> std::ops::Index<Label> for Cfg<Op, Cond> {
+    type Output = Block<Op, Cond>;
 
-    fn index(&self, name: Label) -> &Block<I> {
+    fn index(&self, name: Label) -> &Block<Op, Cond> {
         &self.blocks[name]
     }
 }
 
-impl<I: Instruction> std::ops::Index<Var> for Cfg<I> {
+impl<Op, Cond> std::ops::Index<Var> for Cfg<Op, Cond> {
     type Output = VarKind;
 
     fn index(&self, name: Var) -> &VarKind {
@@ -300,15 +379,15 @@ impl<I: Instruction> std::ops::Index<Var> for Cfg<I> {
     }
 }
 
-impl<I: Instruction> std::ops::Index<InstrId> for Cfg<I> {
-    type Output = I;
+impl<Op, Cond> std::ops::Index<InstrId> for Cfg<Op, Cond> {
+    type Output = Instr<Op, Cond>;
 
-    fn index(&self, (blk, pos): InstrId) -> &I {
+    fn index(&self, (blk, pos): InstrId) -> &Instr<Op, Cond> {
         &self[blk].stmt[pos]
     }
 }
 
-impl<I: Instruction> Cfg<I> {
+impl<Op: Operation, Cond: Condition> Cfg<Op, Cond> {
     /// If ssa is set, then the SSA form will be checked during modification of the arguments
     /// and content of a block
     pub fn new(ssa: bool) -> Self {
@@ -372,7 +451,7 @@ impl<I: Instruction> Cfg<I> {
         order
     }
 
-    pub fn iter_blocks(&self) -> slotmap::basic::Iter<'_, Label, Block<I>> {
+    pub fn iter_blocks(&self) -> slotmap::basic::Iter<'_, Label, Block<Op, Cond>> {
         self.blocks.iter()
     }
 
@@ -525,7 +604,7 @@ impl<I: Instruction> Cfg<I> {
     }
 
     /// Update the body of a block
-    pub fn set_block_stmt(&mut self, block: Label, stmt: Vec<I>) {
+    pub fn set_block_stmt(&mut self, block: Label, stmt: Vec<Instr<Op, Cond>>) {
         if self.ssa {
             let mut vars = std::mem::take(&mut self.vars);
 
@@ -577,7 +656,7 @@ impl<I: Instruction> Cfg<I> {
         self.set_preds(blk);
     }
 
-    pub fn set_instr(&mut self, blk: Label, pos: usize, instr: I) {
+    pub fn set_instr(&mut self, blk: Label, pos: usize, instr: Instr<Op, Cond>) {
         if self.ssa {
             if let Some(x) = self[blk].stmt[pos].destination() {
                 assert!(matches!(self.vars[x], VarKind::Local(..)));
@@ -595,7 +674,7 @@ impl<I: Instruction> Cfg<I> {
         self.set_preds(blk);
     }
 
-    pub fn insert_instr(&mut self, blk: Label, pos: usize, instr: I) {
+    pub fn insert_instr(&mut self, blk: Label, pos: usize, instr: Instr<Op, Cond>) {
         if self.ssa {
             if let Some(x) = instr.destination() {
                 assert!(self.vars[x] == VarKind::Undef);
@@ -644,18 +723,18 @@ pub enum Word {
     Int(i32),
 }
 
-pub enum Section<I: Instruction> {
-    Text(Cfg<I>),
+pub enum Section<Op, Cond> {
+    Text(Cfg<Op, Cond>),
     Data(Vec<Word>),
 }
 
-impl<I: Instruction> Section<I> {
-    pub fn as_text(&self) -> Option<&Cfg<I>> {
+impl<Op: Operation, Cond: Condition> Section<Op, Cond> {
+    pub fn as_text(&self) -> Option<&Cfg<Op, Cond>> {
         if let Self::Text(cfg) = self {return Some(cfg);}
         return None;
     }
 
-    pub fn as_text_mut(&mut self) -> Option<&mut Cfg<I>> {
+    pub fn as_text_mut(&mut self) -> Option<&mut Cfg<Op, Cond>> {
         if let Self::Text(cfg) = self {return Some(cfg);}
         return None;
     }
@@ -666,16 +745,28 @@ impl<I: Instruction> Section<I> {
     }
 }
 
-pub struct SymbolTable<I: Instruction> {
-    pub symbols: HashMap<String, Section<I>>,
+pub struct SymbolTable<Op, Cond> {
+    pub symbols: HashMap<String, Section<Op, Cond>>,
 }
 
-impl<I: Instruction> SymbolTable<I> {
+impl<Op: Operation, Cond: Condition> SymbolTable<Op, Cond> {
     pub fn pp_text(&self) {
         for (symbol, section) in self.symbols.iter() {
             if matches!(section, Section::Text(..)) {
                 print!(".globl {symbol}:\n{section}\n\n");
             }
+        }
+    }
+}
+
+impl std::fmt::Display for MemopKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Signed8 => write!(f, "u8"),
+            Self::Signed16 => write!(f, "u16"),
+            Self::Unsigned16 => write!(f, "i16"),
+            Self::Unsigned8 => write!(f, "u8"),
+            Self::Word => write!(f, "i32"),
         }
     }
 }
@@ -689,7 +780,7 @@ impl std::fmt::Display for Word {
     }
 }
 
-impl<I: Instruction> std::fmt::Display for Section<I> {
+impl<Op: Operation, Cond: Condition> std::fmt::Display for Section<Op, Cond> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Text(cfg) =>  write!(f, "{cfg}"),
@@ -705,7 +796,7 @@ impl<I: Instruction> std::fmt::Display for Section<I> {
     }
 }
 
-impl<I: Instruction> std::fmt::Display for SymbolTable<I> {
+impl<Op: Operation, Cond: Condition> std::fmt::Display for SymbolTable<Op, Cond> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         for (symbol, section) in self.symbols.iter() {
             write!(f, ".globl {symbol}:\n{section}\n\n")?;
@@ -765,49 +856,7 @@ impl std::fmt::Display for Lit {
         }
     }
 }
-
-impl std::fmt::Display for Instr {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Instr::Binop(dest, op, src1, src2) =>
-                write!(f, "{} := {} {} {}", dest, src1, op, src2),
-            Instr::Unop(dest, op, src1) =>
-                write!(f, "{} := {} {}", dest, op, src1),
-            Instr::Load{dest, addr, volatile: true} =>
-                write!(f, "{} := [volatile {}]", dest, addr),
-            Instr::Load{dest, addr, volatile: false} =>
-                write!(f, "{} := [{}]", dest, addr),
-            Instr::Store{addr, val, ..} =>
-                write!(f, "[{}] := {}", addr, val),
-            Instr::Move(dest, src1) =>
-                write!(f, "{} := {}", dest, src1),
-            Instr::Branch(cond, l1, l2) =>
-                write!(f, "branch {}, {}, {}", cond, l1, l2),
-            Instr::Jump(l) =>
-                write!(f, "jump {}", l),
-            Instr::Return(cond) =>
-                write!(f, "return {}", cond),
-            Instr::Call(dest, name, args) => {
-                write!(f, "{} := {}(", dest, name)?;
-                for (i, arg) in args.iter().enumerate() {
-                    write!(f, "{}", arg)?;
-                    if i != args.len() - 1 {
-                        write!(f, ", ")?;
-                    }
-                } write!(f, ")")
-            }
-            Instr::Phi(dest, args) => {
-                write!(f, "{} := phi", dest)?;
-                for (var, label) in args.iter() {
-                    write!(f, " ({}, {})", var, label)?;
-                }
-                Ok(())
-            }
-        }
-    }
-}
-
-impl<I: Instruction> std::fmt::Display for Cfg<I> {
+impl<Op: Operation, Cond: Condition> std::fmt::Display for Cfg<Op, Cond> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "entry: {} args:", self.entry())?;
         for arg in self.args.iter() {
@@ -833,5 +882,127 @@ impl<I: Instruction> std::fmt::Display for Cfg<I> {
         }
 
         Ok(())
+    }
+}
+
+#[derive(Clone, PartialEq, PartialOrd, Eq, Ord, Debug, Hash)]
+pub enum COp {
+    And,
+    Or,
+    Xor,
+    Add,
+    Sub,
+    Sll,
+    Sra,
+    Srl,
+    Equal,
+    NotEqual,
+    LessThan,
+    ULessThan,
+    LessEqual,
+    ULessEqual,
+    Mul,
+    UDiv,
+    URem,
+    SDiv,
+    SRem,
+    Not,
+    Neg,
+}
+
+impl COp {
+    pub fn from_binop(binop: Binop) -> Self {
+        match binop {
+            Binop::And => Self::And,
+            Binop::Add => Self::Add,
+            Binop::Or => Self::Or,
+            Binop::Xor => Self::Xor,
+            Binop::Sub => Self::Sub,
+            Binop::Sll => Self::Sll,
+            Binop::Sra => Self::Sra,
+            Binop::Srl => Self::Srl,
+            Binop::Equal => Self::Equal,
+            Binop::NotEqual => Self::NotEqual,
+            Binop::LessThan => Self::LessThan,
+            Binop::ULessThan => Self::ULessThan,
+            Binop::LessEqual => Self::LessEqual,
+            Binop::ULessEqual => Self::ULessEqual,
+            Binop::Mul => Self::Mul,
+            Binop::SDiv => Self::SDiv,
+            Binop::UDiv => Self::UDiv,
+            Binop::SRem => Self::SRem,
+            Binop::URem => Self::URem,
+        }
+    }
+
+    pub fn from_unop(unop: Unop) -> Self {
+        match unop {
+            Unop::Neg => Self::Neg,
+            Unop::Not => Self::Not
+        }
+    }
+}
+
+impl std::fmt::Display for COp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+impl Operation for COp {
+    fn arity(&self) -> usize {
+        match self {
+            Self::Neg => 1,
+            Self::Not => 1,
+            _ => 2
+        }
+    }
+
+    fn may_have_side_effect(&self) -> bool {false}
+
+    fn eval(&self, args: Vec<i32>) -> Option<i32> {
+        Some(match self {
+            Self::Neg => -args[0],
+            Self::Not => !args[0],
+            Self::And => args[0] & args[1],
+            Self::Or => args[0] | args[1],
+            Self::Xor => args[0] ^ args[1],
+            Self::Add => args[0].wrapping_add(args[1]),
+            Self::Sub => args[0].wrapping_sub(args[1]),
+            Self::Sll => sll(args[0], args[1]),
+            Self::Sra => args[0].wrapping_shr(args[1].cast_unsigned()),
+            Self::Srl => srl(args[0], args[1]),
+            Self::Equal => (args[0] == args[1]) as i32,
+            Self::NotEqual => (args[0] != args[1]) as i32,
+            Self::LessThan => (args[0] < args[1]) as i32,
+            Self::LessEqual => (args[0] <= args[1]) as i32,
+            Self::ULessThan => (args[0].cast_unsigned() < args[1].cast_unsigned()) as i32,
+            Self::ULessEqual => (args[0].cast_unsigned() <= args[1].cast_unsigned()) as i32,
+            Self::Mul => args[0].wrapping_mul(args[1]),
+            Self::SDiv => args[0].wrapping_div(args[1]),
+            Self::SRem => args[0].wrapping_rem(args[1]),
+            Self::UDiv => (args[0].cast_unsigned() / args[1].cast_unsigned()) as i32,
+            Self::URem => (args[0].cast_unsigned() % args[1].cast_unsigned()) as i32,
+        })
+    }
+}
+
+#[derive(Clone, PartialEq, PartialOrd, Eq, Ord, Debug, Hash)]
+pub enum CCond { Nez }
+
+impl std::fmt::Display for CCond {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Nez")
+    }
+}
+
+
+impl Condition for CCond {
+    fn arity(&self) -> usize {1}
+
+    fn may_have_side_effect(&self) -> bool {false}
+
+    fn eval(&self, args: Vec<i32>) -> Option<bool> {
+        Some(args[0] != 0)
     }
 }

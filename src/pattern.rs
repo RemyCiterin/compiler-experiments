@@ -1,4 +1,3 @@
-use crate::ast::*;
 use crate::ssa::*;
 use std::collections::HashMap;
 
@@ -42,7 +41,7 @@ use std::collections::HashMap;
 /// assert!( occ.ints["x"] == 7 );
 /// ```
 #[derive(Clone)]
-pub enum Pattern {
+pub enum Pattern<Op> {
     /// An variable of kind `integer`
     Int(String),
 
@@ -52,14 +51,14 @@ pub enum Pattern {
     /// A variable of kind `stack slot`
     Stack(String),
 
-    /// An unary operation
-    Unop(Unop, Box<Pattern>),
-
-    /// A binary operation
-    Binop(Binop, Box<Pattern>, Box<Pattern>),
+    /// A generic operation
+    Operation(Op, Vec<Pattern<Op>>),
 
     /// A variable of any kind
     Leaf(String),
+
+    /// A variable of kind `register`
+    Reg(String),
 
     /// A constant integer
     Const(i32),
@@ -79,6 +78,10 @@ macro_rules! declare_pattern_vars {
     ( $occ:ident, ( slot $i:ident) ) => {
         #[allow(unused_variables)]
         let $i: Slot = $occ.slots[stringify!($i)].clone();
+    };
+    ( $occ:ident, ( reg $i:ident) ) => {
+        #[allow(unused_variables)]
+        let $i: Var = $occ.vars[stringify!($i)].clone();
     };
     ( $occ:ident, $i:ident ) => {
         #[allow(unused_variables)]
@@ -106,7 +109,11 @@ macro_rules! eval_pattern_vars {
     };
     ( $eval:ident, $occ:ident, ( slot $i:ident) ) => {
         #[allow(unused_variables)]
-        let $i: Var = $eval.eval_lit(Int::Stack($occ.slots[stringify!($i)].clone()));
+        let $i: Var = $eval.eval_lit(Lit::Stack($occ.slots[stringify!($i)].clone()));
+    };
+    ( $eval:ident, $occ:ident, ( var $i:ident) ) => {
+        #[allow(unused_variables)]
+        let $i: Var = $occ.vars[stringify!($i)];
     };
     ( $eval:ident, $occ:ident, $i:ident ) => {
         #[allow(unused_variables)]
@@ -129,16 +136,15 @@ macro_rules! pattern {
     ( (int $i:ident) ) => { crate::pattern::Pattern::Int( stringify!($i).to_string() ) };
     ( (addr $i:ident) ) => { crate::pattern::Pattern::Addr( stringify!($i).to_string() ) };
     ( (slot $i:ident) ) => { crate::pattern::Pattern::Stack( stringify!($i).to_string() ) };
-    ( ($u:ident $p:tt) ) => {
-        crate::pattern::Pattern::Unop( unop!($u), Box::new(pattern!($p)) )
-    };
-    ( ($b:ident $p1:tt $p2:tt ) ) => {
-        crate::pattern::Pattern::Binop(
-            binop!($b),
-            Box::new(pattern!($p1)),
-            Box::new(pattern!($p2))
+    ( (reg $i:ident) ) => { crate::pattern::Pattern::Reg( stringify!($i).to_string() ) };
+    ( ($op:ident $($p:tt)* ) ) => {{
+        let mut patterns = vec![];
+        $(patterns.push(pattern!($p));)*
+        crate::pattern::Pattern::Operation(
+            crate::ssa::COp::$op,
+            patterns
         )
-    };
+    }};
     ( $i:ident ) => { crate::pattern::Pattern::Leaf( stringify!($i).to_string() ) };
 }
 
@@ -147,12 +153,14 @@ pub struct Occurence {
     pub lits: HashMap<String, Lit>,
     pub ints: HashMap<String, i32>,
     pub slots: HashMap<String, Slot>,
+    pub vars: HashMap<String, Var>,
     pub addrs: HashMap<String, String>,
 }
 
 /// Search a given pattern in a control flow graph, and return it's occurence (map from variables
 /// to concrete values) in case of a match
-pub fn search_pattern(pat: Pattern, cfg: &Cfg<Instr>, instr: &Instr) -> Option<Occurence> {
+pub fn search_pattern<Op: Operation, Cond: Condition>
+    (pat: Pattern<Op>, cfg: &Cfg<Op, Cond>, instr: &Instr<Op, Cond>) -> Option<Occurence> {
     let mut occ = Occurence::new();
     if occ.search_instr(cfg, &pat, instr) {
         Some(occ)
@@ -163,7 +171,8 @@ pub fn search_pattern(pat: Pattern, cfg: &Cfg<Instr>, instr: &Instr) -> Option<O
 
 /// Search a given pattern in a control flow graph, and return it's occurence (map from variables
 /// to concrete values) in case of a match
-pub fn search_pattern_in_lit(pat: Pattern, cfg: &Cfg<Instr>, lit: Lit) -> Option<Occurence> {
+pub fn search_pattern_in_lit<Op: Operation, Cond: Condition>
+    (pat: Pattern<Op>, cfg: &Cfg<Op, Cond>, lit: Lit) -> Option<Occurence> {
     let mut occ = Occurence::new();
     if occ.search_lit(cfg, &pat, &lit) {
         Some(occ)
@@ -176,6 +185,7 @@ impl Occurence {
     pub fn new() -> Self {
         Self {
             lits: HashMap::new(),
+            vars: HashMap::new(),
             ints: HashMap::new(),
             slots: HashMap::new(),
             addrs: HashMap::new(),
@@ -184,7 +194,8 @@ impl Occurence {
 
     /// Try to match a literal with a given pattern, propagate the search in the control flow graph
     /// if the literal is a variable, and the pattern is a node
-    pub fn search_lit(&mut self, cfg: &Cfg<Instr>, pattern: &Pattern, lit: &Lit) -> bool {
+    pub fn search_lit<Op: Operation, Cond: Condition>
+        (&mut self, cfg: &Cfg<Op, Cond>, pattern: &Pattern<Op>, lit: &Lit) -> bool {
         match (pattern, lit) {
             (Pattern::Const(c), Lit::Int(x)) => {
                 x == c
@@ -204,6 +215,11 @@ impl Occurence {
                 self.slots.insert(i.clone(), *x);
                 true
             }
+            (Pattern::Reg(i), Lit::Var(x)) => {
+                if self.vars.contains_key(i) && &self.vars[i] != x { return false; }
+                self.vars.insert(i.clone(), *x);
+                true
+            }
             (Pattern::Leaf(i), _) => {
                 if self.lits.contains_key(i) && &self.lits[i] != lit { return false; }
                 self.lits.insert(i.clone(), lit.clone());
@@ -219,22 +235,31 @@ impl Occurence {
     }
 
     /// Try to match a pattern with an instruction
-    pub fn search_instr(&mut self, cfg: &Cfg<Instr>, pattern: &Pattern, instr: &Instr) -> bool {
+    pub fn search_instr<Op: Operation, Cond: Condition>
+        (&mut self, cfg: &Cfg<Op, Cond>, pattern: &Pattern<Op>, instr: &Instr<Op, Cond>) -> bool {
         match (pattern, instr) {
             //(_, Instr::Move(_, lit)) => self.search_lit(cfg, pattern, lit),
+            (Pattern::Reg(i), _) => {
+                let x = instr.destination().unwrap();
+                if self.vars.contains_key(i) && self.vars[i] != x { return false; }
+                self.vars.insert(i.clone(), x);
+                true
+            }
             (Pattern::Leaf(i), _) => {
                 let x = Lit::Var(instr.destination().unwrap());
                 if self.lits.contains_key(i) && self.lits[i] != x { return false; }
                 self.lits.insert(i.clone(), x);
                 true
             }
-            (Pattern::Unop(unop1, p), Instr::Unop(_, unop2, lit)) => {
-                if unop1 != unop2 { return false; }
-                self.search_lit(cfg, p, lit)
-            }
-            (Pattern::Binop(b1, p1, p2), Instr::Binop(_, b2, l1, l2)) => {
-                if b1 != b2 { return false; }
-                self.search_lit(cfg, p1, l1) && self.search_lit(cfg, p2, l2)
+            (Pattern::Operation(op1, pat), Instr::Operation(_, op2, args)) => {
+                if op2 != op1 { return false; }
+                if pat.len() != args.len() { return false; }
+
+                for (p, a) in pat.iter().zip(args.iter()) {
+                    if !self.search_lit(cfg, p, &Lit::Var(*a)) {return false;}
+                }
+
+                return true;
             }
             _ => false
         }

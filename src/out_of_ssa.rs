@@ -18,13 +18,13 @@ pub trait HasPhi: Instruction {
     fn from_phi(dest: Var, args: Vec<(Var, Label)>) -> Self;
 }
 
-impl HasMove for Instr {
+impl<Op: Operation, Cond: Condition> HasMove for Instr<Op, Cond> {
     fn mv(dest: Var, src: Lit) -> Self {
         Instr::Move(dest, src)
     }
 }
 
-impl HasPhi for Instr {
+impl<Op: Operation, Cond: Condition> HasPhi for Instr<Op, Cond> {
     fn from_phi(dest: Var, args: Vec<(Var, Label)>) -> Self {
         Instr::Phi(dest, args.into_iter().map(|(v,l)| (Lit::Var(v),l)).collect())
     }
@@ -38,7 +38,7 @@ impl HasPhi for Instr {
 }
 
 impl Conventionalize {
-    pub fn new<I: Instruction>(cfg: &Cfg<I>) -> Self {
+    pub fn new<Op: Operation, Cond: Condition>(cfg: &Cfg<Op, Cond>) -> Self {
         let mut copies = SecondaryMap::new();
 
         for (b, _) in cfg.iter_blocks() {
@@ -50,7 +50,7 @@ impl Conventionalize {
 
     /// Conventionalize the ssa form: ensure that each phi expressions is of the form
     /// `Phi(x0, Var(x1), ... Var(xn))` where x0, x1, ..., x2 doesn't interfer with each other
-    pub fn run<I: HasPhi + HasMove>(&mut self, cfg: &mut Cfg<I>) {
+    pub fn run<Op: Operation, Cond: Condition>(&mut self, cfg: &mut Cfg<Op, Cond>) {
         let blocks: Vec<Label> = cfg.iter_blocks().map(|(b,_)| b).collect();
 
         for &block in blocks.iter() {
@@ -65,7 +65,7 @@ impl Conventionalize {
                         new_vars.push((new_var, label));
                     }
 
-                    *instr = I::from_phi(dest, new_vars);
+                    *instr = Instr::from_phi(dest, new_vars);
                 }
             }
 
@@ -84,7 +84,8 @@ impl Conventionalize {
             for instr in cfg[block].stmt.iter() {
                 if instr.exit_block() {
                     body.extend(
-                        moves.iter().map(|(v,l)| I::mv(*v,l.clone())));
+                        moves.iter().map(|(v,l)|
+                            Instr::mv(*v,l.clone())));
                 }
 
                 body.push(instr.clone());
@@ -95,7 +96,7 @@ impl Conventionalize {
     }
 }
 
-pub fn out_of_ssa<I: HasPhi + HasMove>(cfg: &mut Cfg<I>) {
+pub fn out_of_ssa<Op: Operation, Cond: Condition>(cfg: &mut Cfg<Op, Cond>) {
     let mut conv = Conventionalize::new(cfg);
     conv.run(cfg);
 

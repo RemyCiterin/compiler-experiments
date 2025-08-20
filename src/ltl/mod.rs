@@ -1,11 +1,20 @@
+//! "Localtion Transfer Language" is the last representation of programs before assemly generation.
+//! This representation use machine/physical registers and linear block placement. The type of
+//! operation ```LInstr<Op, Cond>``` it use is very similar to the Cfg representation making the
+//! translation relatively easy.
+
 pub mod interpreter;
 
 use std::collections::{HashMap, HashSet};
-use crate::rtl::regalloc::*;
-use crate::rtl::*;
+use crate::arch::regalloc::*;
+use crate::arch::*;
 use crate::ssa::*;
 use slotmap::*;
 
+/// Type of operation, it use phisical registers instead of virtual ones (like in
+/// [crate::rtl::Instr]). It also doesn't have a branch instruction but a conditional
+/// jump instead. And it use the calling conventions of the architecture instead of
+/// generic call instructions.
 #[derive(Clone)]
 pub enum LInstr<Op, Cond> {
     /// A generic architecture specific operation
@@ -36,10 +45,10 @@ pub enum LInstr<Op, Cond> {
     StoreLocal{val: Phys, addr: Slot},
 
     /// A load instruction
-    Load{dest: Phys, addr: Phys},
+    Load{dest: Phys, addr: Phys, kind: MemopKind},
 
     /// A store instruction
-    Store{val: Phys, addr: Phys},
+    Store{val: Phys, addr: Phys, kind: MemopKind},
 
     /// A return instruction
     Return,
@@ -53,7 +62,7 @@ pub struct Ltl<A: Arch> {
     pub stack: SlotMap<Slot, SlotKind>,
 }
 
-fn write_regs<A: Arch>(cfg: &Rtl<A::Op, A::Cond>, color: &Coloring) -> HashSet<Phys> {
+fn write_regs<A: Arch>(cfg: &Cfg<A::Op, A::Cond>, color: &Coloring) -> HashSet<Phys> {
     let mut set = HashSet::new();
 
     for (_, block) in cfg.iter_blocks() {
@@ -68,7 +77,7 @@ fn write_regs<A: Arch>(cfg: &Rtl<A::Op, A::Cond>, color: &Coloring) -> HashSet<P
 }
 
 impl<A: Arch> Ltl<A> {
-    pub fn new(mut cfg: Rtl<A::Op, A::Cond>, color: Coloring) -> Self {
+    pub fn new(mut cfg: Cfg<A::Op, A::Cond>, color: Coloring) -> Self {
         let preorder = cfg.preorder();
 
         let phys = |v| Phys(color[v]);
@@ -100,13 +109,13 @@ impl<A: Arch> Ltl<A> {
             for instr in cfg[block].stmt.iter().cloned() {
 
                 match instr {
-                    RInstr::Phi(..) => unreachable!(),
-                    RInstr::Jump(label) => {
+                    Instr::Phi(..) => unreachable!(),
+                    Instr::Jump(label) => {
                         if labels[&label] != i + 1 {
                             stmt.push(LInstr::Jump(labels[&label]));
                         }
                     }
-                    RInstr::Branch(cond, vars, l1, l2) => {
+                    Instr::Branch(cond, vars, l1, l2) => {
                         let vars = vars.into_iter().map(|v|phys(v)).collect();
                         stmt.push(LInstr::Jcc(cond, vars, labels[&l1]));
 
@@ -114,41 +123,41 @@ impl<A: Arch> Ltl<A> {
                             stmt.push(LInstr::Jump(labels[&l2]));
                         }
                     }
-                    RInstr::Operation(dest, op, vars) => {
+                    Instr::Operation(dest, op, vars) => {
                         let vars = vars.into_iter().map(|v|phys(v)).collect();
                         stmt.push(LInstr::Operation(phys(dest), op, vars));
                     }
-                    RInstr::Move(dst, Lit::Var(src)) => {
+                    Instr::Move(dst, Lit::Var(src)) => {
                         if color[dst] != color[src] {
                             stmt.push(LInstr::Move(phys(dst), phys(src)));
                         }
                     }
-                    RInstr::Move(dst, Lit::Addr(src)) => {
+                    Instr::Move(dst, Lit::Addr(src)) => {
                         stmt.push(LInstr::La(phys(dst), src));
                     }
-                    RInstr::Move(dst, Lit::Int(src)) => {
+                    Instr::Move(dst, Lit::Int(src)) => {
                         stmt.push(LInstr::Li(phys(dst), src));
                     }
-                    RInstr::Move(dst, Lit::Stack(src)) => {
+                    Instr::Move(dst, Lit::Stack(src)) => {
                         stmt.push(LInstr::Ls(phys(dst), src));
                     }
-                    RInstr::Move(_, Lit::Undef) => {}
-                    RInstr::LoadLocal{addr, dest} => {
+                    Instr::Move(_, Lit::Undef) => {}
+                    Instr::LoadLocal{addr, dest} => {
                         stmt.push(LInstr::LoadLocal{addr, dest: phys(dest)});
                     }
-                    RInstr::Load{addr, dest, ..} => {
-                        stmt.push(LInstr::Load{addr: phys(addr), dest: phys(dest)});
+                    Instr::Load{addr, dest, kind, ..} => {
+                        stmt.push(LInstr::Load{addr: phys(addr), dest: phys(dest), kind});
                     }
-                    RInstr::StoreLocal{addr, val} => {
+                    Instr::StoreLocal{addr, val} => {
                         stmt.push(LInstr::StoreLocal{addr, val: phys(val)});
                     }
-                    RInstr::Store{addr, val, ..} => {
-                        stmt.push(LInstr::Store{addr: phys(addr), val: phys(val)});
+                    Instr::Store{addr, val, kind, ..} => {
+                        stmt.push(LInstr::Store{addr: phys(addr), val: phys(val), kind});
                     }
-                    RInstr::Call(_, name, _) => {
+                    Instr::Call(_, name, _) => {
                         stmt.push(LInstr::Call(name));
                     }
-                    RInstr::Return(_) => {
+                    Instr::Return(_) => {
                         for (&p, &s) in saved.iter() {
                             stmt.push(LInstr::LoadLocal{addr: s, dest: p});
                         }
@@ -165,6 +174,16 @@ impl<A: Arch> Ltl<A> {
             blocks,
             stack: cfg.stack
         }
+    }
+
+    pub fn contains_call(&self) -> bool {
+        for block in self.blocks.iter() {
+            for instr in block.iter() {
+                if matches!(instr, LInstr::Call(..)) { return true; }
+            }
+        }
+
+        return false;
     }
 
     pub fn layout(&self) -> (i32, SparseSecondaryMap<Slot, i32>) {
@@ -208,11 +227,11 @@ impl<A: Arch> Ltl<A> {
     }
 
     pub fn pp(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let (stack_size, slots) = self.layout();
+        let (push, pop, slots) =
+            A::gen_layout(&self.stack, self.contains_call());
+        //let (stack_size, slots) = self.layout();
 
-        write!(f, "\t")?;
-        A::pp_push(f, stack_size)?;
-        write!(f, "\n")?;
+        write!(f, "\t{push}\n")?;
 
         for (i, block) in self.blocks.iter().enumerate() {
             let from_label = |j: usize| {
@@ -228,9 +247,7 @@ impl<A: Arch> Ltl<A> {
             for instr in block.iter().cloned() {
 
                 if matches!(instr, LInstr::Return) {
-                    write!(f, "\t")?;
-                    A::pp_pop(f, stack_size)?;
-                    write!(f, "\n")?;
+                    write!(f, "\t{pop}\n")?;
                 }
 
                 write!(f, "\t")?;
@@ -253,10 +270,10 @@ impl<A: Arch> Ltl<A> {
                         _ = A::pp_call(f, &name)?,
                     LInstr::Return =>
                         _ = A::pp_return(f)?,
-                    LInstr::Load{addr, dest} =>
-                        _ = A::pp_load(f, dest, addr)?,
-                    LInstr::Store{addr, val} =>
-                        _ = A::pp_store(f, addr, val)?,
+                    LInstr::Load{addr, dest, kind} =>
+                        _ = A::pp_load(f, dest, addr, kind)?,
+                    LInstr::Store{addr, val, kind} =>
+                        _ = A::pp_store(f, addr, val, kind)?,
                     LInstr::LoadLocal{addr, dest} =>
                         _ = A::pp_load_local(f, dest, slots[addr])?,
                     LInstr::StoreLocal{addr, val} =>
@@ -284,10 +301,10 @@ impl<Op: std::fmt::Display, Cond: std::fmt::Display> std::fmt::Display for LInst
                 for v in args { write!(f, " {v}")?; }
                 write!(f, " to {l1}")
             }
-            Self::Load{dest, addr} =>
-                write!(f, "{} := [{}]", dest, addr),
-            Self::Store{addr, val, ..} =>
-                write!(f, "[{}] := {}", addr, val),
+            Self::Load{dest, addr, kind} =>
+                write!(f, "{} := [{}] as {kind}", dest, addr),
+            Self::Store{addr, val, kind, ..} =>
+                write!(f, "[{}] := {} as {kind}", addr, val),
             Self::LoadLocal{dest, addr} =>
                 write!(f, "{} := [stack({})]", dest, addr),
             Self::StoreLocal{addr, val, ..} =>
@@ -345,7 +362,7 @@ pub struct LtlSymbolTable<A: Arch> {
 }
 
 impl<A: Arch> LtlSymbolTable<A> {
-    pub fn new(table: SymbolTable<RInstr<A::Op, A::Cond>>) -> Self {
+    pub fn new(table: SymbolTable<A::Op, A::Cond>) -> Self {
         let mut symbols: HashMap<String, LtlSection<A>> = HashMap::new();
 
         for (name, section) in table.symbols {
@@ -353,7 +370,6 @@ impl<A: Arch> LtlSymbolTable<A> {
                 Section::Data(words) =>
                     _ = symbols.insert(name, LtlSection::Data(words)),
                 Section::Text(mut cfg) => {
-                    use crate::rtl::regalloc::*;
                     let coloring = alloc_register::<A>(&mut cfg);
                     _ = symbols.insert(name, LtlSection::Text(Ltl::new(cfg, coloring)));
                 }
