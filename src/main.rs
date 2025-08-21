@@ -53,7 +53,7 @@ Analyze {name} of cfg\n{cfg}\n
 
                 let mut alias = alias::BasicAA::new(cfg);
                 alias.search(cfg);
-                alias.show();
+                alias.show(cfg);
 
                 licm::licm(cfg);
 

@@ -23,7 +23,7 @@ impl<T: std::fmt::Display> std::fmt::Display for Maybe<T> {
 }
 
 impl<T: Eq + Clone> Maybe<T> {
-    pub fn join(&self, other: &Self) -> Self {
+    pub fn meet(&self, other: &Self) -> Self {
         match (self, other) {
             (Self::All, _) => Self::All,
             (_, Self::All) => Self::All,
@@ -51,9 +51,6 @@ pub enum Alias {
     /// The location represent a pointer to a global variable, plus an offset
     Global(Maybe<String>, Maybe<i32>),
 
-    /// Null pointer
-    Null,
-
     /// Represent the empty set
     Undef,
 }
@@ -64,27 +61,40 @@ impl std::fmt::Display for Alias {
             Self::All => write!(f, "⊤"),
             Self::Slot(x, o) => write!(f, "slot({x} + {o})"),
             Self::Global(x, o) => write!(f, "global({x} + {o})"),
-            Self::Null => write!(f, "NULL"),
             Self::Undef => write!(f, "⊥"),
         }
     }
 }
 
 impl Alias {
-    pub fn join(&self, other: &Self) -> Self {
+    pub fn meet(&self, other: &Self) -> Self {
         match (self, other) {
             (Self::All, _) => Self::All,
             (_, Self::All) => Self::All,
             (Self::Slot(..), Self::Global(..)) => Self::All,
             (Self::Global(..), Self::Slot(..)) => Self::All,
             (Self::Slot(x, a), Self::Slot(y, b)) =>
-                Self::Slot(x.join(y), a.join(b)),
+                Self::Slot(x.meet(y), a.meet(b)),
             (Self::Global(x, a), Self::Global(y, b)) =>
-                Self::Global(x.join(y), a.join(b)),
-            (Self::Null, x) => if x == &Self::Null {Self::Null} else {Self::All},
-            (x, Self::Null) => if x == &Self::Null {Self::Null} else {Self::All},
+                Self::Global(x.meet(y), a.meet(b)),
             (Self::Undef, x) => x.clone(),
             (x, Self::Undef) => x.clone(),
+        }
+    }
+
+    /// An arithmetic operation is not allowed to create a pointer to the stack frame without
+    /// taking as argument somthing that doesn't say anything about the stack
+    pub fn generic_op<'a, I>(iter: I) -> Self where I: std::iter::Iterator<Item=&'a Self> {
+        let elem = iter
+            .fold(
+                Self::Global(Maybe::All, Maybe::All),
+                |x,y| x.meet(y));
+
+        match elem {
+            Self::All => Self::All,
+            Self::Undef => Self::Undef,
+            Self::Slot(slot, _) => Self::Slot(slot, Maybe::All),
+            Self::Global(name, _) => Self::Global(name, Maybe::All),
         }
     }
 }
@@ -115,7 +125,7 @@ impl BasicAA {
         for (var, kind) in cfg.iter_vars() {
             match kind {
                 VarKind::Arg =>
-                    _ = alias.insert(var, Alias::All),
+                    _ = alias.insert(var, Alias::Global(Maybe::All, Maybe::All)),
                 _ =>
                     _ = alias.insert(var, Alias::Undef),
             }
@@ -132,10 +142,30 @@ impl BasicAA {
         }
     }
 
-    pub fn show(&self) {
-        for (var, alias) in self.alias.iter() {
-            println!("alias({var}) = {alias}");
+    pub fn show(&self, cfg: &Cfg<COp, CCond>) {
+        //for (var, alias) in self.alias.iter() {
+        //    println!("alias({var}) = {alias}");
+        //}
+
+        for (_, block) in cfg.iter_blocks() {
+            for instr in block.stmt.iter() {
+                let trigger =
+                    matches!(instr, Instr::Load{..})
+                    || matches!(instr, Instr::LoadLocal{..})
+                    || matches!(instr, Instr::Store{..})
+                    || matches!(instr, Instr::StoreLocal{..})
+                    || matches!(instr, Instr::Call(..));
+
+                if trigger {
+                    println!("{instr}");
+                    for var in instr.operands() {
+                        println!("alias({}) = {}", var, self.alias[var]);
+                    }
+                }
+
+            }
         }
+
     }
 
     pub fn search(&mut self, cfg: &Cfg<COp, CCond>) {
@@ -183,6 +213,9 @@ impl BasicAA {
                 self.visit_jump(label),
             Instr::Operation(dest, COp::PtrAdd, args) =>
                 self.visit_add(dest, args[0], args[1]),
+            Instr::Operation(dest, _, args) =>
+                self.alias[dest]
+                    = Alias::generic_op(args.iter().map(|&x| &self.alias[x])),
             _ => {
                 if let Some(dest) = instr.destination() {
                     self.alias[dest] = Alias::All;
@@ -202,8 +235,6 @@ impl BasicAA {
         let l2 = self.alias[v2].clone();
 
         self.alias[dest] = match (l1, l2) {
-            (x, Alias::Null) => x,
-            (Alias::Null, _) => Alias::Null,
             (Alias::Slot(s,_), _) => Alias::Slot(s, Maybe::All),
             (Alias::Global(s,_), _) => Alias::Global(s, Maybe::All),
             (Alias::All, _) => Alias::All,
@@ -217,8 +248,7 @@ impl BasicAA {
             Lit::Stack(s) => Alias::Slot(Maybe::Just(s), Maybe::Just(0)),
             Lit::Addr(a) => Alias::Global(Maybe::Just(a), Maybe::Just(0)),
             Lit::Undef => Alias::Undef,
-            Lit::Int(x) =>
-                if x == 0 {Alias::Null} else {Alias::All},
+            Lit::Int(_) => Alias::Global(Maybe::All, Maybe::All),
         }
     }
 
@@ -243,7 +273,7 @@ impl BasicAA {
 
         for (arg, _) in args {
             let elem = self.eval_lit(arg.clone());
-            ret = ret.join(&elem);
+            ret = ret.meet(&elem);
         }
 
         self.alias[dest] = ret;
