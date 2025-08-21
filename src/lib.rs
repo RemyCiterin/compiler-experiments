@@ -28,3 +28,4 @@ pub mod alias;
 pub mod instselect;
 pub mod dce;
 pub mod gvn;
+pub mod sexpr;

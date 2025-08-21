@@ -161,4 +161,6 @@ fn main() {
     let mut file = std::fs::File::create(file_name).unwrap();
 
     file.write_all(format!("{ltl_table}").as_bytes()).unwrap();
+
+    sexpr::test_sexpr_parser();
 }

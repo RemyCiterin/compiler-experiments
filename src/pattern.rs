@@ -7,6 +7,7 @@ use std::collections::HashMap;
 /// sexpr =
 ///     variable
 ///     | literal
+///     | (reg variable)
 ///     | (int variable)
 ///     | (addr variable)
 ///     | (slot variable)
