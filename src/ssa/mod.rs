@@ -733,6 +733,7 @@ pub enum Word {
 pub enum Section<Op, Cond> {
     Text(Cfg<Op, Cond>),
     Data(Vec<Word>),
+    Bss(usize),
 }
 
 impl<Op: Operation, Cond: Condition> Section<Op, Cond> {
@@ -790,6 +791,7 @@ impl std::fmt::Display for Word {
 impl<Op: Operation, Cond: Condition> std::fmt::Display for Section<Op, Cond> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::Bss(size) => write!(f, ".zero {size}"),
             Self::Text(cfg) =>  write!(f, "{cfg}"),
             Self::Data(items) => {
                 for x in items.iter() {

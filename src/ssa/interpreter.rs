@@ -57,8 +57,8 @@ impl std::fmt::Display for Statistics {
     }
 }
 
-pub struct Interpreter<'a, Op, Cond>{
-    table: &'a SymbolTable<Op, Cond>,
+pub struct Interpreter<'a>{
+    table: &'a SymbolTable<COp, CCond>,
 
     /// Associate a pointer to each symbol
     symbols: HashMap<String, i32>,
@@ -82,8 +82,8 @@ pub struct Interpreter<'a, Op, Cond>{
     pub stats: Statistics,
 }
 
-impl<'a, Op: Operation, Cond: Condition> Interpreter<'a, Op, Cond> {
-    pub fn new(table: &'a SymbolTable<Op, Cond>) -> Self {
+impl<'a> Interpreter<'a> {
+    pub fn new(table: &'a SymbolTable<COp, CCond>) -> Self {
         let mut symbols: HashMap<String, i32> = HashMap::new();
         let mut memory: HashMap<i32, i32> = HashMap::new();
 
@@ -138,7 +138,7 @@ impl<'a, Op: Operation, Cond: Condition> Interpreter<'a, Op, Cond> {
         }
     }
 
-    pub fn cfg(&self) -> &'a Cfg<Op, Cond> {
+    pub fn cfg(&self) -> &'a Cfg<COp, CCond> {
         self.table.symbols[&self.symbol].as_text().unwrap()
     }
 
@@ -302,6 +302,21 @@ impl<'a, Op: Operation, Cond: Condition> Interpreter<'a, Op, Cond> {
                     Instr::Operation(dest, op, args) => {
                         let values = args.iter().map(|v|self.var(*v)).collect();
                         self.write_var(*dest, op.eval(values).unwrap());
+
+                        self.stats.non_trivial += 1;
+                        match op {
+                            COp::Mul => self.stats.mults += 1,
+                            COp::SDiv
+                                | COp::UDiv
+                                | COp::SRem
+                                | COp::URem
+                                => self.stats.divs += 1,
+                            COp::Sll
+                                | COp::Sra
+                                | COp::Srl
+                                => self.stats.shifts += 1,
+                            _ => {}
+                        }
                     }
                     Instr::Branch(cond, args, l1, l2) => {
                         let values = args.iter().map(|v|self.var(*v)).collect();

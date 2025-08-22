@@ -337,6 +337,7 @@ impl<A: Arch> std::fmt::Display for Ltl<A> {
 pub enum LtlSection<A: Arch> {
     Text(Ltl<A>),
     Data(Vec<Word>),
+    Bss(usize),
 }
 
 
@@ -367,6 +368,8 @@ impl<A: Arch> LtlSymbolTable<A> {
 
         for (name, section) in table.symbols {
             match section {
+                Section::Bss(size) =>
+                    _ = symbols.insert(name, LtlSection::Bss(size)),
                 Section::Data(words) =>
                     _ = symbols.insert(name, LtlSection::Data(words)),
                 Section::Text(mut cfg) => {
@@ -383,6 +386,7 @@ impl<A: Arch> LtlSymbolTable<A> {
 impl<A: Arch> std::fmt::Display for LtlSection<A> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::Bss(size) => write!(f, ".zero {size}"),
             Self::Text(cfg) =>  write!(f, "{cfg}"),
             Self::Data(items) => {
                 for x in items.iter() {

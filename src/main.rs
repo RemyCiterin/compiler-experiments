@@ -75,6 +75,8 @@ pub fn translate(table: ssa::SymbolTable<COp, CCond>) ->
             }
             ssa::Section::Data(v) =>
                 _ = symbols.insert(name, ssa::Section::Data(v.clone())),
+            ssa::Section::Bss(size) =>
+                _ = symbols.insert(name, ssa::Section::Bss(size)),
         }
     }
 
@@ -128,10 +130,6 @@ fn main() {
     let rtl_table = translate(table);
 
     //rtl_table.pp_text();
-
-    let mut interp = interpreter::Interpreter::new(&rtl_table);
-    interp.interpret_function();
-    println!("{}", interp.stats);
 
     let ltl_table: ltl::LtlSymbolTable<arch::rv32::RvArch>
         = ltl::LtlSymbolTable::new(rtl_table);
