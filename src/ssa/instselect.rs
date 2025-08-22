@@ -39,10 +39,10 @@
 //!
 //! See [crate::rtl::rv32] for a full example.
 
-use crate::ssa::*;
+use super::*;
 
 use slotmap::*;
-use crate::pattern::*;
+use super::pattern::*;
 
 
 pub struct Selection<Op1, Op2, Cond1, Cond2> {
@@ -61,7 +61,8 @@ Selection<Op1, Op2, Cond1, Cond2> {
 
         // Ensure phi expressions only depende on variables (no need to have instructions before
         // the phis of the generated block...)
-        let mut conv = crate::out_of_ssa::Conventionalize::new(&old);
+        let mut conv =
+            crate::ssa::out_of_ssa::Conventionalize::new(&old);
         conv.run(&mut old);
 
         let mut labels = SecondaryMap::new();

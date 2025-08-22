@@ -1,6 +1,6 @@
 use crate::ssa::*;
 
-use crate::union_find::*;
+use crate::utils::union_find::*;
 
 pub struct Simplifier {
     uf: UnionFind<Var>,

@@ -1,8 +1,8 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 
-use crate::union_find::*;
-use crate::interference::*;
-use crate::liveness::*;
+use crate::utils::union_find::*;
+use crate::ssa::interference::*;
+use crate::ssa::liveness::*;
 use crate::ssa::*;
 use crate::arch::*;
 

@@ -1,9 +1,9 @@
-use crate::ssa::*;
+use super::*;
 
-use crate::dominance::*;
+use super::dominance::*;
 use slotmap::*;
 
-use crate::persistent_hash_map::*;
+use crate::utils::persistent_hash_map::*;
 
 use std::collections::HashSet;
 

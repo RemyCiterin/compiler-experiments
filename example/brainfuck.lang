@@ -8,12 +8,6 @@ var program = "
     >++.>+.+++++++..+++.>++.<<+++++++++++++++.>.+++.------.--------.>+.>.
 ";
 
-var put_char_buf = "?";
-print_char(x) {
-  put_char_buf[0] = x;
-  puts(put_char_buf);
-}
-
 exit_loop(prog, pos) {
   let count = 0;
   let result = 0;
@@ -60,7 +54,7 @@ execute(prog) {
     }
 
     if char == '.' {
-      print_char(memory[index]);
+      put_char(memory[index]);
     }
 
     if char == '[' {

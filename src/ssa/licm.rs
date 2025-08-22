@@ -1,5 +1,5 @@
-use crate::dominance::*;
-use crate::ssa::*;
+use super::dominance::*;
+use super::*;
 
 use std::collections::{HashSet, HashMap};
 

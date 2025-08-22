@@ -1,10 +1,10 @@
 use super::*;
-use crate::instselect::*;
+use crate::ssa::instselect::*;
 use crate::*;
 use crate::ssa::*;
 use slotmap::*;
 
-use crate::pattern::*;
+use crate::ssa::pattern::*;
 
 pub struct RvArch;
 

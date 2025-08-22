@@ -132,21 +132,21 @@ macro_rules! eval_pattern_vars {
 #[macro_export]
 macro_rules! pattern {
     ( $e:literal ) => {
-        crate::pattern::Pattern::Const($e)
+        crate::ssa::pattern::Pattern::Const($e)
     };
-    ( (int $i:ident) ) => { crate::pattern::Pattern::Int( stringify!($i).to_string() ) };
-    ( (addr $i:ident) ) => { crate::pattern::Pattern::Addr( stringify!($i).to_string() ) };
-    ( (slot $i:ident) ) => { crate::pattern::Pattern::Stack( stringify!($i).to_string() ) };
-    ( (reg $i:ident) ) => { crate::pattern::Pattern::Reg( stringify!($i).to_string() ) };
+    ( (int $i:ident) ) => { crate::ssa::pattern::Pattern::Int( stringify!($i).to_string() ) };
+    ( (addr $i:ident) ) => { crate::ssa::pattern::Pattern::Addr( stringify!($i).to_string() ) };
+    ( (slot $i:ident) ) => { crate::ssa::pattern::Pattern::Stack( stringify!($i).to_string() ) };
+    ( (reg $i:ident) ) => { crate::ssa::pattern::Pattern::Reg( stringify!($i).to_string() ) };
     ( ($op:ident $($p:tt)* ) ) => {{
         let mut patterns = vec![];
         $(patterns.push(pattern!($p));)*
-        crate::pattern::Pattern::Operation(
+        crate::ssa::pattern::Pattern::Operation(
             crate::ssa::COp::$op,
             patterns
         )
     }};
-    ( $i:ident ) => { crate::pattern::Pattern::Leaf( stringify!($i).to_string() ) };
+    ( $i:ident ) => { crate::ssa::pattern::Pattern::Leaf( stringify!($i).to_string() ) };
 }
 
 /// A map from variables in a pattern to their concrete value if the C.F.G. in case of a match

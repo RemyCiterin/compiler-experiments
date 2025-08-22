@@ -1,7 +1,7 @@
-use crate::ssa::*;
+use super::*;
 use slotmap::*;
 
-use crate::pattern::*;
+use super::pattern::*;
 use crate::{pattern, declare_pattern_vars};
 
 

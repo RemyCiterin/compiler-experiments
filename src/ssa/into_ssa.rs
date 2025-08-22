@@ -1,11 +1,11 @@
 //! This module is used to transform a control flow graph into a Static Single Assignment form,
 //! it does it by taking as argument a CFG and returning a new equivalent CSF in SSA form.
 
-use crate::ssa::*;
-use crate::dominance::*;
+use super::*;
+use super::dominance::*;
 use std::collections::HashMap;
-use crate::persistent_hash_map::PHashMap;
-use crate::liveness::*;
+use crate::utils::persistent_hash_map::PHashMap;
+use super::liveness::*;
 use slotmap::*;
 
 /// Naive SSA form generation using liveness relation, it rename each variable at the entry of each

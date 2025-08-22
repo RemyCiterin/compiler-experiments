@@ -43,18 +43,6 @@ pub fn optimize(table: &mut ssa::SymbolTable<COp, CCond>) {
 
                 cfg.gc();
 
-                println!("
-====================================================
-====================================================
-====================================================
-
-Analyze {name} of cfg\n{cfg}\n
-                ");
-
-                let mut alias = alias::BasicAA::new(cfg);
-                alias.search(cfg);
-                alias.show(cfg);
-
                 licm::licm(cfg);
 
                 cfg.gc();
@@ -75,6 +63,8 @@ pub fn translate(table: ssa::SymbolTable<COp, CCond>) ->
 
                 let mut gvn = gvn::ValueTable::new();
                 gvn.run(&mut cfg);
+
+                licm::licm(&mut cfg);
 
                 let mut dce = dce::Dce::new();
                 dce.run(&mut cfg);
@@ -141,7 +131,7 @@ fn main() {
 
     let mut interp = interpreter::Interpreter::new(&rtl_table);
     interp.interpret_function();
-    //println!("{}", interp.stats);
+    println!("{}", interp.stats);
 
     let ltl_table: ltl::LtlSymbolTable<arch::rv32::RvArch>
         = ltl::LtlSymbolTable::new(rtl_table);
@@ -161,6 +151,4 @@ fn main() {
     let mut file = std::fs::File::create(file_name).unwrap();
 
     file.write_all(format!("{ltl_table}").as_bytes()).unwrap();
-
-    sexpr::test_sexpr_parser();
 }

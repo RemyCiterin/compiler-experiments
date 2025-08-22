@@ -1,3 +1,21 @@
+pub mod into_ssa;
+pub mod out_of_ssa;
+pub mod dce;
+pub mod gvn;
+pub mod interpreter;
+pub mod mem_to_reg;
+pub mod simplify_ssa;
+pub mod tail_call_elim;
+pub mod licm;
+pub mod dominance;
+pub mod instcombine;
+pub mod instselect;
+pub mod parallel_copies;
+pub mod pattern;
+pub mod interference;
+pub mod liveness;
+
+
 use slotmap::*;
 use std::collections::BTreeSet;
 use std::collections::HashMap;

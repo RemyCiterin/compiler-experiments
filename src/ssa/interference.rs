@@ -1,4 +1,4 @@
-use crate::liveness::Liveness;
+use super::liveness::Liveness;
 use std::collections::HashSet;
 use crate::ssa::*;
 use slotmap::*;

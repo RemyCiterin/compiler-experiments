@@ -3,11 +3,11 @@
 //! registers.
 
 use std::collections::{HashSet, HashMap};
-use crate::persistent_hash_map::PHashMap;
+use crate::utils::persistent_hash_map::PHashMap;
 
 use slotmap::*;
-use crate::dominance::*;
-use crate::ssa::*;
+use super::dominance::*;
+use super::*;
 
 pub struct MemToReg {
     /// The set of stack slots to remove

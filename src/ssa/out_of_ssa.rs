@@ -1,6 +1,6 @@
 use crate::ssa::*;
 use slotmap::*;
-use crate::union_find::*;
+use crate::utils::union_find::*;
 
 pub struct Conventionalize {
     copies: SecondaryMap<Label, Vec<(Var, Lit)>>,
@@ -47,7 +47,7 @@ impl Conventionalize {
         for block in blocks {
             let copies = std::mem::take(&mut self.copies[block]);
             let moves =
-                crate::parallel_copies::copies_to_moves(|| cfg.fresh_var(), copies);
+                super::parallel_copies::copies_to_moves(|| cfg.fresh_var(), copies);
 
             let mut body = vec![];
 

@@ -84,18 +84,19 @@ impl Alias {
 
     /// An arithmetic operation is not allowed to create a pointer to the stack frame without
     /// taking as argument somthing that doesn't say anything about the stack
-    pub fn generic_op<'a, I>(iter: I) -> Self where I: std::iter::Iterator<Item=&'a Self> {
-        let elem = iter
-            .fold(
-                Self::Global(Maybe::All, Maybe::All),
-                |x,y| x.meet(y));
+    pub fn generic_op<'a, I>(_iter: I) -> Self where I: std::iter::Iterator<Item=&'a Self> {
+        //let elem = iter
+        //    .fold(
+        //        Self::Global(Maybe::All, Maybe::All),
+        //        |x,y| x.meet(y));
 
-        match elem {
-            Self::All => Self::All,
-            Self::Undef => Self::Undef,
-            Self::Slot(slot, _) => Self::Slot(slot, Maybe::All),
-            Self::Global(name, _) => Self::Global(name, Maybe::All),
-        }
+        //match elem {
+        //    Self::All => Self::All,
+        //    Self::Undef => Self::Undef,
+        //    Self::Slot(slot, _) => Self::Slot(slot, Maybe::All),
+        //    Self::Global(name, _) => Self::Global(name, Maybe::All),
+        //}
+        Alias::Undef
     }
 }
 
@@ -248,7 +249,7 @@ impl BasicAA {
             Lit::Stack(s) => Alias::Slot(Maybe::Just(s), Maybe::Just(0)),
             Lit::Addr(a) => Alias::Global(Maybe::Just(a), Maybe::Just(0)),
             Lit::Undef => Alias::Undef,
-            Lit::Int(_) => Alias::Global(Maybe::All, Maybe::All),
+            Lit::Int(_) => Alias::Undef, //Alias::Global(Maybe::All, Maybe::All),
         }
     }
 

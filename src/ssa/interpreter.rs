@@ -161,6 +161,11 @@ impl<'a, Op: Operation, Cond: Condition> Interpreter<'a, Op, Cond> {
             return true;
         }
 
+        if name == "put_char" {
+            print!("{}", args[0] as u8 as char);
+            return true;
+        }
+
         if name == "print_endline" {
             println!("");
 
@@ -168,20 +173,20 @@ impl<'a, Op: Operation, Cond: Condition> Interpreter<'a, Op, Cond> {
             return true;
         }
 
-        if name == "puts" {
-            let mut buf: Vec<u8> = Vec::new();
-            let mut addr = args[0];
+        //if name == "puts" {
+        //    let mut buf: Vec<u8> = Vec::new();
+        //    let mut addr = args[0];
 
-            while self.load(addr) != 0 {
-                buf.push(self.load(addr) as u8);
-                addr += 4;
-            }
+        //    while self.load(addr) != 0 {
+        //        buf.push(self.load(addr) as u8);
+        //        addr += 4;
+        //    }
 
-            buf.push(0);
+        //    buf.push(0);
 
-            print!("{}", String::from_utf8(buf).unwrap());
-            return true;
-        }
+        //    print!("{}", String::from_utf8(buf).unwrap());
+        //    return true;
+        //}
 
         return false;
     }

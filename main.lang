@@ -126,10 +126,13 @@ var program = "
     >++.>+.+++++++..+++.>++.<<+++++++++++++++.>.+++.------.--------.>+.>.
 ";
 
-var put_char_buf = "?";
-print_char(x) {
-  put_char_buf[0] = x;
-  puts(put_char_buf);
+puts(str) {
+  let i = 0;
+
+  while str[i] != 0 {
+    put_char(str[i]);
+    i = i + 1;
+  }
 }
 
 exit_loop(prog, pos) {
@@ -178,7 +181,7 @@ execute(prog) {
     }
 
     if char == '.' {
-      print_char(memory[index]);
+      put_char(memory[index]);
     }
 
     if char == '[' {
