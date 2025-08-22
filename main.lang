@@ -89,11 +89,11 @@ partition(arr, low, high) {
   let j = high;
 
   while i < j {
-    while (arr[i] <= p) && (i <= (high - 1)) {
+    while arr[i] <= p && i <= high - 1 {
       i = i + 1;
     }
 
-    while (arr[j] > p) && (j >= (low + 1)) {
+    while arr[j] > p && j >= low + 1 {
       j = j - 1;
     }
 
@@ -105,7 +105,7 @@ partition(arr, low, high) {
 }
 
 quickSort(arr, low, high) {
-    if (low < high) {
+    if low < high {
 
         // call partition function to find Partition Index
         let pi = partition(arr, low, high);

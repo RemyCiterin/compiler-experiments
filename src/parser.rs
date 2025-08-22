@@ -10,16 +10,36 @@ peg::parser!(pub grammar customlang() for str {
         #{|input, pos| peg::RuleResult::Matched(pos, peg::Parse::position_repr(input, pos))}
 
     pub rule rvalue() -> RValue = precedence!{
-        x:(@) _ "&&" _ y:@ {
-            let begin = x.begin;
-            let end = y.end;
-            RValue::and(x, y, begin, end)
-        }
         x:(@) _ "||" _ y:@ {
             let begin = x.begin;
             let end = y.end;
             RValue::or(x, y, begin, end)
         }
+        --
+        x:(@) _ "&&" _ y:@ {
+            let begin = x.begin;
+            let end = y.end;
+            RValue::and(x, y, begin, end)
+        }
+        --
+        x:(@) _ "|" _ y:@ {
+            let begin = x.begin;
+            let end = y.end;
+            RValue::binop(Binop::Or, x, y, begin, end)
+        }
+        --
+        x:(@) _ "^" _ y:@ {
+            let begin = x.begin;
+            let end = y.end;
+            RValue::binop(Binop::Xor, x, y, begin, end)
+        }
+        --
+        x:(@) _ "&" _ y:@ {
+            let begin = x.begin;
+            let end = y.end;
+            RValue::binop(Binop::And, x, y, begin, end)
+        }
+        --
         x:(@) _ "==" _ y:@ {
             let begin = x.begin;
             let end = y.end;
@@ -30,6 +50,7 @@ peg::parser!(pub grammar customlang() for str {
             let end = y.end;
             RValue::binop(Binop::NotEqual, x, y, begin, end)
         }
+        --
         x:(@) _ "<" _ y:@ {
             let begin = x.begin;
             let end = y.end;
@@ -50,16 +71,30 @@ peg::parser!(pub grammar customlang() for str {
             let end = y.end;
             RValue::binop(Binop::LessEqual, y, x, begin, end)
         }
+        --
+        x:(@) _ "<<" _ y:@ {
+            let begin = x.begin;
+            let end = y.end;
+            RValue::binop(Binop::Sll, x, y, begin, end)
+        }
+        x:(@) _ ">>" _ y:@ {
+            let begin = x.begin;
+            let end = y.end;
+            RValue::binop(Binop::Sra, x, y, begin, end)
+        }
+        --
         x:(@) _ "+" _ y:@ {
             let begin = x.begin;
             let end = y.end;
             RValue::binop(Binop::Add, x, y, begin, end)
         }
+        --
         x:(@) _ "-" _ y:@ {
             let begin = x.begin;
             let end = y.end;
             RValue::binop(Binop::Sub, x, y, begin, end)
         }
+        --
         x:(@) _ "*" _ y:@ {
             let begin = x.begin;
             let end = y.end;
@@ -75,32 +110,8 @@ peg::parser!(pub grammar customlang() for str {
             let end = y.end;
             RValue::binop(Binop::SRem, x, y, begin, end)
         }
-        x:(@) _ "&" _ y:@ {
-            let begin = x.begin;
-            let end = y.end;
-            RValue::binop(Binop::And, x, y, begin, end)
-        }
-        x:(@) _ "|" _ y:@ {
-            let begin = x.begin;
-            let end = y.end;
-            RValue::binop(Binop::Or, x, y, begin, end)
-        }
-        x:(@) _ "^" _ y:@ {
-            let begin = x.begin;
-            let end = y.end;
-            RValue::binop(Binop::Xor, x, y, begin, end)
-        }
-        x:(@) _ "<<" _ y:@ {
-            let begin = x.begin;
-            let end = y.end;
-            RValue::binop(Binop::Sll, x, y, begin, end)
-        }
-        x:(@) _ ">>" _ y:@ {
-            let begin = x.begin;
-            let end = y.end;
-            RValue::binop(Binop::Sra, x, y, begin, end)
-        }
-        begin:location() "-" _ x:@
+        --
+        begin:location() "-" _ x:(@)
             { let end = x.end; RValue::unop(Unop::Neg, x, begin, end) }
         begin:location() "~" _ x:@
             { let end= x.end; RValue::unop(Unop::Not, x, begin, end) }
@@ -109,6 +120,7 @@ peg::parser!(pub grammar customlang() for str {
             let zero = RValue::constant(0, begin, end);
             RValue::binop(Binop::Equal, x, zero, begin, end)
         }
+        --
         begin:location() "@udiv" _ "(" _ x:rvalue() _ "," _ y:rvalue() _ ")" end:location()
             { RValue::binop(Binop::UDiv, x, y, begin, end) }
         begin:location() "@urem" _ "(" _ x:rvalue() _ "," _ y:rvalue() _ ")" end:location()
@@ -124,13 +136,17 @@ peg::parser!(pub grammar customlang() for str {
         begin:location() "&" _ lvalue:lvalue() end:location() {
             RValue::reference(lvalue, begin, end)
         }
+        --
         begin:location() lvalue:lvalue() end:location() {
             RValue::lvalue(lvalue, begin, end)
         }
+        --
         begin:location() n:number() end:location()
             { RValue::constant(n, begin, end) }
+        --
         begin:location() n:character() end:location()
             { RValue::constant(n as i32, begin, end) }
+        --
         "(" _ e:rvalue() _ ")" { e }
     }
 

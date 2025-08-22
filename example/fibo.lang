@@ -8,8 +8,4 @@ fibo(x) {
 
 main() {
   print_i32(fibo(20));
-
-
-
-  print_i32(2 == 1 - 1);
 }
