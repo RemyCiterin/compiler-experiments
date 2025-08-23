@@ -98,7 +98,7 @@ impl<Op: std::fmt::Display, Cond: std::fmt::Display> std::fmt::Display for Instr
                 Ok(())
             }
             Self::Branch(cond, args, l1, l2) => {
-                write!(f, "{cond}")?;
+                write!(f, "branch {cond}")?;
                 for v in args { write!(f, " {v}")?; }
                 write!(f, " to {l1} {l2}")
             }

@@ -1,28 +1,11 @@
 use super::*;
 
 use super::dominance::*;
-use slotmap::*;
 
 use crate::utils::persistent_hash_map::*;
 
 use std::collections::HashSet;
 
-new_key_type!{
-    pub struct Value;
-}
-
-impl std::fmt::Display for Value {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let lsb = self.data().as_ffi() & 0xffff_ffff;
-        let msb = self.data().as_ffi() >> 32;
-
-        if msb == 1 {
-            write!(f, "val{}", lsb)
-        } else {
-            write!(f, "val{}_{}", lsb, msb)
-        }
-    }
-}
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Expr<Op> {
@@ -36,7 +19,7 @@ pub enum Expr<Op> {
     Stack(Slot),
 
     /// Binary operation
-    Operation(Op, Vec<Value>),
+    Operation(Op, Vec<Var>),
 
     /// A copy from a register
     Reg(Var),
@@ -59,43 +42,38 @@ impl<Op: Operation> std::fmt::Display for Expr<Op> {
 }
 
 pub struct ValueTable<Op> {
-    /// Associate an expression and a variable to each value
-    values: SlotMap<Value, Var>,
-
     /// Associate a value to each known expression
-    exprs: PHashMap<Expr<Op>, Value>,
+    exprs: PHashMap<Expr<Op>, Var>,
 
     /// Integer constants, used for contant propagation
-    ints: PHashMap<Value, i32>,
+    ints: PHashMap<Var, i32>,
 
     /// A set of locations where we must kills all the loads
     kill_loads: HashSet<Label>,
 
     /// A map from load addresses to their values, must be cleared at each store or at the
     /// begining of each block in the `self.kill_loads` set
-    loads: PHashMap<Expr<Op>, Value>,
+    loads: PHashMap<Expr<Op>, Var>,
 }
 
 impl<Op: Operation> ValueTable<Op> {
     pub fn new() -> Self {
         Self {
             ints: PHashMap::new(),
-            values: SlotMap::with_key(),
             kill_loads: HashSet::new(),
             loads: PHashMap::new(),
             exprs: PHashMap::new(),
         }
     }
 
-    pub fn insert(&mut self, expr: Expr<Op>, var: Var) -> Value {
-        if let Some(val) = self.exprs.get(&expr) { return *val; }
+    pub fn insert(&mut self, expr: Expr<Op>, var: Var) -> Var {
+        if let Some(x) = self.exprs.get(&expr) { return *x; }
 
-        let value = self.values.insert(var);
-        self.exprs.insert(expr.clone(), value);
-        value
+        self.exprs.insert(expr.clone(), var);
+        var
     }
 
-    pub fn insert_move(&mut self, dest: Var, lit: Lit) -> Value {
+    pub fn insert_move(&mut self, dest: Var, lit: Lit) -> Var {
         match lit {
             Lit::Int(i) => self.insert(Expr::Int(i), dest),
             Lit::Addr(s) => self.insert(Expr::Addr(s.clone()), dest),
@@ -105,7 +83,7 @@ impl<Op: Operation> ValueTable<Op> {
         }
     }
 
-    pub fn get_lit(&self, lit: Lit) -> Option<Value> {
+    pub fn get_lit(&self, lit: Lit) -> Option<Var> {
         match lit {
             Lit::Int(i) => self.exprs.get(&Expr::Int(i)).cloned(),
             Lit::Addr(a) => self.exprs.get(&Expr::Addr(a)).cloned(),
@@ -115,7 +93,7 @@ impl<Op: Operation> ValueTable<Op> {
         }
     }
 
-    pub fn insert_var(&mut self, v: Var)-> Value {
+    pub fn insert_var(&mut self, v: Var)-> Var {
         self.insert(Expr::Reg(v), v)
     }
 
@@ -126,7 +104,7 @@ impl<Op: Operation> ValueTable<Op> {
             Instr::Operation(dest, op, args) => {
                 if op.may_have_side_effect() { return instr; }
 
-                let vals: Vec<Value> = args.iter().map(|v| self.insert_var(*v)).collect();
+                let vals: Vec<Var> = args.iter().map(|v| self.insert_var(*v)).collect();
 
                 // Perform constant propagation if we known that all the arguments of the
                 // operation are integers
@@ -135,7 +113,7 @@ impl<Op: Operation> ValueTable<Op> {
                     if let Some(r) = op.eval(args) {
                         if let Some(value) = self.get_lit(Lit::Int(r)) {
                             self.exprs.insert(Expr::Reg(*dest), value);
-                            return Instr::Move(*dest, Lit::Var(self.values[value].clone()));
+                            return Instr::Move(*dest, Lit::Var(value));
                         }
 
                         let v = self.insert_move(*dest, Lit::Int(r));
@@ -148,7 +126,7 @@ impl<Op: Operation> ValueTable<Op> {
                 let expr = Expr::Operation(op.clone(), vals);
                 if let Some(value) = self.exprs.get(&expr).cloned() {
                     self.exprs.insert(Expr::Reg(*dest), value);
-                    return Instr::Move(*dest, Lit::Var(self.values[value].clone()));
+                    return Instr::Move(*dest, Lit::Var(value));
                 }
 
                 let v = self.insert(expr, *dest);
@@ -158,7 +136,7 @@ impl<Op: Operation> ValueTable<Op> {
             Instr::Move(dest, lit) => {
                 if let Some(value) = self.get_lit(lit.clone()) {
                     self.exprs.insert(Expr::Reg(*dest), value);
-                    return Instr::Move(*dest, Lit::Var(self.values[value].clone()));
+                    return Instr::Move(*dest, Lit::Var(value));
                 }
 
                 let v = self.insert_move(*dest, lit.clone());
@@ -167,38 +145,38 @@ impl<Op: Operation> ValueTable<Op> {
                 instr
             }
             Instr::Load{addr, dest, volatile: false, kind: MemopKind::Word} => {
-                if let Some(value) = self.loads.get(&Expr::Reg(*addr)) {
+                let addr = self.insert_var(*addr);
+
+                if let Some(value) = self.loads.get(&Expr::Reg(addr)) {
                     self.exprs.insert(Expr::Reg(*dest), *value);
-                    return Instr::Move(*dest, Lit::Var(self.values[*value].clone()));
+                    return Instr::Move(*dest, Lit::Var(*value));
                 }
 
-                let v = self.values.insert(*dest);
-                self.loads.insert(Expr::Reg(*addr), v);
-                self.exprs.insert(Expr::Reg(*dest), v);
+                self.loads.insert(Expr::Reg(addr), *dest);
+                self.exprs.insert(Expr::Reg(*dest), *dest);
                 instr
             }
             Instr::LoadLocal{addr, dest, kind: MemopKind::Word} => {
                 let mut addr_expr = Expr::Stack(*addr);
 
                 if let Some(value) = self.exprs.get(&addr_expr) {
-                    addr_expr = Expr::Reg(self.values[*value].clone());
+                    addr_expr = Expr::Reg(*value);
                 }
 
                 if let Some(value) = self.loads.get(&addr_expr) {
                     self.exprs.insert(Expr::Reg(*dest), *value);
-                    return Instr::Move(*dest, Lit::Var(self.values[*value].clone()));
+                    return Instr::Move(*dest, Lit::Var(*value));
                 }
 
-                let v = self.values.insert(*dest);
-                self.loads.insert(addr_expr, v);
-                self.exprs.insert(Expr::Reg(*dest), v);
+                self.loads.insert(addr_expr, *dest);
+                self.exprs.insert(Expr::Reg(*dest), *dest);
                 instr
             }
             Instr::StoreLocal{addr, val, kind: MemopKind::Word} => {
                 let mut addr_expr = Expr::Stack(*addr);
 
                 if let Some(value) = self.exprs.get(&addr_expr) {
-                    addr_expr = Expr::Reg(self.values[*value].clone());
+                    addr_expr = Expr::Reg(*value);
                 }
 
                 self.loads.clear();
@@ -207,9 +185,11 @@ impl<Op: Operation> ValueTable<Op> {
                 instr
             }
             Instr::Store{addr, val, volatile: false, kind: MemopKind::Word} => {
+                let addr = self.insert_var(*addr);
+
                 self.loads.clear();
                 let value = self.insert_var(*val);
-                self.loads.insert(Expr::Reg(*addr), value);
+                self.loads.insert(Expr::Reg(addr), value);
                 instr
             }
             Instr::Call(..) | Instr::Store{..} | Instr::StoreLocal{..} => {
@@ -222,7 +202,7 @@ impl<Op: Operation> ValueTable<Op> {
 
     pub fn update_operand(&self, var: Var) -> Var {
         if let Some(value) = self.exprs.get(&Expr::Reg(var)) {
-            return self.values[*value].clone();
+            return *value;
         }
 
         return var;
@@ -258,7 +238,7 @@ impl<Op: Operation> ValueTable<Op> {
                     for (lit, label) in args.iter() {
                         if let Lit::Var(x) = lit && label == &block {
                             if let Some(value) = self.exprs.get(&Expr::Reg(*x)) {
-                                new_args.push((Lit::Var(self.values[*value]), *label));
+                                new_args.push((Lit::Var(*value), *label));
                                 continue;
                             }
                         }
@@ -307,8 +287,7 @@ impl<Op: Operation> ValueTable<Op> {
 
     pub fn run<Cond: Condition>(&mut self, cfg: &mut Cfg<Op, Cond>) {
         for &arg in cfg.args.iter() {
-            let val = self.values.insert(arg);
-            self.exprs.insert(Expr::Reg(arg), val);
+            self.exprs.insert(Expr::Reg(arg), arg);
         }
 
         self.exprs.push();

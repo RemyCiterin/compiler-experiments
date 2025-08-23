@@ -239,7 +239,7 @@ impl Occurence {
     pub fn search_instr<Op: Operation, Cond: Condition>
         (&mut self, cfg: &Cfg<Op, Cond>, pattern: &Pattern<Op>, instr: &Instr<Op, Cond>) -> bool {
         match (pattern, instr) {
-            //(_, Instr::Move(_, lit)) => self.search_lit(cfg, pattern, lit),
+            (_, Instr::Move(_, lit)) => self.search_lit(cfg, pattern, lit),
             (Pattern::Reg(i), _) => {
                 let x = instr.destination().unwrap();
                 if self.vars.contains_key(i) && self.vars[i] != x { return false; }
