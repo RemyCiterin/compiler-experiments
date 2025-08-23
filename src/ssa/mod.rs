@@ -14,6 +14,7 @@ pub mod parallel_copies;
 pub mod pattern;
 pub mod interference;
 pub mod liveness;
+pub mod alias;
 
 
 use slotmap::*;

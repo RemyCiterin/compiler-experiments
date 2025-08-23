@@ -369,17 +369,6 @@ pub fn combine_from_patterns<'a>(
     op_rules: &Vec<OpRule<'a>>,
     cond_rules: &Vec<CondRule<'a>>) {
 
-    // TODO constant propagation
-    // // Constant folding in case of a binary operation
-    // if let Instr::Binop(dest, binop, Lit::Int(i1), Lit::Int(i2)) = &instr {
-    //     *instr = Instr::Move(*dest, Lit::Int(binop.eval(*i1, *i2)));
-    // }
-
-    // // Constant folding in case of an unary operation
-    // if let Instr::Unop(dest, unop, Lit::Int(i)) = &instr {
-    //     *instr = Instr::Move(*dest, Lit::Int(unop.eval(*i)));
-    // }
-
     // Search for a rule for an operation
     for rule in op_rules.iter() {
         let result = search_pattern(rule.pattern(), cfg, instr);

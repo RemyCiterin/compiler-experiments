@@ -45,6 +45,9 @@ pub fn optimize(table: &mut ssa::SymbolTable<COp, CCond>) {
 
                 licm::licm(cfg);
 
+                let mut gvn = gvn::ValueTable::new();
+                gvn.run(cfg);
+
                 cfg.gc();
             }
             _ => {}
@@ -83,14 +86,15 @@ pub fn translate(table: ssa::SymbolTable<COp, CCond>) ->
     ssa::SymbolTable{symbols}
 }
 
-pub fn fibo(x: i32) -> i32 {
-    if x < 2 { x }
-    else { fibo(x-1) + fibo(x-2) }
+pub fn write(content: String, file_name: String) {
+    let mut file = std::fs::File::create(file_name).unwrap();
+
+    file.write_all(content.as_bytes()).unwrap();
 }
 
 fn main() {
     let file_name = std::env::args().nth(1).unwrap();
-    let mut file = std::fs::File::open(file_name).unwrap();
+    let mut file = std::fs::File::open(format!("{file_name}.lang")).unwrap();
 
     let mut program: String = String::new();
 
@@ -99,8 +103,8 @@ fn main() {
     let parsed = parser::customlang::decl(&program);
 
     match &parsed {
-        Err(peg::error::ParseError{location, expected}) => {
-            let msg = format!("unexpected token, expect {}", expected);
+        Err(peg::error::ParseError{location, ..}) => {
+            let msg = format!("unexpected token");
             ast::show_error(&msg, &program, *location, *location);
             return;
         }
@@ -122,6 +126,7 @@ fn main() {
     optimize(&mut table);
 
     //table.pp_text();
+    write(format!("{table}"), format!("{file_name}.ir"));
 
     let mut interp = interpreter::Interpreter::new(&table);
     interp.interpret_function();
@@ -130,6 +135,7 @@ fn main() {
     let rtl_table = translate(table);
 
     //rtl_table.pp_text();
+    write(format!("{rtl_table}"), format!("{file_name}.rtl"));
 
     let ltl_table: ltl::LtlSymbolTable<arch::rv32::RvArch>
         = ltl::LtlSymbolTable::new(rtl_table);
@@ -145,8 +151,5 @@ fn main() {
         println!("function {name}: {stats}\n");
     }
 
-    let file_name = std::env::args().nth(2).unwrap();
-    let mut file = std::fs::File::create(file_name).unwrap();
-
-    file.write_all(format!("{ltl_table}").as_bytes()).unwrap();
+    write(format!("{ltl_table}"), format!("{file_name}.s"));
 }

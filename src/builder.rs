@@ -400,7 +400,7 @@ fn fill_table(program: Decl, symbols: &HashSet<String>, table: &mut SymbolTable<
         DeclCore::Array{name, values} => {
             let mut data: Vec<Word> = values.iter().map(|x| Word::Int(*x)).collect();
             data.insert(0, Word::Addr(name.clone(), 4));
-            _ = table.symbols.insert(name, Section::Data(data))
+            _ = table.symbols.insert(name, Section::Data(data));
         },
         DeclCore::Seq{lhs, rhs} => {
             fill_table(lhs, symbols, table)?;

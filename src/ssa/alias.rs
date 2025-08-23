@@ -144,10 +144,6 @@ impl BasicAA {
     }
 
     pub fn show(&self, cfg: &Cfg<COp, CCond>) {
-        //for (var, alias) in self.alias.iter() {
-        //    println!("alias({var}) = {alias}");
-        //}
-
         for (_, block) in cfg.iter_blocks() {
             for instr in block.stmt.iter() {
                 let trigger =
@@ -166,7 +162,6 @@ impl BasicAA {
 
             }
         }
-
     }
 
     pub fn search(&mut self, cfg: &Cfg<COp, CCond>) {

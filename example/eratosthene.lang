@@ -1,16 +1,46 @@
-mult(x, y) {
-  let acc = 0;
+puts(str) {
+  let i = 0;
 
-  while x && y {
-    if y & 1 {
-      acc = acc + x;
-    }
+  while str[i] != 0 {
+    put_char(str[i]);
+    i = i + 1;
+  }
+}
 
-    x = x << 1;
-    y = y >> 1;
+var print_uint_error = "Error during printing";
+
+panic(msg) {
+  puts(msg);
+  while 1 {nop;}
+}
+
+print_uint(x) {
+  let buffer[10];
+  let index = 0;
+
+  while x != 0 {
+
+    if index >= 10 { panic(print_uint_error); }
+    buffer[index] = (x % 10) + '0';
+    index = index + 1;
+    x = x / 10;
   }
 
-  return acc;
+  while index > 0 {
+    index = index - 1;
+    put_char(buffer[index]);
+  }
+
+  put_char(10);
+}
+
+print_int(x) {
+  if x > 0 {
+    print_uint(x);
+  } else {
+    put_char('-');
+    print_uint(-x);
+  }
 }
 
 var buffer[100] = 1;
@@ -33,7 +63,7 @@ eratosthene(N) {
       continue;
     }
 
-    j = mult(i, i);
+    j = i * i;
 
     while j < N {
       buffer[j] = 0;
@@ -51,7 +81,7 @@ main() {
   x = 1;
   while x < 100 {
     if buffer[x] {
-      print_i32(x);
+      print_int(x);
     }
 
     x = x + 1;
