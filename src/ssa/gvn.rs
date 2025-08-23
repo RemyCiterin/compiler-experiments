@@ -249,6 +249,28 @@ impl<Op: Operation> ValueTable<Op> {
 
         cfg.set_block_stmt(block, stmt);
 
+        for succ in cfg[block].succs() {
+            // Rename Phi arguments of this successor
+            for i in 0..cfg[succ].stmt.len() {
+                if let Instr::Phi(dest, args) = &cfg[succ].stmt[i] {
+                    let mut new_args = vec![];
+
+                    for (lit, label) in args.iter() {
+                        if let Lit::Var(x) = lit && label == &block {
+                            if let Some(value) = self.exprs.get(&Expr::Reg(*x)) {
+                                new_args.push((Lit::Var(self.values[*value]), *label));
+                                continue;
+                            }
+                        }
+
+                        new_args.push((lit.clone(), *label));
+                    }
+
+                    cfg.set_instr(succ, i, Instr::Phi(*dest, new_args));
+                }
+            }
+        }
+
         for &child in dom.childrens(block).iter() {
             self.run_on_block(cfg, dom, child);
         }
