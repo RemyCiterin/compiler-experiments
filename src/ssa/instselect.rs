@@ -84,8 +84,8 @@ Selection<Op1, Op2, Cond1, Cond2> {
 
         for (slot, kind) in old.stack.iter() {
             match kind {
-                SlotKind::Local(size) =>
-                    _ = slots.insert(slot, new.fresh_stack_var(*size)),
+                SlotKind::Local(size, align) =>
+                    _ = slots.insert(slot, new.fresh_stack_var(*size, *align)),
                 _ => panic!("on local stack slots are allowed until `Cfg` representation"),
             }
         }

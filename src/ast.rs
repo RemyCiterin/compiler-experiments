@@ -241,7 +241,6 @@ ast!{
     }
 }
 
-
 ast!{
     enum StmtCore Stmt {
         Decl decl(name: String),
@@ -257,6 +256,16 @@ ast!{
         Scope scope(body: Stmt),
         Break _break_(),
         Continue _continue_()
+    }
+}
+
+ast! {
+    enum DeclCore Decl{
+        Variable variable(name: String, value: i32),
+        Array array(name: String, values: Vec<i32>),
+        Function function(name: String, args: Vec<String>, body: Stmt),
+        Seq seq(lhs: Decl, rhs: Decl),
+        Empty empty()
     }
 }
 
@@ -307,13 +316,3 @@ pub fn show_error(msg: &str, program: &str, begin: LineCol, end: LineCol) {
     }
 }
 
-
-ast! {
-    enum DeclCore Decl{
-        Variable variable(name: String, value: i32),
-        Array array(name: String, values: Vec<i32>),
-        Function function(name: String, args: Vec<String>, body: Stmt),
-        Seq seq(lhs: Decl, rhs: Decl),
-        Empty empty()
-    }
-}

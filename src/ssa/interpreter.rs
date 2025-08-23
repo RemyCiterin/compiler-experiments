@@ -256,7 +256,7 @@ impl<'a> Interpreter<'a> {
         let sp = self.sp;
         for (slot, kind) in self.cfg().stack.iter() {
             match kind {
-                SlotKind::Local(size) => self.push(slot, *size),
+                SlotKind::Local(size, 2) => self.push(slot, *size),
                 _ => panic!("only local slots are allowed until `Rtl` representation"),
             }
         }

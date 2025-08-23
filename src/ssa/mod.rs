@@ -340,7 +340,7 @@ pub enum VarKind {
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
 pub enum SlotKind {
-    Local(usize),
+    Local(usize, u8),
     Incoming(usize),
     Outgoing(usize),
 }
@@ -497,8 +497,8 @@ impl<Op: Operation, Cond: Condition> Cfg<Op, Cond> {
     }
 
     /// Return a fresh stack slot, and allocate it on the stack
-    pub fn fresh_stack_var(&mut self, size: usize) -> Slot {
-        self.stack.insert(SlotKind::Local(size))
+    pub fn fresh_stack_var(&mut self, size: usize, align: u8) -> Slot {
+        self.stack.insert(SlotKind::Local(size, align))
     }
 
     /// Generate a fresh outgoing stack slot

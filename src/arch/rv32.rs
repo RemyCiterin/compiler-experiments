@@ -183,7 +183,7 @@ impl Arch for RvArch {
         let mut num_outgoing = 0;
         for (_, kind) in stack.iter() {
             match kind {
-                SlotKind::Local(size) => {
+                SlotKind::Local(size, _align) => {
                     stack_size += *size as i32;
                 },
                 SlotKind::Outgoing(num) =>
@@ -205,7 +205,7 @@ impl Arch for RvArch {
         let mut offset: i32 = num_outgoing as i32 * 4;
         for (slot, kind) in stack.iter() {
             match kind {
-                SlotKind::Local(size) => {
+                SlotKind::Local(size, _align) => {
                     slots.insert(slot, offset);
                     offset += *size as i32;
                 }

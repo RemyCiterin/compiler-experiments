@@ -86,7 +86,7 @@ impl<A: Arch> Ltl<A> {
         let saved: HashMap<Phys, Slot> =
             write_regs::<A>(&cfg, &color).into_iter()
             .filter_map(|p| {
-                if callee_saved.contains(&p) {Some((p, cfg.fresh_stack_var(4)))}
+                if callee_saved.contains(&p) {Some((p, cfg.fresh_stack_var(4, 2)))}
                 else {None}
             }).collect();
 
@@ -193,7 +193,7 @@ impl<A: Arch> Ltl<A> {
         let mut num_outgoing = 0;
         for (_, kind) in self.stack.iter() {
             match kind {
-                SlotKind::Local(size) => {
+                SlotKind::Local(size, _align) => {
                     stack_size += *size as i32;
                 },
                 SlotKind::Outgoing(num) =>
@@ -212,7 +212,7 @@ impl<A: Arch> Ltl<A> {
         let mut offset: i32 = num_outgoing as i32 * 4;
         for (slot, kind) in self.stack.iter() {
             match kind {
-                SlotKind::Local(size) => {
+                SlotKind::Local(size, _align) => {
                     slots.insert(slot, offset);
                     offset += *size as i32;
                 }

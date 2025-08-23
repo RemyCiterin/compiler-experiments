@@ -45,7 +45,7 @@ impl Builder {
 
         // We start by pushing arguments to the stack in case we dereference them
         for arg in args {
-            let slot = cfg.fresh_stack_var(4);
+            let slot = cfg.fresh_stack_var(4, 2);
             let slot = slot;
             let id: Var = cfg.fresh_arg();
             env.insert(arg, Lit::Stack(slot));
@@ -203,15 +203,15 @@ impl Builder {
     pub fn gen_stmt(&mut self, stmt: Stmt) -> Result<(), BuilderError> {
         match *stmt.core {
             StmtCore::Decl{name: s} => {
-                let slot = self.cfg.fresh_stack_var(4);
+                let slot = self.cfg.fresh_stack_var(4, 2);
 
                 self.env.insert(s.clone(), Lit::Stack(slot));
 
                 Ok(())
             }
             StmtCore::DeclArray{name: s, size} => {
-                let slot1 = self.cfg.fresh_stack_var(size);
-                let slot2 = self.cfg.fresh_stack_var(4);
+                let slot1 = self.cfg.fresh_stack_var(size, 2);
+                let slot2 = self.cfg.fresh_stack_var(4, 2);
 
                 let tmp = self.cfg.fresh_var();
                 self.stmt.push(Instr::Move(tmp, Lit::Stack(slot1)));

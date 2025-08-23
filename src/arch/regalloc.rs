@@ -281,7 +281,7 @@ pub fn spill_vars<A: Arch>(cfg: &mut Cfg<A::Op, A::Cond>, spill: BTreeSet<Var>) 
 
     let slots: HashMap<Var, Slot> =
         spill.iter()
-        .map(|v| (*v, cfg.fresh_stack_var(4)))
+        .map(|v| (*v, cfg.fresh_stack_var(4, 2)))
         .collect();
 
     for block in cfg.labels() {
@@ -359,7 +359,7 @@ pub fn save_caller_saved<A: Arch>
                 let mut i: usize = 0;
                 for &v in lives.iter() {
                     if saved.contains(&Phys(color[v])) {
-                        if slots.len() == i { slots.push(cfg.fresh_stack_var(4)); }
+                        if slots.len() == i { slots.push(cfg.fresh_stack_var(4, 2)); }
                         stmt.push( Instr::LoadLocal{addr: slots[i], dest: v, kind: MemopKind::Word} );
 
                         i += 1;

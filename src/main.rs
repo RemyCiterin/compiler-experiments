@@ -152,4 +152,6 @@ fn main() {
     }
 
     write(format!("{ltl_table}"), format!("{file_name}.s"));
+
+    frontend::test();
 }

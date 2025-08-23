@@ -1,5 +1,5 @@
 generate:
-	RUST_BACKTRACE=1 cargo run --release -- main.lang main
+	RUST_BACKTRACE=1 cargo run --release -- main
 
 
 example/%.s: example/%.lang
