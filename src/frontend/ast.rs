@@ -6,8 +6,8 @@ use crate::decl_ast;
 
 #[derive(Eq, PartialEq, Clone, Debug)]
 pub enum IntSize {
-    I8,I16,I32,
-    U8,U16,U32
+    I32,
+    U32
 }
 
 decl_ast! {
@@ -23,6 +23,8 @@ decl_ast! {
 decl_ast! {
     enum LValueCore LValue {
         Variable variable(name: String),
+        LField lfield(lvalue: LValue, name: String),
+        RField rfield(rvalue: RValue, name: String),
         Deref defer(rvalue: RValue)
     }
 }

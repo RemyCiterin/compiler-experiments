@@ -1,6 +1,8 @@
 use super::ast::*;
 use crate::ast::{Binop, Unop};
 
+use peg::*;
+
 pub enum Binding{
     Array(String, usize),
     Var(String),
@@ -122,8 +124,12 @@ peg::parser!(pub grammar customlang() for str {
             RValue::binop(Binop::Equal, x, zero, begin, end)
         }
         --
-        begin:location() s:ident() _ "(" args:(_rvalue_() ** ",") ")" end:location()
-            { RValue::call(s, args, begin, end) }
+        begin:location() "@cast" _ "(" _ v:rvalue() _ ":" _ t:type_() _ ")" end:location() {
+            RValue::cast(v, t, begin, end)
+        }
+        begin:location() s:ident() _ "(" args:(_rvalue_() ** ",") ")" end:location() {
+            RValue::call(s, args, begin, end)
+        }
         begin:location() "&" _ lvalue:lvalue() end:location() {
             RValue::reference(lvalue, begin, end)
         }
@@ -144,7 +150,16 @@ peg::parser!(pub grammar customlang() for str {
     rule _rvalue_() -> RValue =
         _ r:rvalue() _ {r}
 
+    #[cache_left_rec]
     pub rule lvalue() -> LValue = precedence!{
+        lvalue:@ _ "." _ name:ident() end:location() {
+            let begin = lvalue.span.begin;
+            LValue::lfield(lvalue, name, begin, end)
+        }
+        rvalue:rvalue() _ "->" _ name:ident() end:location() {
+            let begin = rvalue.span.begin;
+            LValue::rfield(rvalue, name, begin, end)
+        }
         begin:location() "*" _ rvalue:rvalue() end:location()
             { LValue::defer(rvalue, begin, end) }
         lvalue:@ _ "[" _ rvalue:rvalue() _ "]" end:location() {
@@ -260,10 +275,6 @@ peg::parser!(pub grammar customlang() for str {
     rule type_() -> Type = precedence!{
         begin:location() "i32" end:location() { Type::int(IntSize::I32, begin, end) }
         begin:location() "u32" end:location() { Type::int(IntSize::U32, begin, end) }
-        begin:location() "i16" end:location() { Type::int(IntSize::I16, begin, end) }
-        begin:location() "u16" end:location() { Type::int(IntSize::U16, begin, end) }
-        begin:location() "i8" end:location() { Type::int(IntSize::I8, begin, end) }
-        begin:location() "u8" end:location() { Type::int(IntSize::U8, begin, end) }
         begin:location() "void" end:location() { Type::void(begin, end) }
         --
         begin:location() s:ident() end:location() { Type::ident(s, begin, end) }

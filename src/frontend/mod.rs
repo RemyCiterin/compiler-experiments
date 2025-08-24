@@ -29,7 +29,7 @@ macro_rules! decl_ast {
 
 pub type LineCol = peg::str::LineCol;
 
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug, Copy)]
 pub struct Span{
     pub begin: LineCol,
     pub end: LineCol
@@ -81,12 +81,12 @@ pub fn show_error(msg: &str, program: &str, span: Span) {
 
 const PROGRAM: &'static str = "
 struct FOO {
-    x: u8,
+    x: i32,
     y: *FOO,
 }
 
-int foo(x: i32, y: FOO) {
-    return x + y;
+int foo(x: i32, y: *FOO) {
+    return x + y->x;
 }
 ";
 
