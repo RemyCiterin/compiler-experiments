@@ -270,6 +270,7 @@ impl<'a, A: Arch> Interpreter<'a, A> {
                         self.sp = sp;
                         return;
                     },
+                    LInstr::Divergence | LInstr::Convergence => {}
                     LInstr::Jump(l) => {
                         label = *l;
                         continue 'main_loop;

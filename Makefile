@@ -1,5 +1,6 @@
 generate:
-	RUST_BACKTRACE=1 cargo run --release -- main
+	RUST_BACKTRACE=1 cargo build --release
+	cp ./target/release/compiler-experiments ./compiler
 
 
 example/%.s: example/%.lang

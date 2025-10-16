@@ -66,6 +66,12 @@ pub enum Instr<Op, Cond> {
     /// A jump
     Jump(Label),
 
+    /// A divergenvce point
+    Divergence,
+
+    /// A convergence point
+    Convergence,
+
     /// Load from the current stack frame
     LoadLocal{dest: Var, addr: Slot, kind: MemopKind},
 
@@ -112,6 +118,10 @@ impl<Op: std::fmt::Display, Cond: std::fmt::Display> std::fmt::Display for Instr
                 write!(f, "[stack({})] := {} as {kind}", addr, val),
             Self::Move(dest, src1) =>
                 write!(f, "{} := {}", dest, src1),
+            Self::Divergence =>
+                write!(f, "divergence"),
+            Self::Convergence =>
+                write!(f, "convergence"),
             Self::Jump(l) =>
                 write!(f, "jump to {}", l),
             Self::Return(cond) =>
@@ -203,6 +213,8 @@ impl<Op: Operation, Cond: Condition> Instr<Op, Cond> {
                 | Self::Store{..}
                 | Self::LoadLocal{..}
                 | Self::StoreLocal{..}
+                | Self::Convergence
+                | Self::Divergence
                 | Self::Call(..)
                 | Self::Return(..)
                 | Self::Branch(..)
@@ -235,6 +247,8 @@ impl<Op: Operation, Cond: Condition> Instr<Op, Cond> {
             Self::Call(dest, _, _) => Some(*dest),
             Self::Phi(dest, _) => Some(*dest),
             Self::Jump(_) => None,
+            Self::Divergence => None,
+            Self::Convergence => None,
         }
     }
 
@@ -251,6 +265,8 @@ impl<Op: Operation, Cond: Condition> Instr<Op, Cond> {
             Self::Call(dest, _, _) => Some(dest),
             Self::Phi(dest, _) => Some(dest),
             Self::Jump(_) => None,
+            Self::Divergence => None,
+            Self::Convergence => None,
         }
     }
 
@@ -912,6 +928,7 @@ pub enum COp {
     ULessThan,
     LessEqual,
     ULessEqual,
+    Mulh,
     Mul,
     UDiv,
     URem,
@@ -933,6 +950,7 @@ impl COp {
             Binop::Sll => Self::Sll,
             Binop::Sra => Self::Sra,
             Binop::Srl => Self::Srl,
+            Binop::Mulh => Self::Mulh,
             Binop::Equal => Self::Equal,
             Binop::NotEqual => Self::NotEqual,
             Binop::LessThan => Self::LessThan,
@@ -973,7 +991,7 @@ impl Operation for COp {
     fn may_have_side_effect(&self) -> bool {false}
 
     fn eval(&self, args: Vec<i32>) -> Option<i32> {
-        Some(match self {
+        let ret = Some(match self {
             Self::Neg => -args[0],
             Self::Not => !args[0],
             Self::PtrAdd => args[0] + args[1],
@@ -996,7 +1014,17 @@ impl Operation for COp {
             Self::SRem => args[0].wrapping_rem(args[1]),
             Self::UDiv => (args[0].cast_unsigned() / args[1].cast_unsigned()) as i32,
             Self::URem => (args[0].cast_unsigned() % args[1].cast_unsigned()) as i32,
-        })
+            Self::Mulh => {
+                let r: u64 = ((args[0] as i64) * (args[1] as i64)) as u64;
+                ((r >> 32) as u32).cast_signed()
+            }
+        });
+
+        //if let Some(x) = ret {
+        //    println!("{self} {:?} = {}", args, x);
+        //}
+
+        return ret;
     }
 }
 

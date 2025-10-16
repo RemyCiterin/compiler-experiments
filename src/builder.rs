@@ -23,6 +23,9 @@ pub struct Builder {
 
     /// Entry label of the current loop (if it exists)
     current_header: Option<Label>,
+
+    /// Depth in number of uncoverged divergence points
+    depth: usize,
 }
 
 pub struct BuilderError {
@@ -60,6 +63,7 @@ impl Builder {
             stmt,
             label,
             globals,
+            depth: 0,
             current_exit: None,
             current_header: None,
         }
@@ -181,6 +185,16 @@ impl Builder {
         }
     }
 
+    /// Add a divergence point
+    pub fn gen_divergence(&mut self) {
+        self.stmt.push(Instr::Divergence);
+    }
+
+    /// Add a convergence point
+    pub fn gen_convergence(&mut self) {
+        self.stmt.push(Instr::Convergence);
+    }
+
     /// End a block by generating a branch instruction
     pub fn gen_branch(&mut self, cond: Var, l1: Label, l2: Label) {
         self.stmt.push(Instr::Branch(CCond::Nez, vec![cond], l1, l2));
@@ -231,6 +245,9 @@ impl Builder {
                 let id = self.gen_rvalue(cond)?;
                 let l1 = self.cfg.fresh_label();
                 let exit = self.cfg.fresh_label();
+
+                self.depth += 1;
+                self.gen_divergence();
                 self.gen_branch(id, l1, exit);
 
 
@@ -240,6 +257,8 @@ impl Builder {
                 self.gen_jump(exit);
                 self.label = exit;
                 self.env = env;
+                self.gen_convergence();
+                self.depth -= 1;
 
                 Ok(())
             }
@@ -257,6 +276,9 @@ impl Builder {
                 let l1 = self.cfg.fresh_label();
                 let l2 = self.cfg.fresh_label();
                 let exit = self.cfg.fresh_label();
+
+                self.depth += 1;
+                self.gen_divergence();
                 self.gen_branch(id, l1, l2);
 
 
@@ -272,6 +294,8 @@ impl Builder {
                 self.env = env;
 
                 self.label = exit;
+                self.gen_convergence();
+                self.depth -= 1;
 
                 Ok(())
             }
@@ -280,6 +304,8 @@ impl Builder {
                 let body = self.cfg.fresh_label();
                 let exit = self.cfg.fresh_label();
 
+                self.depth += 1;
+                self.gen_divergence();
                 self.gen_jump(header);
 
                 self.label = header;
@@ -300,6 +326,8 @@ impl Builder {
                 self.env = env;
 
                 self.label = exit;
+                self.gen_convergence();
+                self.depth -= 1;
                 Ok(())
             }
             StmtCore::Seq{lhs, rhs} => {
@@ -307,6 +335,15 @@ impl Builder {
                 self.gen_stmt(rhs)
             }
             StmtCore::Return{expr} => {
+                if self.depth != 0 {
+                    return Err(BuilderError{
+                        message:
+                            format!("return are not allowed inside a divergent scope").to_string(),
+                        begin: stmt.begin,
+                        end: stmt.end,
+                    });
+                }
+
                 let id = self.gen_rvalue(expr)?;
                 self.gen_return(id);
                 self.label = self.cfg.fresh_label();
@@ -378,6 +415,7 @@ fn get_symbols(program: Decl, symbols: &mut HashSet<String>) -> Result<(), Build
     };
 
     match *program.core {
+        DeclCore::Extern{name} => add(&name)?,
         DeclCore::Array{name, ..} => add(&name)?,
         DeclCore::Variable{name, ..} => add(&name)?,
         DeclCore::Seq{lhs, rhs} => {
@@ -395,6 +433,7 @@ fn fill_table(program: Decl, symbols: &HashSet<String>, table: &mut SymbolTable<
     -> Result<(), BuilderError> {
 
     match *program.core {
+        DeclCore::Extern{..} => {},
         DeclCore::Variable{name, value} =>
             _ = table.symbols.insert(name, Section::Data(vec![Word::Int(value)])),
         DeclCore::Array{name, values} => {

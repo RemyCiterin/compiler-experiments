@@ -117,6 +117,14 @@ impl Arch for RvArch {
         write!(f, "\taddi sp, sp, {}", size)
     }
 
+    fn pp_divergence(f: &mut Formatter<'_>) -> Result {
+        write!(f, ".insn i CUSTOM_0, 0x0, zero, zero, 0")
+    }
+
+    fn pp_convergence(f: &mut Formatter<'_>) -> Result {
+        write!(f, ".insn i CUSTOM_0, 0x1, zero, zero, 0")
+    }
+
     fn ret_reg() -> Phys {
         Phys(10)
     }
@@ -243,7 +251,7 @@ impl Arch for RvArch {
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum RvBinop {
-    Add, Sub, Slt, Sltu, Sll, Srl, Sra, And, Or, Xor, Mul, SDiv, SRem, UDiv, URem
+    Add, Sub, Slt, Sltu, Sll, Srl, Sra, And, Or, Xor, Mul, Mulh, SDiv, SRem, UDiv, URem
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
@@ -263,6 +271,7 @@ impl std::fmt::Display for RvBinop {
             Self::And => write!(f, "and"),
             Self::Sub => write!(f, "sub"),
             Self::Or => write!(f, "or"),
+            Self::Mulh => write!(f, "mulh"),
             Self::Xor => write!(f, "xor"),
             Self::Sll => write!(f, "sll"),
             Self::Sra => write!(f, "sra"),
@@ -377,6 +386,10 @@ impl Operation for RvOp {
                 Some( (v[0].cast_unsigned() / v[1].cast_unsigned()) as i32 ),
             RvOp::Binop(RvBinop::URem) =>
                 Some( (v[0].cast_unsigned() % v[1].cast_unsigned()) as i32 ),
+            RvOp::Binop(RvBinop::Mulh) => {
+                let r: u64 = ((v[0] as i64) * (v[1] as i64)) as u64;
+                Some(((r >> 32) as u32).cast_signed())
+            }
         }
     }
 }
@@ -524,6 +537,10 @@ pub fn translate_operation
         translate_operation_rule!(
             ( Mul x y ), true,
             select dest => vec![RvInstr::Operation(dest, RvOp::Binop(RvBinop::Mul), vec![x, y])]
+        ),
+        translate_operation_rule!(
+            ( Mulh x y ), true,
+            select dest => vec![RvInstr::Operation(dest, RvOp::Binop(RvBinop::Mulh), vec![x, y])]
         ),
         translate_operation_rule!(
             ( SDiv x y ), true,

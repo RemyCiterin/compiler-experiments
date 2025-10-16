@@ -48,6 +48,8 @@ pub fn optimize(table: &mut ssa::SymbolTable<COp, CCond>) {
                 let mut gvn = gvn::ValueTable::new();
                 gvn.run(cfg);
 
+                instcombine::combine_instructions(cfg);
+
                 cfg.gc();
             }
             _ => {}
@@ -94,7 +96,12 @@ pub fn write(content: String, file_name: String) {
 
 fn main() {
     let file_name = std::env::args().nth(1).unwrap();
-    let mut file = std::fs::File::open(format!("{file_name}.lang")).unwrap();
+    let input_dir = std::env::args().nth(2).unwrap();
+    let output_dir = std::env::args().nth(3).unwrap();
+    println!("{input_dir}/{file_name}.lang");
+    let mut file = std::fs::File::open(
+        format!("{input_dir}/{file_name}.lang")
+    ).unwrap();
 
     let mut program: String = String::new();
 
@@ -126,32 +133,43 @@ fn main() {
     optimize(&mut table);
 
     //table.pp_text();
-    write(format!("{table}"), format!("{file_name}.ir"));
+    // write(format!("{table}"), format!("{file_name}.ir"));
 
-    let mut interp = interpreter::Interpreter::new(&table);
-    interp.interpret_function();
-    println!("{}", interp.stats);
+    write(
+        format!("{table}"),
+        format!("{output_dir}/{file_name}.ir")
+    );
+
+    // let mut interp = interpreter::Interpreter::new(&table);
+    // interp.interpret_function();
+    // println!("{}", interp.stats);
 
     let rtl_table = translate(table);
 
     //rtl_table.pp_text();
-    write(format!("{rtl_table}"), format!("{file_name}.rtl"));
+    // write(format!("{rtl_table}"), format!("{file_name}.rtl"));
+
+    write(
+        format!("{rtl_table}"),
+        format!("{output_dir}/{file_name}.rtl")
+    );
 
     let ltl_table: ltl::LtlSymbolTable<arch::rv32::RvArch>
         = ltl::LtlSymbolTable::new(rtl_table);
 
     //println!("{ltl_table}");
 
-    let mut interp =
-        ltl::interpreter::Interpreter::new(&ltl_table);
-    interp.interpret_function();
+    // let mut interp =
+    //     ltl::interpreter::Interpreter::new(&ltl_table);
+    // interp.interpret_function();
 
 
-    for (name, stats) in interp.stats.iter() {
-        println!("function {name}: {stats}\n");
-    }
+    // for (name, stats) in interp.stats.iter() {
+    //     println!("function {name}: {stats}\n");
+    // }
 
-    write(format!("{ltl_table}"), format!("{file_name}.s"));
-
-    frontend::test();
+    write(
+        format!("{ltl_table}"),
+        format!("{output_dir}/{file_name}.s")
+    );
 }

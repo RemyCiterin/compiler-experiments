@@ -54,6 +54,9 @@ pub enum Binop {
     /// Integer multiplication
     Mul,
 
+    /// Upper bits of the multiplication (signed)
+    Mulh,
+
     /// Unsigned remainder, division by zero is undefined bahaviour
     URem,
 
@@ -127,6 +130,10 @@ impl Binop {
             Binop::Sub => lhs.wrapping_sub(rhs),
             Binop::Sll => sll(lhs, rhs),
             Binop::PtrAdd => lhs + rhs,
+            Binop::Mulh => {
+                let r: u64 = ((lhs as i64) * (rhs as i64)) as u64;
+                ((r >> 32) as u32).cast_signed()
+            }
             Binop::Sra => lhs.wrapping_shr(rhs.cast_unsigned()),
             Binop::Srl => srl(lhs, rhs),
             Binop::Equal => (lhs == rhs) as i32,
@@ -178,6 +185,7 @@ impl fmt::Display for Binop {
             Binop::ULessThan => write!(f, "<u"),
             Binop::ULessEqual => write!(f, "<=u"),
             Binop::Mul => write!(f, "*"),
+            Binop::Mulh => write!(f, "*'"),
             Binop::SDiv => write!(f, "`sdiv`"),
             Binop::UDiv => write!(f, "`udiv`"),
             Binop::SRem => write!(f, "`srem`"),
@@ -261,6 +269,7 @@ ast!{
 
 ast! {
     enum DeclCore Decl{
+        Extern external(name: String),
         Variable variable(name: String, value: i32),
         Array array(name: String, values: Vec<i32>),
         Function function(name: String, args: Vec<String>, body: Stmt),
@@ -299,7 +308,7 @@ pub fn show_error(msg: &str, program: &str, begin: LineCol, end: LineCol) {
 
             if n == begin.line - 1 && n == end.line - 1 {
                 let (x, y) = line.split_at(begin.column-1);
-                let (y, z) = y.split_at(end.column-begin.column+1);
+                let (y, z) = y.split_at(end.column-begin.column);
                 println!("{}{red}{}{white}{}", x.to_string(), y.to_string(), z.to_string());
             } else if n == begin.line - 1 {
                 let (x, y) = line.split_at(begin.column-1);

@@ -142,6 +142,38 @@ pub fn combine_instructions(cfg: &mut Cfg<COp, CCond>) {
             dest => Instr::Move(dest, Lit::Int(0))
         ),
         op_rule!(
+            ( Mulh x 1 ), true,
+            dest => Instr::Move(dest, Lit::Int(0))
+        ),
+        op_rule!(
+            ( Mulh 1 x ), true,
+            dest => Instr::Move(dest, Lit::Int(0))
+        ),
+        op_rule!(
+            ( Mulh x 0 ), true,
+            dest => Instr::Move(dest, Lit::Int(0))
+        ),
+        op_rule!(
+            ( Mulh 0 x ), true,
+            dest => Instr::Move(dest, Lit::Int(0))
+        ),
+        op_rule!(
+            ( Mul x 0 ), true,
+            dest => Instr::Move(dest, Lit::Int(0))
+        ),
+        op_rule!(
+            ( Mul 0 x ), true,
+            dest => Instr::Move(dest, Lit::Int(0))
+        ),
+        op_rule!(
+            ( Mul x 1 ), true,
+            dest => Instr::Move(dest, x)
+        ),
+        op_rule!(
+            ( Mul 1 x ), true,
+            dest => Instr::Move(dest, x)
+        ),
+        op_rule!(
             ( Xor x 0 ), true,
             dest => Instr::Move(dest, x)
         ),
@@ -152,6 +184,10 @@ pub fn combine_instructions(cfg: &mut Cfg<COp, CCond>) {
         op_rule!(
             ( Xor x x ), true,
             dest => Instr::Move(dest, Lit::Int(0))
+        ),
+        op_rule!(
+            ( PtrAdd x 0 ), true,
+            dest => Instr::Move(dest, x)
         ),
         op_rule!(
             ( Add 0 x ), true,

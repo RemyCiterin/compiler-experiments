@@ -121,6 +121,14 @@ peg::parser!(pub grammar customlang() for str {
             RValue::binop(Binop::Equal, x, zero, begin, end)
         }
         --
+        begin:location() "@fmul" _ "(" _ x:rvalue() _ "," _ y:rvalue() _ ")" end:location() {
+            let mut a = RValue::binop(Binop::Mul, x.clone(), y.clone(), begin, end);
+            let mut b = RValue::binop(Binop::Mulh, x, y, begin, end);
+            let imm16 = RValue::constant(16, begin, end);
+            a = RValue::binop(Binop::Srl, a, imm16.clone(), begin, end);
+            b = RValue::binop(Binop::Sll, b, imm16.clone(), begin, end);
+            RValue::binop(Binop::Or, a, b, begin, end)
+        }
         begin:location() "@udiv" _ "(" _ x:rvalue() _ "," _ y:rvalue() _ ")" end:location()
             { RValue::binop(Binop::UDiv, x, y, begin, end) }
         begin:location() "@urem" _ "(" _ x:rvalue() _ "," _ y:rvalue() _ ")" end:location()
@@ -234,6 +242,8 @@ peg::parser!(pub grammar customlang() for str {
             let end = d2.end;
             Decl::seq(d1, d2, begin, end)
         }
+        begin:location() "extern" _ s:variable() _ ";" end:location()
+            { Decl::external(s, begin, end) }
         begin:location() s:variable() _ "(" args:(_variable_() ** ",") ")" _
             "{" body:stmt() "}" end:location()
             { Decl::function(s, args, body, begin, end) }
