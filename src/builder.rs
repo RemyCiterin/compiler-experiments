@@ -18,12 +18,6 @@ pub struct Builder {
     /// Global variables as a set of strings that we can point to
     globals: HashSet<String>,
 
-    /// Exit label of the current loop (if it exists)
-    current_exit: Option<Label>,
-
-    /// Entry label of the current loop (if it exists)
-    current_header: Option<Label>,
-
     /// Depth in number of uncoverged divergence points
     depth: usize,
 }
@@ -64,8 +58,6 @@ impl Builder {
             label,
             globals,
             depth: 0,
-            current_exit: None,
-            current_header: None,
         }
     }
 
@@ -156,6 +148,8 @@ impl Builder {
                 let l1: Label = self.cfg.fresh_label();
                 let l2: Label = self.cfg.fresh_label();
 
+                self.depth += 1;
+                self.gen_divergence();
                 let id1 = self.gen_rvalue(lhs)?;
                 self.gen_branch(id1, l1, l2);
 
@@ -165,12 +159,16 @@ impl Builder {
                 self.gen_jump(l2);
 
                 self.label = l2;
+                self.gen_convergence();
+                self.depth -= 1;
                 Ok(id1)
             }
             RValueCore::Or{lhs, rhs} => {
                 let l1: Label = self.cfg.fresh_label();
                 let l2: Label = self.cfg.fresh_label();
 
+                self.depth += 1;
+                self.gen_divergence();
                 let id1 = self.gen_rvalue(lhs)?;
                 self.gen_branch(id1, l1, l2);
 
@@ -180,6 +178,8 @@ impl Builder {
                 self.gen_jump(l1);
 
                 self.label = l1;
+                self.gen_convergence();
+                self.depth -= 1;
                 Ok(id1)
             }
         }
@@ -312,17 +312,11 @@ impl Builder {
                 let id = self.gen_rvalue(cond)?;
                 self.gen_branch(id, body, exit);
 
-                let header_save =
-                    std::mem::replace(&mut self.current_header, Some(header));
-                let exit_save =
-                    std::mem::replace(&mut self.current_exit, Some(exit));
                 let env = self.env.clone();
 
                 self.label = body;
                 self.gen_stmt(stmt)?;
                 self.gen_jump(header);
-                self.current_header = header_save;
-                self.current_exit = exit_save;
                 self.env = env;
 
                 self.label = exit;
@@ -362,36 +356,6 @@ impl Builder {
                         Instr::Store{val: id, addr: tmp, volatile: false, kind: MemopKind::Word});
                 }
 
-                Ok(())
-            }
-            StmtCore::Break{} => {
-                if self.current_exit.is_none() {
-                    return Err(BuilderError{
-                        message: "`break` is illegal outside of a loop".to_string(),
-                        begin: stmt.begin,
-                        end: stmt.end,
-                    });
-                }
-
-                self.gen_jump(self.current_exit.unwrap());
-
-                // Generate a fresh label to ensure everything after a `break` is unreachable
-                self.label = self.cfg.fresh_label();
-                Ok(())
-            }
-            StmtCore::Continue{} => {
-                if self.current_header.is_none() {
-                    return Err(BuilderError{
-                        message: "`continue` is illegal outside of a loop".to_string(),
-                        begin: stmt.begin,
-                        end: stmt.end,
-                    });
-                }
-
-                self.gen_jump(self.current_header.unwrap());
-
-                // Generate a fresh label to ensure everything after a `continue` is unreachable
-                self.label = self.cfg.fresh_label();
                 Ok(())
             }
         }

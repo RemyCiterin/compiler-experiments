@@ -125,7 +125,11 @@ impl MemToReg {
         for instr in stmt.iter_mut() {
             if let Instr::LoadLocal{addr: s, dest, ..} = instr
                 && self.removed.contains(s) {
-                *instr = Instr::Move(*dest, Lit::Var(self.env[s]));
+
+                match self.env.get(s) {
+                    Some(v) => *instr = Instr::Move(*dest, Lit::Var(*v)),
+                    None => *instr = Instr::Move(*dest, Lit::Undef),
+                }
             }
 
             if let Instr::StoreLocal{addr: slot, val, ..} = instr

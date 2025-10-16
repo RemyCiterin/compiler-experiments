@@ -223,10 +223,6 @@ peg::parser!(pub grammar customlang() for str {
             { Stmt::_return_(e, begin, end) }
         begin:location() lvalue:lvalue() _ "=" _ e:rvalue() _ ";" end:location()
             { Stmt::assign(lvalue, e, begin, end) }
-        begin:location() "break" _ ";" end:location()
-            { Stmt::_break_(begin, end) }
-        begin:location() "continue" _ ";" end:location()
-            { Stmt::_continue_(begin, end) }
         begin:location() rvalue:rvalue() _ ";" end:location()
             { Stmt::expr(rvalue, begin, end) }
         begin:location() "{" _ body:stmt_core() _ "}" end:location()
