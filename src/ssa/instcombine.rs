@@ -142,14 +142,6 @@ pub fn combine_instructions(cfg: &mut Cfg<COp, CCond>) {
             dest => Instr::Move(dest, Lit::Int(0))
         ),
         op_rule!(
-            ( Mulh x 1 ), true,
-            dest => Instr::Move(dest, Lit::Int(0))
-        ),
-        op_rule!(
-            ( Mulh 1 x ), true,
-            dest => Instr::Move(dest, Lit::Int(0))
-        ),
-        op_rule!(
             ( Mulh x 0 ), true,
             dest => Instr::Move(dest, Lit::Int(0))
         ),
