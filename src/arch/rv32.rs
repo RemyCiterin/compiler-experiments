@@ -432,6 +432,10 @@ pub fn translate_operation
     let operation_rules = vec![
         // First: we try to detect some cases where we can propagate the immediate
         translate_operation_rule!(
+            ( PtrAdd x (int y) ), check_riscv_immediate(y),
+            select dest => vec![RvInstr::Operation(dest, RvOp::Unop(RvUnop::Add, y), vec![x])]
+        ),
+        translate_operation_rule!(
             ( Add x (int y) ), check_riscv_immediate(y),
             select dest => vec![RvInstr::Operation(dest, RvOp::Unop(RvUnop::Add, y), vec![x])]
         ),

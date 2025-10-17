@@ -43,7 +43,7 @@ pub fn optimize(table: &mut ssa::SymbolTable<COp, CCond>) {
 
                 cfg.gc();
 
-                licm::licm(cfg);
+                //licm::licm(cfg);
 
                 let mut gvn = gvn::ValueTable::new();
                 gvn.run(cfg);
@@ -69,7 +69,7 @@ pub fn translate(table: ssa::SymbolTable<COp, CCond>) ->
                 let mut gvn = gvn::ValueTable::new();
                 gvn.run(&mut cfg);
 
-                licm::licm(&mut cfg);
+                //licm::licm(&mut cfg);
 
                 let mut dce = dce::Dce::new();
                 dce.run(&mut cfg);
