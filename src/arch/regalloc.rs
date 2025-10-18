@@ -16,6 +16,33 @@ pub fn show_coloring(color: &Coloring) {
     }
 }
 
+// Search the set of constant literals in a control flow graph
+pub fn search_constants<A: Arch>(cfg: &Cfg<A::Op, A::Cond>) -> SparseSecondaryMap<Var, Lit> {
+    let mut map: SparseSecondaryMap<Var, Lit> = SparseSecondaryMap::new();
+
+    for (_, block) in cfg.iter_blocks() {
+        for instr in block.stmt.iter() {
+            if let Instr::Move(var, lit) = instr && !matches!(lit, Lit::Var(_)) {
+                map.insert(*var, lit.clone());
+            }
+        }
+    }
+
+    for (_, block) in cfg.iter_blocks() {
+        for instr in block.stmt.iter() {
+            if let Some(dest) = instr.destination() && map.contains_key(dest) {
+                if !matches!(instr, Instr::Move(..)) {
+                    map.remove(dest);
+                } else if let Instr::Move(_, lit) = instr && lit != &map[dest] {
+                    map.remove(dest);
+                }
+            }
+        }
+    }
+
+    return map;
+}
+
 pub fn aggressive_coalescing<A: Arch>(
     cfg: &mut Cfg<A::Op, A::Cond>,
     color: &mut Coloring,
@@ -278,9 +305,12 @@ pub fn solve_coloring<A: Arch>(
 }
 
 pub fn spill_vars<A: Arch>(cfg: &mut Cfg<A::Op, A::Cond>, spill: BTreeSet<Var>) {
+    // We recompute the unallocated constants instead of spilling htose variables
+    let constants = search_constants::<A>(cfg);
 
     let slots: HashMap<Var, Slot> =
         spill.iter()
+        .filter(|v| !constants.contains_key(**v))
         .map(|v| (*v, cfg.fresh_stack_var(4, 2)))
         .collect();
 
@@ -291,6 +321,13 @@ pub fn spill_vars<A: Arch>(cfg: &mut Cfg<A::Op, A::Cond>, spill: BTreeSet<Var>) 
 
             for v in instr.operands_mut() {
                 if spill.contains(v) {
+                    if let Some(lit) = constants.get(*v) {
+                        let id = cfg.fresh_var();
+                        stmt.push(Instr::Move(id, lit.clone()));
+                        *v = id;
+                        continue;
+                    }
+
                     let id = cfg.fresh_var();
                     stmt.push(Instr::LoadLocal{addr: slots[v], dest: id, kind: MemopKind::Word});
                     *v = id;
@@ -298,6 +335,7 @@ pub fn spill_vars<A: Arch>(cfg: &mut Cfg<A::Op, A::Cond>, spill: BTreeSet<Var>) 
             }
 
             if let Some(dest) = instr.destination_mut() && spill.contains(dest) {
+                if constants.contains_key(*dest) {continue;}
                 let id = cfg.fresh_var();
                 let store =
                     Instr::StoreLocal{val: id, addr: slots[dest], kind: MemopKind::Word};
