@@ -117,14 +117,6 @@ impl Arch for RvArch {
         write!(f, "\taddi sp, sp, {}", size)
     }
 
-    fn pp_divergence(f: &mut Formatter<'_>) -> Result {
-        write!(f, ".insn i CUSTOM_0, 0x0, zero, zero, 0")
-    }
-
-    fn pp_convergence(f: &mut Formatter<'_>) -> Result {
-        write!(f, ".insn i CUSTOM_0, 0x1, zero, zero, 0")
-    }
-
     fn ret_reg() -> Phys {
         Phys(10)
     }

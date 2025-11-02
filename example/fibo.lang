@@ -1,9 +1,12 @@
 fibo(x) {
+  let ret;
   if x < 2 {
-    return x;
+    ret = x;
   } else {
-    return fibo(x-1) + fibo(x-2);
+    ret = fibo(x-1) + fibo(x-2);
   }
+
+  return ret;
 }
 
 main() {

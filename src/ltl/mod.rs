@@ -38,12 +38,6 @@ pub enum LInstr<Op, Cond> {
     /// A jump
     Jump(usize),
 
-    /// A divergence point
-    Divergence,
-
-    /// A convergence point
-    Convergence,
-
     /// Load from the current stack frame
     LoadLocal{dest: Phys, addr: Slot, kind: MemopKind},
 
@@ -163,12 +157,6 @@ impl<A: Arch> Ltl<A> {
                     Instr::Call(_, name, _) => {
                         stmt.push(LInstr::Call(name));
                     }
-                    Instr::Divergence => {
-                        stmt.push(LInstr::Divergence);
-                    }
-                    Instr::Convergence => {
-                        stmt.push(LInstr::Convergence);
-                    }
                     Instr::Return(_) => {
                         for (&p, &s) in saved.iter() {
                             stmt.push(LInstr::LoadLocal{addr: s, dest: p, kind: MemopKind::Word});
@@ -264,10 +252,6 @@ impl<A: Arch> Ltl<A> {
 
                 write!(f, "\t")?;
                 match instr {
-                    LInstr::Divergence =>
-                        _ = A::pp_divergence(f)?,
-                    LInstr::Convergence =>
-                        _ = A::pp_convergence(f)?,
                     LInstr::Operation(dest, op, args) =>
                         _ = A::pp_op(f, dest, op, args)?,
                     LInstr::Jcc(cond, args, label) =>
@@ -317,10 +301,6 @@ impl<Op: std::fmt::Display, Cond: std::fmt::Display> std::fmt::Display for LInst
                 for v in args { write!(f, " {v}")?; }
                 write!(f, " to {l1}")
             }
-            Self::Convergence =>
-                write!(f, "convergence"),
-            Self::Divergence =>
-                write!(f, "divergence"),
             Self::Load{dest, addr, kind} =>
                 write!(f, "{} := [{}] as {kind}", dest, addr),
             Self::Store{addr, val, kind, ..} =>

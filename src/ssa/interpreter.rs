@@ -299,7 +299,6 @@ impl<'a> Interpreter<'a> {
                         label = *l;
                         continue;
                     }
-                    Instr::Divergence | Instr::Convergence => {}
                     Instr::Operation(dest, op, args) => {
                         let values = args.iter().map(|v|self.var(*v)).collect();
                         self.write_var(*dest, op.eval(values).unwrap());

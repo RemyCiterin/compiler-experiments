@@ -159,9 +159,9 @@ fn main() {
 
     //println!("{ltl_table}");
 
-    // let mut interp =
-    //     ltl::interpreter::Interpreter::new(&ltl_table);
-    // interp.interpret_function();
+    let mut interp =
+        ltl::interpreter::Interpreter::new(&ltl_table);
+    interp.interpret_function();
 
 
     // for (name, stats) in interp.stats.iter() {

@@ -182,12 +182,6 @@ Selection<Op1, Op2, Cond1, Cond2> {
                     tr_cond(self, cond.clone(), args.clone(), *l1, *l2);
                 self.stmt.extend(ops)
             }
-            Instr::Divergence => {
-                self.stmt.push(Instr::Divergence);
-            }
-            Instr::Convergence => {
-                self.stmt.push(Instr::Convergence);
-            }
             Instr::Return(id) => {
                 self.stmt.push(Instr::Return(*id));
             }

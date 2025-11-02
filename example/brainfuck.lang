@@ -12,14 +12,15 @@ exit_loop(prog, pos) {
   let count = 0;
   let result = 0;
 
-  while 1 {
+  let break = 0;
+  while !break {
     if prog[pos] == '[' {
       count = count + 1;
     }
 
     if prog[pos] == ']' {
       if count == 1 {
-        return pos + 1;
+        break = 1;
       } else {
         count = count - 1;
       }
@@ -27,6 +28,8 @@ exit_loop(prog, pos) {
 
     pos = pos + 1;
   }
+
+  return pos;
 }
 
 execute(prog) {
@@ -36,6 +39,7 @@ execute(prog) {
 
   while prog[pos] != 0 {
     let char = prog[pos];
+    let continue = 0;
 
     if char == '+' {
       memory[index] = memory[index] + 1;
@@ -60,11 +64,13 @@ execute(prog) {
     if char == '[' {
       if memory[index] == 0 {
         pos = exit_loop(prog, pos);
-        continue;
+        continue = 1;
       }
 
-      stack[top] = pos;
-      top = top + 1;
+      if !continue {
+        stack[top] = pos;
+        top = top + 1;
+      }
     }
 
     if char == ']' {
@@ -72,11 +78,13 @@ execute(prog) {
 
       if memory[index] != 0 {
         pos = stack[top];
-        continue;
+        continue = 1;
       }
     }
 
-    pos = pos + 1;
+    if !continue {
+      pos = pos + 1;
+    }
   }
 }
 

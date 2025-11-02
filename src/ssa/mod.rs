@@ -66,12 +66,6 @@ pub enum Instr<Op, Cond> {
     /// A jump
     Jump(Label),
 
-    /// A divergenvce point
-    Divergence,
-
-    /// A convergence point
-    Convergence,
-
     /// Load from the current stack frame
     LoadLocal{dest: Var, addr: Slot, kind: MemopKind},
 
@@ -118,10 +112,6 @@ impl<Op: std::fmt::Display, Cond: std::fmt::Display> std::fmt::Display for Instr
                 write!(f, "[stack({})] := {} as {kind}", addr, val),
             Self::Move(dest, src1) =>
                 write!(f, "{} := {}", dest, src1),
-            Self::Divergence =>
-                write!(f, "divergence"),
-            Self::Convergence =>
-                write!(f, "convergence"),
             Self::Jump(l) =>
                 write!(f, "jump to {}", l),
             Self::Return(cond) =>
@@ -213,8 +203,6 @@ impl<Op: Operation, Cond: Condition> Instr<Op, Cond> {
                 | Self::Store{..}
                 | Self::LoadLocal{..}
                 | Self::StoreLocal{..}
-                | Self::Convergence
-                | Self::Divergence
                 | Self::Call(..)
                 | Self::Return(..)
                 | Self::Branch(..)
@@ -247,8 +235,6 @@ impl<Op: Operation, Cond: Condition> Instr<Op, Cond> {
             Self::Call(dest, _, _) => Some(*dest),
             Self::Phi(dest, _) => Some(*dest),
             Self::Jump(_) => None,
-            Self::Divergence => None,
-            Self::Convergence => None,
         }
     }
 
@@ -265,8 +251,6 @@ impl<Op: Operation, Cond: Condition> Instr<Op, Cond> {
             Self::Call(dest, _, _) => Some(dest),
             Self::Phi(dest, _) => Some(dest),
             Self::Jump(_) => None,
-            Self::Divergence => None,
-            Self::Convergence => None,
         }
     }
 

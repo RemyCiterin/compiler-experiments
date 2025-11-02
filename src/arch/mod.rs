@@ -68,12 +68,6 @@ pub trait Arch {
     /// Pretty print return instruction
     fn pp_return(f: &mut Formatter<'_>) -> Result;
 
-    /// Add a divergence point
-    fn pp_divergence(f: &mut Formatter<'_>) -> Result;
-
-    /// Add a convergence point
-    fn pp_convergence(f: &mut Formatter<'_>) -> Result;
-
     /// Pretty print call instruction
     fn pp_call(f: &mut Formatter<'_>, symbol: &str) -> Result;
 

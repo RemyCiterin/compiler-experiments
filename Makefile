@@ -4,7 +4,7 @@ generate:
 
 
 example/%.s: example/%.lang
-	RUST_BACKTRACE=1 cargo run --release -- $(@:.s=)
+	RUST_BACKTRACE=1 cargo run --release -- $(@:example/%.s=%) example build
 
 .PHONY: clean
 clean:
