@@ -30,6 +30,8 @@ impl Conventionalize {
                 if let Instr::Phi(dest, args) = instr {
                     let mut new_vars: Vec<(Lit, Label)> = vec![];
                     for (old_lit, label) in args {
+                        // This Phi instruction reference a deleted block
+                        if !self.copies.contains_key(*label) {continue;}
                         let new_var = cfg.fresh_var();
                         self.copies[*label].push((new_var, old_lit.clone()));
                         new_vars.push((Lit::Var(new_var), *label));
