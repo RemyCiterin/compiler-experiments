@@ -8,6 +8,10 @@ use builder;
 
 use ssa::*;
 
+use spirv::*;
+
+use lang_c::driver::{Config, parse};
+
 pub fn into_ssa(table: &mut ssa::SymbolTable<COp, CCond>) {
     for (_, section) in table.symbols.iter_mut() {
         match section {
@@ -159,9 +163,9 @@ fn main() {
 
     //println!("{ltl_table}");
 
-    let mut interp =
-        ltl::interpreter::Interpreter::new(&ltl_table);
-    interp.interpret_function();
+    //let mut interp =
+    //    ltl::interpreter::Interpreter::new(&ltl_table);
+    //interp.interpret_function();
 
 
     // for (name, stats) in interp.stats.iter() {
@@ -172,4 +176,19 @@ fn main() {
         format!("{ltl_table}"),
         format!("{output_dir}/{file_name}.s")
     );
+
+    file = std::fs::File::open(
+        format!("test.spv")
+    ).unwrap();
+
+    let vec: Vec<u8> =
+        file
+        .bytes()
+        .map(|r| r.unwrap())
+        .collect();
+
+    parse_spirv_spec(&vec);
+
+    //let config = Config::default();
+    //println!("{:?}", parse(&config, "test/main.c"));
 }

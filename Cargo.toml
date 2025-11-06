@@ -6,4 +6,6 @@ edition = "2024"
 [dependencies]
 slotmap = "1.0"
 parsable = "*"
+lang-c = "*"
 peg = "*"
+rspirv = "*"

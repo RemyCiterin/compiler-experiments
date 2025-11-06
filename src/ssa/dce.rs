@@ -25,7 +25,14 @@ impl Dce {
             self.visited.insert(block);
 
             for instr in cfg[block].stmt.iter() {
-                if instr.may_have_side_effect() {
+                let mut side_effect = instr.may_have_side_effect();
+
+                // If the instruction is a non-volatile load
+                // then we can remove the instructions safely
+                if let Instr::LoadLocal{..} = instr { side_effect = false; }
+                if let Instr::Load{volatile: false, ..} = instr { side_effect = false; }
+
+                if side_effect {
                     if let Some(dest) = instr.destination() {
                         self.used_vars.insert(dest);
                     }

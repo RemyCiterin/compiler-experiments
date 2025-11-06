@@ -4,7 +4,15 @@ generate:
 
 
 example/%.s: example/%.lang
-	RUST_BACKTRACE=1 cargo run --release -- $(@:example/%.s=%) example build
+	RUST_BACKTRACE=1 RUST_BACKTRACE=full cargo run --release -- $(@:example/%.s=%) example build
+
+.PHONY: opencl
+opencl:
+	clang -c -target spir test.cl -emit-llvm -o test.bc -cl-std=CL3.0
+	llvm-spirv test.bc -o test.spv
+	spirv-dis test.spv > test.asm
+	rm test.bc
+	make example/brainfuck.s
 
 .PHONY: clean
 clean:

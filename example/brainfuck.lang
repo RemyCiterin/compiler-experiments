@@ -8,6 +8,20 @@ var program = "
     >++.>+.+++++++..+++.>++.<<+++++++++++++++.>.+++.------.--------.>+.>.
 ";
 
+print_string(str) {
+  //let i = 0;
+  //while (str[i] != 0) {
+  //  put_char(str[i]);
+  //  i = i + 1;
+  //}
+  while *str != 0 {
+    put_char(*str);
+    str = str + 4;
+  }
+
+  print_endline();
+}
+
 exit_loop(prog, pos) {
   let count = 0;
   let result = 0;
@@ -33,6 +47,7 @@ exit_loop(prog, pos) {
 }
 
 execute(prog) {
+  print_string(prog);
   let index = 0;
   let pos = 0;
   let top = 0;
