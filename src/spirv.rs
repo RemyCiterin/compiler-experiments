@@ -192,8 +192,8 @@ impl Env {
             Type::Bool => 1,
             Type::Pointer(..) => 4,
             Type::Function{..} => 4,
-            Type::Vector{items, count} => count * self.get_type_bytes(*items),
-            Type::Array{items, count} => count * self.get_type_bytes(*items),
+            Type::Vector{items, count} => count * self.get_type_size(*items),
+            Type::Array{items, count} => count * self.get_type_size(*items),
             Type::Struct{size, ..} => *size,
             Type::I64 | Type::U64 | Type::Double => 8,
             Type::I32 | Type::U32 | Type::Float => 4,
@@ -229,7 +229,15 @@ impl Env {
 
     fn add_global(&mut self, x: Word, ty: Word, vec: Vec<SWord>) {
         while self.globals.len() as u32 <= x {self.globals.push(None);}
-        self.globals[x as usize] = Some((ty, vec));
+        self.globals[x as usize] = Some((ty, vec.clone()));
+
+        print!("c{x} := ");
+        for i in 0..vec.len() {
+            if i != 0 { print!(", "); }
+            print!("{}", vec[i]);
+        }
+
+        println!();
     }
 
     fn add_type_int(&mut self, instr: &Instruction) {
@@ -335,6 +343,10 @@ impl Env {
 
             offsets.push(offset);
             offset += sizes[i];
+        }
+
+        if offset % align != 0 {
+            offset += align - (offset % align);
         }
 
         self.add_type(
@@ -493,7 +505,7 @@ impl CfgBuilder {
         self.labels[&k]
     }
 
-    pub fn create_var(&mut self, k: Word, ty: Word) {
+    pub fn new_value(&mut self, k: Word, ty: Word) {
         if self.vars.contains_key(&k) {return;}
         self.types.insert(k, ty);
 
@@ -507,14 +519,14 @@ impl CfgBuilder {
         self.vars.insert(k, vec);
     }
 
-    pub fn to_vars(&mut self, k: Word) -> Vec<Var> {
+    pub fn value(&mut self, k: Word) -> Value {
         if (k as usize) < self.env.globals.len() {
-            if let Some((_, dat)) = &self.env.globals[k as usize] {
-                let mut ret = vec![];
+            if let Some((ty, dat)) = &self.env.globals[k as usize] {
+                let mut val = vec![];
 
                 for s in dat.iter() {
                     let id = self.cfg.fresh_var();
-                    ret.push(id);
+                    val.push(id);
                     match s {
                         SWord::Int(i) => _ = self.stmt.push(Instr::Move(id, Lit::Int(*i))),
                         SWord::Addr(name, offset) => if *offset == 0 {
@@ -529,11 +541,17 @@ impl CfgBuilder {
                     }
                 }
 
-                return ret;
+                return Value{ty: *ty, val};
             }
         }
 
-        return self.vars[&k].clone();
+        let val = self.vars[&k].clone();
+        let ty = self.types[&k].clone();
+        return Value{ty, val};
+    }
+
+    pub fn to_vars(&mut self, k: Word) -> Vec<Var> {
+        self.value(k).val
     }
 
     pub fn new_slot(&mut self, k: Word, size: usize, align: usize) {
@@ -608,6 +626,161 @@ impl CfgBuilder {
         return y;
     }
 
+    // value must represent a pointer, and index is a constant operation index
+    pub fn chain_struct(&mut self, value: Value, index: Word) -> Value {
+        let Type::Pointer(ty) =
+            self.env.get_type(value.ty) else {panic!()};
+
+        let Type::Struct{fields, offsets, ..} =
+            self.env.get_type(*ty) else {panic!()};
+
+        let idx_vec = self.env.get_global_data(index);
+        assert!(idx_vec.len() == 1);
+        let mut count = 0;
+
+        match idx_vec[0] {
+            SWord::Int(x) => count += x,
+            _ => panic!()
+        }
+
+        let cst = self.cfg.fresh_var();
+        let ptr = self.cfg.fresh_var();
+        self.stmt.push(Instr::Move(cst, Lit::Int(offsets[count as usize] as i32)));
+        self.stmt.push(Instr::Operation(ptr, COp::PtrAdd, vec![value.val[0], cst]));
+
+        return Value{val: vec![ptr], ty: fields[count as usize]};
+    }
+
+    pub fn extract1(&mut self, value: Value, index: usize) -> Value {
+        let offset = match self.env.get_type(value.ty) {
+            Type::Struct{offsets, ..} => offsets[index],
+            Type::Vector{items, ..}
+            | Type::Array{items, ..} =>
+                index * self.env.get_type_size(*items),
+            _ => panic!("not a composite type")
+        };
+
+        let ty = match self.env.get_type(value.ty) {
+            Type::Struct{fields, ..} => fields[index],
+            Type::Vector{items, ..}
+            | Type::Array{items, ..} => *items,
+            _ => panic!("not a composite type")
+        };
+
+        let bytes = self.env.get_type_bytes(ty);
+        let words = self.env.get_type_words(ty);
+        let mut val = vec![];
+
+        for i in 0..words {
+            val.push(value.val[(offset / 4) + i]);
+        }
+
+        let error: i32 = (offset % 4) as i32 * 8;
+
+        if error != 0 {
+            let cst1 = self.cfg.fresh_var();
+            let cst2 = self.cfg.fresh_var();
+            self.stmt.push(Instr::Move(cst1, Lit::Int(error)));
+            self.stmt.push(Instr::Move(cst2, Lit::Int(32-error)));
+
+            for i in 0..words-1 {
+                let x = self.cfg.fresh_var();
+                let y = self.cfg.fresh_var();
+                let z = self.cfg.fresh_var();
+                self.stmt.push(Instr::Operation(x, COp::Srl, vec![val[i], cst1]));
+                self.stmt.push(Instr::Operation(y, COp::Sll, vec![val[i+1], cst2]));
+                self.stmt.push(Instr::Operation(z, COp::Or, vec![x, y]));
+                val[i] = z;
+            }
+
+            let x = self.cfg.fresh_var();
+            self.stmt.push(Instr::Operation(x, COp::Srl, vec![val[words-1], cst1]));
+            val[words-1] = x;
+
+            if bytes > 4 * (words-1) + (offset % 4) {
+                let y = self.cfg.fresh_var();
+                let z = self.cfg.fresh_var();
+                let idx = (offset/4) + words;
+                self.stmt.push(Instr::Operation(y, COp::Sll, vec![value.val[idx], cst2]));
+                self.stmt.push(Instr::Operation(z, COp::Or, vec![val[words-1], y]));
+                val[words-1] = z;
+            }
+        }
+
+        match self.env.get_type(ty) {
+            Type::I8 => val[0] = self.sign_extend_8(val[0]),
+            Type::U8 => val[0] = self.zero_extend_8(val[0]),
+            Type::I16 => val[0] = self.sign_extend_16(val[0]),
+            Type::U16 => val[0] = self.zero_extend_16(val[0]),
+            _ => {}
+        }
+
+        return Value{val, ty};
+    }
+
+    pub fn gen_composite_extract(&mut self, instr: &Instruction) {
+        let mut value = self.value(instr.operands[0].unwrap_id_ref());
+
+        for i in 1..instr.operands.len() {
+            value =
+                self.extract1(
+                    value,
+                    instr.operands[i].unwrap_literal_bit32() as usize
+                );
+        }
+
+        self.new_value(instr.result_id.unwrap(), instr.result_type.unwrap());
+        let goal = self.value(instr.result_id.unwrap());
+
+        for (x, y) in value.val.into_iter().zip(goal.val.into_iter()) {
+            self.stmt.push(Instr::Move(y, Lit::Var(x)));
+        }
+    }
+
+
+    pub fn build_array(&mut self, vars: &[Word], items: Word, count: usize) -> Vec<Var> {
+        let mut val = vec![];
+
+        let mut offset = 0;
+
+        for x in vars.iter().cloned() {
+            match offset % 4 {
+                0 => {
+                    let value = self.value(x);
+                    val.extend(value.val);
+                }
+                1 => {
+                    let value = self.value(x);
+                    todo!()
+                }
+                _ => {}
+            }
+
+            offset += self.env.get_type_size(items);
+        }
+
+        return val;
+    }
+
+    //pub fn compose1(&mut self, vars: &[Word], ty: Word) -> Value {
+    //    let mut offsets: Vec<usize> = vec![];
+
+    //    match self.env.get_type(ty) {
+    //        Type::Struct{offsets: off, ..} => offsets.extend_from_slice(off),
+    //        Type::Array{items, count}
+    //        | Type::Vector{items, count} => {
+    //            let mut offset = 0;
+    //            for _ in 0..*count {
+    //                offsets.push(offset);
+    //                offset += self.env.get_type_size(*items);
+    //            }
+    //        }
+    //        _ => panic!("not a composite type")
+    //    }
+
+    //    unreachable!()
+    //}
+
     pub fn gen_jump(&mut self, id: Word) {
         let label = self.to_label(id);
         self.stmt.push(Instr::Jump(label));
@@ -618,7 +791,7 @@ impl CfgBuilder {
         let result = instr.result_id.unwrap();
         let mut pointer = self.to_vars(instr.operands[0].unwrap_id_ref())[0];
 
-        self.create_var(result, instr.result_type.unwrap());
+        self.new_value(result, instr.result_type.unwrap());
 
         let mut kind: MemopKind = match self.env.get_type_bytes(instr.result_type.unwrap()) {
             0 => MemopKind::Unsigned8,
@@ -666,7 +839,7 @@ impl CfgBuilder {
         //assert!(lhs.len() == rhs.len());
 
         //let result_reg = instr.result_id.unwrap();
-        //self.create_var(result_reg, instr.result_type.unwrap());
+        //self.new_value(result_reg, instr.result_type.unwrap());
         //let mut result = self.to_vars(result_reg)[0];
 
         //for (l,r) in lhs.into_iter().zip(rhs.into_iter()) {
@@ -692,7 +865,7 @@ impl CfgBuilder {
     }
 
     pub fn gen_store(&mut self, instr: &Instruction) {
-        let mut pointer = self.vars[&instr.operands[0].unwrap_id_ref()][0];
+        let mut pointer = self.value(instr.operands[0].unwrap_id_ref()).val[0];
         let object = instr.operands[1].unwrap_id_ref();
 
         let kind: MemopKind = match self.env.get_type_bytes(self.types[&object]) {
@@ -749,7 +922,7 @@ impl CfgBuilder {
             assert!(instr.class.opcode == Op::FunctionParameter);
             let id = instr.result_id.unwrap();
 
-            self.create_var(id, instr.result_type.unwrap());
+            self.new_value(id, instr.result_type.unwrap());
             self.cfg.args.extend(&self.vars[&id]);
 
             for var in self.vars[&id].iter() {
@@ -785,6 +958,7 @@ impl CfgBuilder {
                     Op::BranchConditional => self.gen_branch_conditional(instr),
                     Op::Branch => self.gen_branch(instr),
                     Op::Store => self.gen_store(instr),
+                    Op::CompositeExtract => self.gen_composite_extract(instr),
                     //Op::ULessThan | Op::ULessThanEqual |
                     //    Op::UGreaterThan | Op::UGreaterThanEqual |
                     //    Op::SLessThan | Op::SLessThanEqual |
@@ -792,13 +966,13 @@ impl CfgBuilder {
                     //    Op::INotEqual | Op::IEqual =>
                     //    self.gen_compare(instr),
                     _ => {
-                        println!("instruction {:?} is nut implemented", instr.class.opcode);
+                        println!("instruction {:?} is not implemented", instr.class.opcode);
                         println!("instr: {:?}\n", instr);
 
                         if instr.result_type.is_some() && instr.result_id.is_some() {
                             let ty = instr.result_type.unwrap();
                             let num_var = self.env.get_type_words(ty);
-                            self.create_var(instr.result_id.unwrap(), ty);
+                            self.new_value(instr.result_id.unwrap(), ty);
 
                             let mut vec = vec![];
                             for _ in 0..num_var {
