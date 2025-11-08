@@ -15,8 +15,8 @@ global int test_y = test_x;
 global int test_array[100];
 
 __kernel void square(
-   __global float* input,
-   __global float* output,
+   __global float2* input,
+   __global float2* output,
    const unsigned int count,
    global foo *f) {
 
@@ -24,4 +24,6 @@ __kernel void square(
   int i = get_global_id(0);
   if(i < count)
      output[i] = input[i] * input[i];
+
+  f->z.x = 4.0;
 }
