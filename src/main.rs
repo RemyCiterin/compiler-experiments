@@ -10,8 +10,6 @@ use ssa::*;
 
 use spirv::*;
 
-use lang_c::driver::{Config, parse};
-
 pub fn into_ssa(table: &mut ssa::SymbolTable<COp, CCond>) {
     for (_, section) in table.symbols.iter_mut() {
         match section {

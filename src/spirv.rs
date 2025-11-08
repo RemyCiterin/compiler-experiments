@@ -10,10 +10,11 @@ type SWord = crate::ssa::Word;
 
 #[derive(Clone)]
 pub enum Type {
-    // A pointer to a type identifier
+    /// A pointer to a type identifier, the size/alignment of a pointer is always 32-bits
     Pointer(Word),
 
-    // A struct as a list of structs
+    /// A struct as a list of structs, this type contains the offset of each field in memory, the
+    /// type identifiers of each fields, and the global size/alignment of the type.
     Struct{
         fields: Vec<Word>,
         offsets: Vec<usize>,
@@ -21,11 +22,15 @@ pub enum Type {
         size: usize,
     },
 
+    /// A type of arrays of `count` elements of type identifier `item`
     Array{
         items: Word,
         count: usize
     },
 
+
+    /// A type of vectors of `count` elements of type identifier `item`. Vectors can only be
+    /// constructed for builtin types like I*, U*, Pointer(*), Void and Bool.
     Vector{
         items: Word,
         count: usize,
@@ -36,14 +41,43 @@ pub enum Type {
         ret: Word
     },
 
-    // An integer of a given size and signedness
-    Int(usize, bool),
+    /// 64 bit signed integer
+    I64,
 
-    // A floating point of a given size
-    Float(usize),
+    /// 32 bit signed integer
+    I32,
 
+    /// 16 bit signed integer
+    I16,
+
+    /// 8 bit signed integer
+    I8,
+
+    /// 64 bit signed integer
+    U64,
+
+    /// 32 bit signed integer
+    U32,
+
+    /// 16 bit signed integer
+    U16,
+
+    /// 8 bit signed integer
+    U8,
+
+    /// 32 bit floating point
+    Float,
+
+    /// 64 bit floating point
+    Double,
+
+    /// 16 bit floating point
+    Half,
+
+    /// Zero bits type
     Void,
 
+    /// One byte, can be only zero (false) or one (true)
     Bool,
 }
 
@@ -53,9 +87,6 @@ impl std::fmt::Display for Type {
             Self::Bool => write!(f, "bool"),
             Self::Void => write!(f, "void"),
             Self::Pointer(raw) => write!(f, "*t{raw}"),
-            Self::Int(w, false) => write!(f, "u{w}"),
-            Self::Int(w, true) => write!(f, "i{w}"),
-            Self::Float(w) => write!(f, "f{w}"),
             Self::Array{items, count} => write!(f, "t{items}[{count}]"),
             Self::Vector{items, count} => write!(f, "t{items}[{count}]"),
             Self::Function{args, ret} => {
@@ -78,6 +109,17 @@ impl std::fmt::Display for Type {
 
                 write!(f, "}}")
             }
+            Self::Float => write!(f, "f32"),
+            Self::Double => write!(f, "f64"),
+            Self::Half => write!(f, "f16"),
+            Self::U64 => write!(f, "u64"),
+            Self::U32 => write!(f, "u32"),
+            Self::U16 => write!(f, "u16"),
+            Self::U8 => write!(f, "u8"),
+            Self::I64 => write!(f, "i64"),
+            Self::I32 => write!(f, "i32"),
+            Self::I16 => write!(f, "i16"),
+            Self::I8 => write!(f, "i8"),
         }
     }
 }
@@ -113,11 +155,13 @@ impl Env {
             Type::Bool => 1,
             Type::Pointer(..) => 4,
             Type::Function{..} => 4,
-            Type::Vector{items, ..} => self.get_type_align(*items),
-            Type::Int(size, _) => up2(size / 8),
-            Type::Float(size) => up2(size / 8),
+            Type::Vector{items, count} => up2(count * self.get_type_align(*items)),
             Type::Struct{align, ..} => *align,
             Type::Array{items, ..} => self.get_type_align(*items),
+            Type::I64 | Type::U64 | Type::Double => 8,
+            Type::I32 | Type::U32 | Type::Float => 4,
+            Type::I16 | Type::U16 | Type::Half => 2,
+            Type::I8 | Type::U8 => 1,
         }
     }
 
@@ -130,10 +174,38 @@ impl Env {
             Type::Function{..} => 4,
             Type::Vector{items, count} => up2(count * self.get_type_size(*items)),
             Type::Array{items, count} => count * self.get_type_size(*items),
-            Type::Int(size, _) => up2(size / 8),
-            Type::Float(size) => up2(size / 8),
-            Type::Struct{size, ..} => *size
+            Type::Struct{size, ..} => *size,
+            Type::I64 | Type::U64 | Type::Double => 8,
+            Type::I32 | Type::U32 | Type::Float => 4,
+            Type::I16 | Type::U16 | Type::Half => 2,
+            Type::I8 | Type::U8 => 1,
         }
+    }
+
+    // Return the number of bytes used to represent the type, in case of a vector, if the type is
+    // not aligned then a smaller number of bytes can be used that the result of sizeof. As example
+    // only three words are necessary to represent an int3, so it is possible to comute their
+    // additions in 3 operations instead of 4 if we use sizeof words to represent the object
+    pub fn get_type_bytes(&self, x: Word) -> usize {
+        match self.get_type(x) {
+            Type::Void => 0,
+            Type::Bool => 1,
+            Type::Pointer(..) => 4,
+            Type::Function{..} => 4,
+            Type::Vector{items, count} => count * self.get_type_bytes(*items),
+            Type::Array{items, count} => count * self.get_type_bytes(*items),
+            Type::Struct{size, ..} => *size,
+            Type::I64 | Type::U64 | Type::Double => 8,
+            Type::I32 | Type::U32 | Type::Float => 4,
+            Type::I16 | Type::U16 | Type::Half => 2,
+            Type::I8 | Type::U8 => 1,
+        }
+    }
+
+    #[inline]
+    pub fn get_type_words(&self, x: Word) -> usize {
+        let bytes = self.get_type_bytes(x);
+        return (bytes+3)/4;
     }
 
     pub fn get_type(&self, x: Word) -> &Type {
@@ -164,7 +236,22 @@ impl Env {
         let width = instr.operands[0].unwrap_literal_bit32() as usize;
         let signedness = instr.operands[1].unwrap_literal_bit32();
 
-        self.add_type(instr.result_id.unwrap(), Type::Int(width, signedness == 1));
+        let ty = match (width, signedness) {
+            (64, 0) => Type::U64,
+            (64, 1) => Type::I64,
+            (32, 0) => Type::U32,
+            (32, 1) => Type::I32,
+            (16, 0) => Type::U16,
+            (16, 1) => Type::I16,
+            (8, 0) => Type::U8,
+            (8, 1) => Type::I8,
+            _ => {
+                panic!("The only possible integer width are 8,16,32, or 64 bits")
+            }
+        };
+
+
+        self.add_type(instr.result_id.unwrap(), ty);
     }
 
     fn add_type_vector(&mut self, instr: &Instruction) {
@@ -200,7 +287,16 @@ impl Env {
     fn add_type_float(&mut self, instr: &Instruction) {
         let size = instr.operands[0].unwrap_literal_bit32() as usize;
 
-        self.add_type(instr.result_id.unwrap(), Type::Float(size));
+        let ty = match size {
+            64 => Type::Double,
+            32 => Type::Float,
+            16 => Type::Half,
+            _ => {
+                panic!("only 64,32 or 16 bits floating points are supported");
+            }
+        };
+
+        self.add_type(instr.result_id.unwrap(), ty);
     }
 
     fn add_type_function(&mut self, instr: &Instruction) {
@@ -259,8 +355,7 @@ impl Env {
         let raw_type: u32 = if let Type::Pointer(raw) = self.get_type(ty) { *raw }
         else { unreachable!() };
 
-        let mut size = self.get_type_size(raw_type) / 4;
-        if self.get_type_size(raw_type) % 4 != 0 { size += 1; }
+        let size = self.get_type_words(raw_type);
 
         let mut vec = vec![];
         for i in 0..size {
@@ -291,8 +386,7 @@ impl Env {
     fn add_constant_null(&mut self, instr: &Instruction) {
         let ty = instr.result_type.unwrap();
 
-        let mut size = self.get_type_size(ty) / 4;
-        if self.get_type_size(ty) % 4 != 0 { size += 1; }
+        let size = self.get_type_words(ty);
 
         let mut ret = vec![];
         for _ in 0..size { ret.push(SWord::Int(0)); }
@@ -318,10 +412,6 @@ impl Env {
     }
 
     pub fn build(&mut self, block: &Vec<Instruction>) {
-        //for instr in block.iter() {
-        //    println!("\n{:?}", instr);
-        //}
-
         for instr in block.iter() {
             //println!("\n{:?}", instr);
 
@@ -345,6 +435,15 @@ impl Env {
             }
         }
     }
+}
+
+/// This type represent a value composed of a list of CFG variables (representing 32-bit integers)
+/// and their associated spir-v type. Values can be combined to construct new composites, like
+/// structs, vetors or arrays. Values can also be destruct to extracts their components.
+#[derive(Clone)]
+pub struct Value {
+    pub ty: Word,
+    pub val: Vec<Var>,
 }
 
 pub struct CfgBuilder {
@@ -398,8 +497,7 @@ impl CfgBuilder {
         if self.vars.contains_key(&k) {return;}
         self.types.insert(k, ty);
 
-        let mut num_var = self.env.get_type_size(ty)/4;
-        if self.env.get_type_size(ty) % 4 != 0 {num_var += 1;}
+        let num_var = self.env.get_type_words(ty);
 
         let mut vec = vec![];
         for _ in 0..num_var {
@@ -446,6 +544,70 @@ impl CfgBuilder {
         self.slots[&k]
     }
 
+    // Sign-extend the 8 less significant bits of an integer
+    pub fn sign_extend(&mut self, x: Var) -> Var {
+        let cst24 = self.cfg.fresh_var();
+        let y = self.cfg.fresh_var();
+        let z = self.cfg.fresh_var();
+
+        self.stmt.push(Instr::Move(cst24, Lit::Int(24)));
+        self.stmt.push(Instr::Operation(y, COp::Sll, vec![x, cst24]));
+        self.stmt.push(Instr::Operation(z, COp::Sra, vec![y, cst24]));
+
+        return z;
+    }
+
+    // Sign-extend the 8 less significant bits of an integer
+    pub fn sign_extend_8(&mut self, x: Var) -> Var {
+        let cst24 = self.cfg.fresh_var();
+        let y = self.cfg.fresh_var();
+        let z = self.cfg.fresh_var();
+
+        self.stmt.push(Instr::Move(cst24, Lit::Int(24)));
+        self.stmt.push(Instr::Operation(y, COp::Sll, vec![x, cst24]));
+        self.stmt.push(Instr::Operation(z, COp::Sra, vec![y, cst24]));
+
+        return z;
+    }
+
+    // Zero-extend the 8 less significant bits of an integer
+    pub fn zero_extend_8(&mut self, x: Var) -> Var {
+        let cst255 = self.cfg.fresh_var();
+        let y = self.cfg.fresh_var();
+
+        self.stmt.push(Instr::Move(cst255, Lit::Int(255)));
+        self.stmt.push(Instr::Operation(y, COp::And, vec![x, cst255]));
+
+        return y;
+    }
+
+    // Sign-extend the 16 less significant bits of an integer
+    pub fn sign_extend_16(&mut self, x: Var) -> Var {
+        let cst16 = self.cfg.fresh_var();
+        let y = self.cfg.fresh_var();
+        let z = self.cfg.fresh_var();
+
+        self.stmt.push(Instr::Move(cst16, Lit::Int(16)));
+        self.stmt.push(Instr::Operation(y, COp::Sll, vec![x, cst16]));
+        self.stmt.push(Instr::Operation(z, COp::Sra, vec![y, cst16]));
+
+        return z;
+    }
+
+    // Zero-extend the 16 less significant bits of an integer, we don't use 65535 as an
+    // immediate because some risc-v can't represent it as an immediate for `andi`
+    pub fn zero_extend_16(&mut self, x: Var) -> Var {
+        let cst16 = self.cfg.fresh_var();
+        let y = self.cfg.fresh_var();
+        let z = self.cfg.fresh_var();
+
+        self.stmt.push(Instr::Move(cst16, Lit::Int(16)));
+        self.stmt.push(Instr::Operation(y, COp::Sll, vec![x, cst16]));
+        self.stmt.push(Instr::Operation(z, COp::Srl, vec![y, cst16]));
+
+        return y;
+    }
+
     pub fn gen_jump(&mut self, id: Word) {
         let label = self.to_label(id);
         self.stmt.push(Instr::Jump(label));
@@ -458,12 +620,20 @@ impl CfgBuilder {
 
         self.create_var(result, instr.result_type.unwrap());
 
-        let kind: MemopKind = match self.env.get_type_size(instr.result_type.unwrap()) {
+        let mut kind: MemopKind = match self.env.get_type_bytes(instr.result_type.unwrap()) {
             0 => MemopKind::Unsigned8,
             1 => MemopKind::Unsigned8,
             2 => MemopKind::Unsigned16,
             _ => MemopKind::Word,
         };
+
+        if matches!(self.env.get_type(instr.result_type.unwrap()), Type::I8) {
+            kind = MemopKind::Signed8;
+        }
+
+        if matches!(self.env.get_type(instr.result_type.unwrap()), Type::I16) {
+            kind = MemopKind::Signed16;
+        }
 
         for i in 0..self.to_vars(result).len() {
             if i != 0 {
@@ -488,6 +658,31 @@ impl CfgBuilder {
         }
     }
 
+    pub fn gen_compare(&mut self, _instr: &Instruction) {
+        todo!()
+        //let lhs = self.to_vars(instr.operands[0].unwrap_id_ref());
+        //let rhs = self.to_vars(instr.operands[0].unwrap_id_ref());
+
+        //assert!(lhs.len() == rhs.len());
+
+        //let result_reg = instr.result_id.unwrap();
+        //self.create_var(result_reg, instr.result_type.unwrap());
+        //let mut result = self.to_vars(result_reg)[0];
+
+        //for (l,r) in lhs.into_iter().zip(rhs.into_iter()) {
+
+        //    match instr.class.opcode {
+        //        Op::UGreaterThan
+        //        Op::UGreaterThanEqual
+        //        Op::SLessThan
+        //        Op::SLessThanEqual
+        //        Op::SGreaterThan
+        //        Op::SGreaterThanEqual
+        //        _ => unreachable!(),
+        //    }
+        //}
+    }
+
     pub fn gen_return(&mut self, _instr: &Instruction) {
         let id = self.cfg.fresh_var();
         self.stmt.push(Instr::Move(id, Lit::Int(0)));
@@ -500,7 +695,7 @@ impl CfgBuilder {
         let mut pointer = self.vars[&instr.operands[0].unwrap_id_ref()][0];
         let object = instr.operands[1].unwrap_id_ref();
 
-        let kind: MemopKind = match self.env.get_type_size(self.types[&object]) {
+        let kind: MemopKind = match self.env.get_type_bytes(self.types[&object]) {
             0 => MemopKind::Unsigned8,
             1 => MemopKind::Unsigned8,
             2 => MemopKind::Unsigned16,
@@ -530,6 +725,23 @@ impl CfgBuilder {
         }
     }
 
+    pub fn gen_branch_conditional(&mut self, instr: &Instruction) {
+        let cond = instr.operands[0].unwrap_id_ref();
+        let l1 = instr.operands[1].unwrap_id_ref();
+        let l2 = instr.operands[2].unwrap_id_ref();
+
+        let label1 = self.to_label(l1);
+        let label2 = self.to_label(l2);
+
+        let condition = self.to_vars(cond)[0];
+        self.stmt.push(Instr::Branch(CCond::Nez, vec![condition], label1, label2));
+        self.cfg.set_block_stmt(self.label, std::mem::take(&mut self.stmt));
+    }
+
+    pub fn gen_branch(&mut self, instr: &Instruction) {
+        self.gen_jump(instr.operands[0].unwrap_id_ref());
+    }
+
     pub fn build(&mut self, fun: &Function) {
         print!("**********************************\nfunction:");
 
@@ -547,27 +759,57 @@ impl CfgBuilder {
 
         println!();
 
+        let mut first_block: bool = true;
+
         for block in fun.blocks.iter() {
             // Generate the label of the current block
-            let label: Label;
+            assert!(self.stmt.len() == 0);
             if let Some(id) = block.label_id() {
-                label = self.to_label(id);
-                self.gen_jump(id);
+                if first_block { self.gen_jump(id); }
+                self.label = self.to_label(id);
             } else {
-                label = self.cfg.fresh_label();
+                println!("--------------------------------------------no label");
+                let label = self.cfg.fresh_label();
+                if first_block { assert!(false); }
+                self.label = label;
             }
 
-            self.label = label;
-            println!("{label}:");
+            println!("{}:", self.label);
 
+            first_block = false;
 
             for instr in block.instructions.iter() {
-                println!("instr: {:?}\n", instr);
                 match instr.class.opcode {
                     Op::Load => self.gen_load(instr),
                     Op::Return => self.gen_return(instr),
-                    //Op::Store => self.gen_store(instr),
-                    _ => {}
+                    Op::BranchConditional => self.gen_branch_conditional(instr),
+                    Op::Branch => self.gen_branch(instr),
+                    Op::Store => self.gen_store(instr),
+                    //Op::ULessThan | Op::ULessThanEqual |
+                    //    Op::UGreaterThan | Op::UGreaterThanEqual |
+                    //    Op::SLessThan | Op::SLessThanEqual |
+                    //    Op::SGreaterThan | Op::SGreaterThanEqual
+                    //    Op::INotEqual | Op::IEqual =>
+                    //    self.gen_compare(instr),
+                    _ => {
+                        println!("instruction {:?} is nut implemented", instr.class.opcode);
+                        println!("instr: {:?}\n", instr);
+
+                        if instr.result_type.is_some() && instr.result_id.is_some() {
+                            let ty = instr.result_type.unwrap();
+                            let num_var = self.env.get_type_words(ty);
+                            self.create_var(instr.result_id.unwrap(), ty);
+
+                            let mut vec = vec![];
+                            for _ in 0..num_var {
+                                let fresh = self.cfg.fresh_var();
+                                self.stmt.push(Instr::Move(fresh, Lit::Undef));
+                                vec.push(fresh);
+                            }
+
+                            self.vars.insert(instr.result_id.unwrap(), vec);
+                        }
+                    }
                 }
             }
         }

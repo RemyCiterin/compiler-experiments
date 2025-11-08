@@ -20,6 +20,7 @@ __kernel void square(
    const unsigned int count,
    global foo *f) {
 
+
   int i = get_global_id(0);
   if(i < count)
      output[i] = input[i] * input[i];
