@@ -9,8 +9,6 @@
         Srl
         Slt
         Sltu
-        Sge
-        Sgeu
         And
         Or
         Xor
@@ -28,8 +26,6 @@
         Srl
         Slt
         Sltu
-        Sge
-        Sgeu
         Or
         And
         Xor))
@@ -46,9 +42,7 @@
         Ge
         Geu
         Eq
-        Ne
-        Eqz
-        Nez))
+        Ne))
 
 (type RvCondR
   (enum Eqz
@@ -383,6 +377,22 @@
 
 (rule 29
   (lower (store val (ptr_add (from_slot slot) (immediate (rv_imm offset))) kind))
+  (MInstr.StoreLocal val slot offset kind))
+
+(rule 26
+  (lower (load (add addr (immediate (rv_imm offset))) kind))
+  (MInstr.Load (destination) addr offset kind))
+
+(rule 27
+  (lower (store val (add addr (immediate (rv_imm offset))) kind))
+  (MInstr.Store val addr offset kind))
+
+(rule 28
+  (lower (load (add (from_slot slot) (immediate (rv_imm offset))) kind))
+  (MInstr.LoadLocal (destination) slot offset kind))
+
+(rule 29
+  (lower (store val (add (from_slot slot) (immediate (rv_imm offset))) kind))
   (MInstr.StoreLocal val slot offset kind))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

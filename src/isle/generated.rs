@@ -121,7 +121,7 @@ impl<L: Length, C> Length for ContextIterWrapper<L, C> {
         self.iter.len()
     }
 }
-           
+
 
 /// Internal type RvOpRR: defined at rv32.isle line 3.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
@@ -133,8 +133,6 @@ pub enum RvOpRR {
     Srl,
     Slt,
     Sltu,
-    Sge,
-    Sgeu,
     And,
     Or,
     Xor,
@@ -146,7 +144,7 @@ pub enum RvOpRR {
     URem,
 }
 
-/// Internal type RvOpRI: defined at rv32.isle line 23.
+/// Internal type RvOpRI: defined at rv32.isle line 21.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum RvOpRI {
     Add,
@@ -155,14 +153,12 @@ pub enum RvOpRI {
     Srl,
     Slt,
     Sltu,
-    Sge,
-    Sgeu,
     Or,
     And,
     Xor,
 }
 
-/// Internal type RvOpR: defined at rv32.isle line 36.
+/// Internal type RvOpR: defined at rv32.isle line 32.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum RvOpR {
     Seqz,
@@ -171,7 +167,7 @@ pub enum RvOpR {
     Not,
 }
 
-/// Internal type RvCondRR: defined at rv32.isle line 42.
+/// Internal type RvCondRR: defined at rv32.isle line 38.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum RvCondRR {
     Lt,
@@ -180,18 +176,16 @@ pub enum RvCondRR {
     Geu,
     Eq,
     Ne,
-    Eqz,
-    Nez,
 }
 
-/// Internal type RvCondR: defined at rv32.isle line 52.
+/// Internal type RvCondR: defined at rv32.isle line 46.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum RvCondR {
     Eqz,
     Nez,
 }
 
-/// Internal type MInstr: defined at rv32.isle line 56.
+/// Internal type MInstr: defined at rv32.isle line 50.
 #[derive(Clone, Debug)]
 pub enum MInstr {
     OpRR {
@@ -293,7 +287,7 @@ pub fn constructor_lower<C: Context>(
             dest: v6,
             imm: 0_i32,
         };
-        // Rule at rv32.isle line 423.
+        // Rule at rv32.isle line 433.
         return v229;
     }
     let v223 = C::immediate_extract(ctx, arg0);
@@ -303,7 +297,7 @@ pub fn constructor_lower<C: Context>(
             dest: v6,
             imm: v224,
         };
-        // Rule at rv32.isle line 419.
+        // Rule at rv32.isle line 429.
         return v225;
     }
     let v220 = C::addr_extract(ctx, arg0);
@@ -313,7 +307,7 @@ pub fn constructor_lower<C: Context>(
             dest: v6,
             addr: v221,
         };
-        // Rule at rv32.isle line 415.
+        // Rule at rv32.isle line 425.
         return v222;
     }
     let v217 = C::slot_extract(ctx, arg0);
@@ -323,7 +317,7 @@ pub fn constructor_lower<C: Context>(
             dest: v6,
             slot: v218,
         };
-        // Rule at rv32.isle line 411.
+        // Rule at rv32.isle line 421.
         return v219;
     }
     let v214 = C::move_extract(ctx, arg0);
@@ -333,7 +327,7 @@ pub fn constructor_lower<C: Context>(
             dest: v6,
             rs1: v215,
         };
-        // Rule at rv32.isle line 407.
+        // Rule at rv32.isle line 417.
         return v216;
     }
     let v211 = C::phi_extract(ctx, arg0);
@@ -343,7 +337,7 @@ pub fn constructor_lower<C: Context>(
             dest: v6,
             args: v212,
         };
-        // Rule at rv32.isle line 403.
+        // Rule at rv32.isle line 413.
         return v213;
     }
     let v208 = C::return_extract(ctx, arg0);
@@ -351,7 +345,7 @@ pub fn constructor_lower<C: Context>(
         let v210 = MInstr::Return {
             rs1: v209,
         };
-        // Rule at rv32.isle line 395.
+        // Rule at rv32.isle line 405.
         return v210;
     }
     let v205 = C::call_extract(ctx, arg0);
@@ -361,7 +355,7 @@ pub fn constructor_lower<C: Context>(
             dest: v6,
             args: v206,
         };
-        // Rule at rv32.isle line 391.
+        // Rule at rv32.isle line 401.
         return v207;
     }
     let v149 = C::store_extract(ctx, arg0);
@@ -370,30 +364,58 @@ pub fn constructor_lower<C: Context>(
         if let Some(v167) = v166 {
             let v183 = C::binop_extract(ctx, v167);
             if let Some(v184) = v183 {
-                if let &Binop::PtrAdd = &v184.0 {
-                    let v188 = C::def_instr(ctx, v184.2);
-                    if let Some(v189) = v188 {
-                        let v190 = C::immediate_extract(ctx, v189);
-                        if let Some(v191) = v190 {
-                            let v192 = C::rv_imm(ctx, v191);
-                            if let Some(v193) = v192 {
-                                let v200 = C::def_instr(ctx, v184.1);
-                                if let Some(v201) = v200 {
-                                    let v202 = C::slot_extract(ctx, v201);
-                                    if let Some(v203) = v202 {
-                                        let v204 = MInstr::StoreLocal {
-                                            val: v150.0,
-                                            addr: v203,
-                                            offset: v193,
-                                            kind: v150.2,
-                                        };
-                                        // Rule at rv32.isle line 383.
-                                        return v204;
+                match &v184.0 {
+                    &Binop::Add => {
+                        let v188 = C::def_instr(ctx, v184.2);
+                        if let Some(v189) = v188 {
+                            let v190 = C::immediate_extract(ctx, v189);
+                            if let Some(v191) = v190 {
+                                let v192 = C::rv_imm(ctx, v191);
+                                if let Some(v193) = v192 {
+                                    let v200 = C::def_instr(ctx, v184.1);
+                                    if let Some(v201) = v200 {
+                                        let v202 = C::slot_extract(ctx, v201);
+                                        if let Some(v203) = v202 {
+                                            let v204 = MInstr::StoreLocal {
+                                                val: v150.0,
+                                                addr: v203,
+                                                offset: v193,
+                                                kind: v150.2,
+                                            };
+                                            // Rule at rv32.isle line 393.
+                                            return v204;
+                                        }
                                     }
                                 }
                             }
                         }
                     }
+                    &Binop::PtrAdd => {
+                        let v188 = C::def_instr(ctx, v184.2);
+                        if let Some(v189) = v188 {
+                            let v190 = C::immediate_extract(ctx, v189);
+                            if let Some(v191) = v190 {
+                                let v192 = C::rv_imm(ctx, v191);
+                                if let Some(v193) = v192 {
+                                    let v200 = C::def_instr(ctx, v184.1);
+                                    if let Some(v201) = v200 {
+                                        let v202 = C::slot_extract(ctx, v201);
+                                        if let Some(v203) = v202 {
+                                            let v204 = MInstr::StoreLocal {
+                                                val: v150.0,
+                                                addr: v203,
+                                                offset: v193,
+                                                kind: v150.2,
+                                            };
+                                            // Rule at rv32.isle line 377.
+                                            return v204;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
                 }
             }
         }
@@ -404,31 +426,60 @@ pub fn constructor_lower<C: Context>(
         if let Some(v162) = v161 {
             let v171 = C::binop_extract(ctx, v162);
             if let Some(v172) = v171 {
-                if let &Binop::PtrAdd = &v172.0 {
-                    let v176 = C::def_instr(ctx, v172.2);
-                    if let Some(v177) = v176 {
-                        let v178 = C::immediate_extract(ctx, v177);
-                        if let Some(v179) = v178 {
-                            let v180 = C::rv_imm(ctx, v179);
-                            if let Some(v181) = v180 {
-                                let v195 = C::def_instr(ctx, v172.1);
-                                if let Some(v196) = v195 {
-                                    let v197 = C::slot_extract(ctx, v196);
-                                    if let Some(v198) = v197 {
-                                        let v6 = C::destination(ctx);
-                                        let v199 = MInstr::LoadLocal {
-                                            dest: v6,
-                                            addr: v198,
-                                            offset: v181,
-                                            kind: v139.1,
-                                        };
-                                        // Rule at rv32.isle line 379.
-                                        return v199;
+                match &v172.0 {
+                    &Binop::Add => {
+                        let v176 = C::def_instr(ctx, v172.2);
+                        if let Some(v177) = v176 {
+                            let v178 = C::immediate_extract(ctx, v177);
+                            if let Some(v179) = v178 {
+                                let v180 = C::rv_imm(ctx, v179);
+                                if let Some(v181) = v180 {
+                                    let v195 = C::def_instr(ctx, v172.1);
+                                    if let Some(v196) = v195 {
+                                        let v197 = C::slot_extract(ctx, v196);
+                                        if let Some(v198) = v197 {
+                                            let v6 = C::destination(ctx);
+                                            let v199 = MInstr::LoadLocal {
+                                                dest: v6,
+                                                addr: v198,
+                                                offset: v181,
+                                                kind: v139.1,
+                                            };
+                                            // Rule at rv32.isle line 389.
+                                            return v199;
+                                        }
                                     }
                                 }
                             }
                         }
                     }
+                    &Binop::PtrAdd => {
+                        let v176 = C::def_instr(ctx, v172.2);
+                        if let Some(v177) = v176 {
+                            let v178 = C::immediate_extract(ctx, v177);
+                            if let Some(v179) = v178 {
+                                let v180 = C::rv_imm(ctx, v179);
+                                if let Some(v181) = v180 {
+                                    let v195 = C::def_instr(ctx, v172.1);
+                                    if let Some(v196) = v195 {
+                                        let v197 = C::slot_extract(ctx, v196);
+                                        if let Some(v198) = v197 {
+                                            let v6 = C::destination(ctx);
+                                            let v199 = MInstr::LoadLocal {
+                                                dest: v6,
+                                                addr: v198,
+                                                offset: v181,
+                                                kind: v139.1,
+                                            };
+                                            // Rule at rv32.isle line 373.
+                                            return v199;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
                 }
             }
         }
@@ -438,24 +489,46 @@ pub fn constructor_lower<C: Context>(
         if let Some(v167) = v166 {
             let v183 = C::binop_extract(ctx, v167);
             if let Some(v184) = v183 {
-                if let &Binop::PtrAdd = &v184.0 {
-                    let v188 = C::def_instr(ctx, v184.2);
-                    if let Some(v189) = v188 {
-                        let v190 = C::immediate_extract(ctx, v189);
-                        if let Some(v191) = v190 {
-                            let v192 = C::rv_imm(ctx, v191);
-                            if let Some(v193) = v192 {
-                                let v194 = MInstr::Store {
-                                    val: v150.0,
-                                    addr: v184.1,
-                                    offset: v193,
-                                    kind: v150.2,
-                                };
-                                // Rule at rv32.isle line 375.
-                                return v194;
+                match &v184.0 {
+                    &Binop::Add => {
+                        let v188 = C::def_instr(ctx, v184.2);
+                        if let Some(v189) = v188 {
+                            let v190 = C::immediate_extract(ctx, v189);
+                            if let Some(v191) = v190 {
+                                let v192 = C::rv_imm(ctx, v191);
+                                if let Some(v193) = v192 {
+                                    let v194 = MInstr::Store {
+                                        val: v150.0,
+                                        addr: v184.1,
+                                        offset: v193,
+                                        kind: v150.2,
+                                    };
+                                    // Rule at rv32.isle line 385.
+                                    return v194;
+                                }
                             }
                         }
                     }
+                    &Binop::PtrAdd => {
+                        let v188 = C::def_instr(ctx, v184.2);
+                        if let Some(v189) = v188 {
+                            let v190 = C::immediate_extract(ctx, v189);
+                            if let Some(v191) = v190 {
+                                let v192 = C::rv_imm(ctx, v191);
+                                if let Some(v193) = v192 {
+                                    let v194 = MInstr::Store {
+                                        val: v150.0,
+                                        addr: v184.1,
+                                        offset: v193,
+                                        kind: v150.2,
+                                    };
+                                    // Rule at rv32.isle line 369.
+                                    return v194;
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
                 }
             }
         }
@@ -465,25 +538,48 @@ pub fn constructor_lower<C: Context>(
         if let Some(v162) = v161 {
             let v171 = C::binop_extract(ctx, v162);
             if let Some(v172) = v171 {
-                if let &Binop::PtrAdd = &v172.0 {
-                    let v176 = C::def_instr(ctx, v172.2);
-                    if let Some(v177) = v176 {
-                        let v178 = C::immediate_extract(ctx, v177);
-                        if let Some(v179) = v178 {
-                            let v180 = C::rv_imm(ctx, v179);
-                            if let Some(v181) = v180 {
-                                let v6 = C::destination(ctx);
-                                let v182 = MInstr::Load {
-                                    dest: v6,
-                                    addr: v172.1,
-                                    offset: v181,
-                                    kind: v139.1,
-                                };
-                                // Rule at rv32.isle line 371.
-                                return v182;
+                match &v172.0 {
+                    &Binop::Add => {
+                        let v176 = C::def_instr(ctx, v172.2);
+                        if let Some(v177) = v176 {
+                            let v178 = C::immediate_extract(ctx, v177);
+                            if let Some(v179) = v178 {
+                                let v180 = C::rv_imm(ctx, v179);
+                                if let Some(v181) = v180 {
+                                    let v6 = C::destination(ctx);
+                                    let v182 = MInstr::Load {
+                                        dest: v6,
+                                        addr: v172.1,
+                                        offset: v181,
+                                        kind: v139.1,
+                                    };
+                                    // Rule at rv32.isle line 381.
+                                    return v182;
+                                }
                             }
                         }
                     }
+                    &Binop::PtrAdd => {
+                        let v176 = C::def_instr(ctx, v172.2);
+                        if let Some(v177) = v176 {
+                            let v178 = C::immediate_extract(ctx, v177);
+                            if let Some(v179) = v178 {
+                                let v180 = C::rv_imm(ctx, v179);
+                                if let Some(v181) = v180 {
+                                    let v6 = C::destination(ctx);
+                                    let v182 = MInstr::Load {
+                                        dest: v6,
+                                        addr: v172.1,
+                                        offset: v181,
+                                        kind: v139.1,
+                                    };
+                                    // Rule at rv32.isle line 365.
+                                    return v182;
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
                 }
             }
         }
@@ -499,7 +595,7 @@ pub fn constructor_lower<C: Context>(
                     offset: 0_i16,
                     kind: v150.2,
                 };
-                // Rule at rv32.isle line 367.
+                // Rule at rv32.isle line 361.
                 return v170;
             }
         }
@@ -516,7 +612,7 @@ pub fn constructor_lower<C: Context>(
                     offset: 0_i16,
                     kind: v139.1,
                 };
-                // Rule at rv32.isle line 363.
+                // Rule at rv32.isle line 357.
                 return v165;
             }
         }
@@ -529,7 +625,7 @@ pub fn constructor_lower<C: Context>(
             offset: 0_i16,
             kind: v156.2,
         };
-        // Rule at rv32.isle line 359.
+        // Rule at rv32.isle line 353.
         return v160;
     }
     if let Some(v150) = v149 {
@@ -539,7 +635,7 @@ pub fn constructor_lower<C: Context>(
             offset: 0_i16,
             kind: v150.2,
         };
-        // Rule at rv32.isle line 355.
+        // Rule at rv32.isle line 349.
         return v154;
     }
     let v144 = C::load_local_extract(ctx, arg0);
@@ -551,7 +647,7 @@ pub fn constructor_lower<C: Context>(
             offset: 0_i16,
             kind: v145.1,
         };
-        // Rule at rv32.isle line 351.
+        // Rule at rv32.isle line 345.
         return v148;
     }
     if let Some(v139) = v138 {
@@ -562,7 +658,7 @@ pub fn constructor_lower<C: Context>(
             offset: 0_i16,
             kind: v139.1,
         };
-        // Rule at rv32.isle line 347.
+        // Rule at rv32.isle line 341.
         return v143;
     }
     let v99 = C::branch_extract(ctx, arg0);
@@ -584,7 +680,7 @@ pub fn constructor_lower<C: Context>(
                                         l1: v100.1,
                                         l2: v100.2,
                                     };
-                                    // Rule at rv32.isle line 335.
+                                    // Rule at rv32.isle line 329.
                                     return v136;
                                 }
                             }
@@ -600,7 +696,7 @@ pub fn constructor_lower<C: Context>(
                                         l1: v100.1,
                                         l2: v100.2,
                                     };
-                                    // Rule at rv32.isle line 327.
+                                    // Rule at rv32.isle line 321.
                                     return v130;
                                 }
                             }
@@ -612,7 +708,7 @@ pub fn constructor_lower<C: Context>(
                             l1: v100.1,
                             l2: v100.2,
                         };
-                        // Rule at rv32.isle line 303.
+                        // Rule at rv32.isle line 297.
                         return v114;
                     }
                     &Binop::NotEqual => {
@@ -627,7 +723,7 @@ pub fn constructor_lower<C: Context>(
                                         l1: v100.1,
                                         l2: v100.2,
                                     };
-                                    // Rule at rv32.isle line 339.
+                                    // Rule at rv32.isle line 333.
                                     return v137;
                                 }
                             }
@@ -643,7 +739,7 @@ pub fn constructor_lower<C: Context>(
                                         l1: v100.1,
                                         l2: v100.2,
                                     };
-                                    // Rule at rv32.isle line 331.
+                                    // Rule at rv32.isle line 325.
                                     return v131;
                                 }
                             }
@@ -655,7 +751,7 @@ pub fn constructor_lower<C: Context>(
                             l1: v100.1,
                             l2: v100.2,
                         };
-                        // Rule at rv32.isle line 307.
+                        // Rule at rv32.isle line 301.
                         return v116;
                     }
                     &Binop::LessThan => {
@@ -666,7 +762,7 @@ pub fn constructor_lower<C: Context>(
                             l1: v100.1,
                             l2: v100.2,
                         };
-                        // Rule at rv32.isle line 311.
+                        // Rule at rv32.isle line 305.
                         return v118;
                     }
                     &Binop::ULessThan => {
@@ -677,7 +773,7 @@ pub fn constructor_lower<C: Context>(
                             l1: v100.1,
                             l2: v100.2,
                         };
-                        // Rule at rv32.isle line 315.
+                        // Rule at rv32.isle line 309.
                         return v120;
                     }
                     &Binop::LessEqual => {
@@ -688,7 +784,7 @@ pub fn constructor_lower<C: Context>(
                             l1: v100.1,
                             l2: v100.2,
                         };
-                        // Rule at rv32.isle line 319.
+                        // Rule at rv32.isle line 313.
                         return v122;
                     }
                     &Binop::ULessEqual => {
@@ -699,7 +795,7 @@ pub fn constructor_lower<C: Context>(
                             l1: v100.1,
                             l2: v100.2,
                         };
-                        // Rule at rv32.isle line 323.
+                        // Rule at rv32.isle line 317.
                         return v124;
                     }
                     _ => {}
@@ -712,7 +808,7 @@ pub fn constructor_lower<C: Context>(
             l1: v100.1,
             l2: v100.2,
         };
-        // Rule at rv32.isle line 299.
+        // Rule at rv32.isle line 293.
         return v105;
     }
     let v96 = C::jump_extract(ctx, arg0);
@@ -720,7 +816,7 @@ pub fn constructor_lower<C: Context>(
         let v98 = MInstr::Jump {
             label: v97,
         };
-        // Rule at rv32.isle line 295.
+        // Rule at rv32.isle line 289.
         return v98;
     }
     let v1 = C::binop_extract(ctx, arg0);
@@ -740,7 +836,7 @@ pub fn constructor_lower<C: Context>(
                                 rs1: v2.2,
                                 imm: v22,
                             };
-                            // Rule at rv32.isle line 163.
+                            // Rule at rv32.isle line 157.
                             return v44;
                         }
                     }
@@ -758,7 +854,7 @@ pub fn constructor_lower<C: Context>(
                                 rs1: v2.1,
                                 imm: v14,
                             };
-                            // Rule at rv32.isle line 159.
+                            // Rule at rv32.isle line 153.
                             return v43;
                         }
                     }
@@ -770,7 +866,7 @@ pub fn constructor_lower<C: Context>(
                     rs1: v2.1,
                     rs2: v2.2,
                 };
-                // Rule at rv32.isle line 156.
+                // Rule at rv32.isle line 150.
                 return v41;
             }
             &Binop::Or => {
@@ -787,7 +883,7 @@ pub fn constructor_lower<C: Context>(
                                 rs1: v2.2,
                                 imm: v22,
                             };
-                            // Rule at rv32.isle line 176.
+                            // Rule at rv32.isle line 170.
                             return v49;
                         }
                     }
@@ -805,7 +901,7 @@ pub fn constructor_lower<C: Context>(
                                 rs1: v2.1,
                                 imm: v14,
                             };
-                            // Rule at rv32.isle line 172.
+                            // Rule at rv32.isle line 166.
                             return v48;
                         }
                     }
@@ -817,7 +913,7 @@ pub fn constructor_lower<C: Context>(
                     rs1: v2.1,
                     rs2: v2.2,
                 };
-                // Rule at rv32.isle line 169.
+                // Rule at rv32.isle line 163.
                 return v46;
             }
             &Binop::Xor => {
@@ -834,7 +930,7 @@ pub fn constructor_lower<C: Context>(
                                 rs1: v2.2,
                                 imm: v22,
                             };
-                            // Rule at rv32.isle line 189.
+                            // Rule at rv32.isle line 183.
                             return v54;
                         }
                     }
@@ -852,7 +948,7 @@ pub fn constructor_lower<C: Context>(
                                 rs1: v2.1,
                                 imm: v14,
                             };
-                            // Rule at rv32.isle line 185.
+                            // Rule at rv32.isle line 179.
                             return v53;
                         }
                     }
@@ -864,7 +960,7 @@ pub fn constructor_lower<C: Context>(
                     rs1: v2.1,
                     rs2: v2.2,
                 };
-                // Rule at rv32.isle line 182.
+                // Rule at rv32.isle line 176.
                 return v51;
             }
             &Binop::Add => {
@@ -878,7 +974,7 @@ pub fn constructor_lower<C: Context>(
                                 dest: v6,
                                 rs1: v2.1,
                             };
-                            // Rule at rv32.isle line 102.
+                            // Rule at rv32.isle line 96.
                             return v25;
                         }
                     }
@@ -893,7 +989,7 @@ pub fn constructor_lower<C: Context>(
                                 dest: v6,
                                 rs1: v2.2,
                             };
-                            // Rule at rv32.isle line 98.
+                            // Rule at rv32.isle line 92.
                             return v24;
                         }
                         let v21 = C::rv_imm(ctx, v20);
@@ -905,7 +1001,7 @@ pub fn constructor_lower<C: Context>(
                                 rs1: v2.2,
                                 imm: v22,
                             };
-                            // Rule at rv32.isle line 94.
+                            // Rule at rv32.isle line 88.
                             return v23;
                         }
                     }
@@ -922,7 +1018,7 @@ pub fn constructor_lower<C: Context>(
                                 rs1: v2.1,
                                 imm: v14,
                             };
-                            // Rule at rv32.isle line 90.
+                            // Rule at rv32.isle line 84.
                             return v16;
                         }
                     }
@@ -934,7 +1030,7 @@ pub fn constructor_lower<C: Context>(
                     rs1: v2.1,
                     rs2: v2.2,
                 };
-                // Rule at rv32.isle line 87.
+                // Rule at rv32.isle line 81.
                 return v8;
             }
             &Binop::PtrAdd => {
@@ -948,7 +1044,7 @@ pub fn constructor_lower<C: Context>(
                                 dest: v6,
                                 rs1: v2.1,
                             };
-                            // Rule at rv32.isle line 145.
+                            // Rule at rv32.isle line 139.
                             return v25;
                         }
                         let v13 = C::rv_imm(ctx, v12);
@@ -960,7 +1056,7 @@ pub fn constructor_lower<C: Context>(
                                 rs1: v2.1,
                                 imm: v14,
                             };
-                            // Rule at rv32.isle line 141.
+                            // Rule at rv32.isle line 135.
                             return v16;
                         }
                     }
@@ -972,7 +1068,7 @@ pub fn constructor_lower<C: Context>(
                     rs1: v2.1,
                     rs2: v2.2,
                 };
-                // Rule at rv32.isle line 138.
+                // Rule at rv32.isle line 132.
                 return v8;
             }
             &Binop::Sub => {
@@ -983,7 +1079,7 @@ pub fn constructor_lower<C: Context>(
                     rs1: v2.1,
                     rs2: v2.2,
                 };
-                // Rule at rv32.isle line 151.
+                // Rule at rv32.isle line 145.
                 return v39;
             }
             &Binop::Sll => {
@@ -1000,7 +1096,7 @@ pub fn constructor_lower<C: Context>(
                                 rs1: v2.1,
                                 imm: v14,
                             };
-                            // Rule at rv32.isle line 269.
+                            // Rule at rv32.isle line 263.
                             return v87;
                         }
                     }
@@ -1012,7 +1108,7 @@ pub fn constructor_lower<C: Context>(
                     rs1: v2.1,
                     rs2: v2.2,
                 };
-                // Rule at rv32.isle line 266.
+                // Rule at rv32.isle line 260.
                 return v85;
             }
             &Binop::Sra => {
@@ -1029,7 +1125,7 @@ pub fn constructor_lower<C: Context>(
                                 rs1: v2.1,
                                 imm: v14,
                             };
-                            // Rule at rv32.isle line 278.
+                            // Rule at rv32.isle line 272.
                             return v91;
                         }
                     }
@@ -1041,7 +1137,7 @@ pub fn constructor_lower<C: Context>(
                     rs1: v2.1,
                     rs2: v2.2,
                 };
-                // Rule at rv32.isle line 275.
+                // Rule at rv32.isle line 269.
                 return v89;
             }
             &Binop::Srl => {
@@ -1058,7 +1154,7 @@ pub fn constructor_lower<C: Context>(
                                 rs1: v2.1,
                                 imm: v14,
                             };
-                            // Rule at rv32.isle line 287.
+                            // Rule at rv32.isle line 281.
                             return v95;
                         }
                     }
@@ -1070,7 +1166,7 @@ pub fn constructor_lower<C: Context>(
                     rs1: v2.1,
                     rs2: v2.2,
                 };
-                // Rule at rv32.isle line 284.
+                // Rule at rv32.isle line 278.
                 return v93;
             }
             &Binop::Equal => {
@@ -1085,7 +1181,7 @@ pub fn constructor_lower<C: Context>(
                                 op: RvOpR::Seqz,
                                 rs1: v2.2,
                             };
-                            // Rule at rv32.isle line 243.
+                            // Rule at rv32.isle line 237.
                             return v79;
                         }
                     }
@@ -1101,7 +1197,7 @@ pub fn constructor_lower<C: Context>(
                                 op: RvOpR::Seqz,
                                 rs1: v2.1,
                             };
-                            // Rule at rv32.isle line 239.
+                            // Rule at rv32.isle line 233.
                             return v78;
                         }
                     }
@@ -1120,7 +1216,7 @@ pub fn constructor_lower<C: Context>(
                     op: RvOpR::Seqz,
                     rs1: v76,
                 };
-                // Rule at rv32.isle line 232.
+                // Rule at rv32.isle line 226.
                 return v77;
             }
             &Binop::NotEqual => {
@@ -1135,7 +1231,7 @@ pub fn constructor_lower<C: Context>(
                                 op: RvOpR::Snez,
                                 rs1: v2.2,
                             };
-                            // Rule at rv32.isle line 260.
+                            // Rule at rv32.isle line 254.
                             return v83;
                         }
                     }
@@ -1151,7 +1247,7 @@ pub fn constructor_lower<C: Context>(
                                 op: RvOpR::Snez,
                                 rs1: v2.1,
                             };
-                            // Rule at rv32.isle line 256.
+                            // Rule at rv32.isle line 250.
                             return v82;
                         }
                     }
@@ -1170,7 +1266,7 @@ pub fn constructor_lower<C: Context>(
                     op: RvOpR::Snez,
                     rs1: v76,
                 };
-                // Rule at rv32.isle line 249.
+                // Rule at rv32.isle line 243.
                 return v81;
             }
             &Binop::LessThan => {
@@ -1181,7 +1277,7 @@ pub fn constructor_lower<C: Context>(
                     rs1: v2.1,
                     rs2: v2.2,
                 };
-                // Rule at rv32.isle line 205.
+                // Rule at rv32.isle line 199.
                 return v64;
             }
             &Binop::ULessThan => {
@@ -1192,7 +1288,7 @@ pub fn constructor_lower<C: Context>(
                     rs1: v2.1,
                     rs2: v2.2,
                 };
-                // Rule at rv32.isle line 210.
+                // Rule at rv32.isle line 204.
                 return v66;
             }
             &Binop::LessEqual => {
@@ -1210,7 +1306,7 @@ pub fn constructor_lower<C: Context>(
                     op: RvOpR::Not,
                     rs1: v69,
                 };
-                // Rule at rv32.isle line 215.
+                // Rule at rv32.isle line 209.
                 return v70;
             }
             &Binop::ULessEqual => {
@@ -1228,7 +1324,7 @@ pub fn constructor_lower<C: Context>(
                     op: RvOpR::Not,
                     rs1: v72,
                 };
-                // Rule at rv32.isle line 220.
+                // Rule at rv32.isle line 214.
                 return v73;
             }
             &Binop::Mul => {
@@ -1239,7 +1335,7 @@ pub fn constructor_lower<C: Context>(
                     rs1: v2.1,
                     rs2: v2.2,
                 };
-                // Rule at rv32.isle line 108.
+                // Rule at rv32.isle line 102.
                 return v27;
             }
             &Binop::Mulh => {
@@ -1250,7 +1346,7 @@ pub fn constructor_lower<C: Context>(
                     rs1: v2.1,
                     rs2: v2.2,
                 };
-                // Rule at rv32.isle line 113.
+                // Rule at rv32.isle line 107.
                 return v29;
             }
             &Binop::URem => {
@@ -1261,7 +1357,7 @@ pub fn constructor_lower<C: Context>(
                     rs1: v2.1,
                     rs2: v2.2,
                 };
-                // Rule at rv32.isle line 123.
+                // Rule at rv32.isle line 117.
                 return v33;
             }
             &Binop::SRem => {
@@ -1272,7 +1368,7 @@ pub fn constructor_lower<C: Context>(
                     rs1: v2.1,
                     rs2: v2.2,
                 };
-                // Rule at rv32.isle line 118.
+                // Rule at rv32.isle line 112.
                 return v31;
             }
             &Binop::UDiv => {
@@ -1283,7 +1379,7 @@ pub fn constructor_lower<C: Context>(
                     rs1: v2.1,
                     rs2: v2.2,
                 };
-                // Rule at rv32.isle line 133.
+                // Rule at rv32.isle line 127.
                 return v37;
             }
             &Binop::SDiv => {
@@ -1294,7 +1390,7 @@ pub fn constructor_lower<C: Context>(
                     rs1: v2.1,
                     rs2: v2.2,
                 };
-                // Rule at rv32.isle line 128.
+                // Rule at rv32.isle line 122.
                 return v35;
             }
             _ => {}
@@ -1310,7 +1406,7 @@ pub fn constructor_lower<C: Context>(
                     op: RvOpR::Not,
                     rs1: v56.1,
                 };
-                // Rule at rv32.isle line 194.
+                // Rule at rv32.isle line 188.
                 return v60;
             }
             &Unop::Neg => {
@@ -1320,11 +1416,11 @@ pub fn constructor_lower<C: Context>(
                     op: RvOpR::Neg,
                     rs1: v56.1,
                 };
-                // Rule at rv32.isle line 199.
+                // Rule at rv32.isle line 193.
                 return v62;
             }
             _ => {}
         }
     }
-    unreachable!("no rule matched for term {} at {}; should it be partial?", "lower", "rv32.isle line 79")
+    unreachable!("no rule matched for term {} at {}; should it be partial?", "lower", "rv32.isle line 73")
 }

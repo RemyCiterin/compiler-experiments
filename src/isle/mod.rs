@@ -64,6 +64,165 @@ pub trait MachineInstr {
     fn slots_mut(&mut self) -> Vec<&mut Slot>;
 }
 
+impl std::fmt::Display for RvOpRR {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Add => write!(f, "add"),
+            Self::Sub => write!(f, "sub"),
+            Self::Sll => write!(f, "sll"),
+            Self::Sra => write!(f, "sra"),
+            Self::Srl => write!(f, "srl"),
+            Self::Slt => write!(f, "slt"),
+            Self::Sltu => write!(f, "sltu"),
+            Self::And => write!(f, "and"),
+            Self::Or => write!(f, "or"),
+            Self::Xor => write!(f, "xor"),
+            Self::Mul => write!(f, "mul"),
+            Self::Mulh => write!(f, "mulh"),
+            Self::SDiv => write!(f, "sdiv"),
+            Self::SRem => write!(f, "srem"),
+            Self::UDiv => write!(f, "udiv"),
+            Self::URem => write!(f, "urem"),
+        }
+    }
+}
+
+impl std::fmt::Display for RvOpRI {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Add => write!(f, "addi"),
+            Self::Sll => write!(f, "slli"),
+            Self::Sra => write!(f, "srai"),
+            Self::Srl => write!(f, "srli"),
+            Self::Slt => write!(f, "slti"),
+            Self::Sltu => write!(f, "sltiu"),
+            Self::And => write!(f, "andi"),
+            Self::Or => write!(f, "ori"),
+            Self::Xor => write!(f, "xori"),
+        }
+    }
+}
+
+impl std::fmt::Display for RvOpR {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Seqz => write!(f, "seqz"),
+            Self::Snez => write!(f, "snez"),
+            Self::Not => write!(f, "not"),
+            Self::Neg => write!(f, "neg"),
+        }
+    }
+}
+
+impl std::fmt::Display for RvCondRR {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Lt => write!(f, "lt"),
+            Self::Ltu => write!(f, "ltu"),
+            Self::Ge => write!(f, "ge"),
+            Self::Geu => write!(f, "geu"),
+            Self::Eq => write!(f, "eq"),
+            Self::Ne => write!(f, "ne"),
+        }
+    }
+}
+
+impl std::fmt::Display for RvCondR {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Eqz => write!(f, "eqz"),
+            Self::Nez => write!(f, "nez"),
+        }
+    }
+}
+
+impl std::fmt::Display for MInstr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MInstr::OpR{dest, op, rs1} =>
+                write!(f, "{op} {dest}, {rs1}"),
+            MInstr::OpRR{dest, op, rs1, rs2} =>
+                write!(f, "{op} {dest}, {rs1}, {rs2}"),
+            MInstr::OpRI{dest, op, rs1, imm} =>
+                write!(f, "{op} {dest}, {rs1}, {imm}"),
+            MInstr::Move{dest, rs1} =>
+                write!(f, "mv {dest}, {rs1}"),
+            MInstr::MoveInt{dest, imm} =>
+                write!(f, "li {dest}, {imm}"),
+            MInstr::MoveAddr{dest, addr} =>
+                write!(f, "la {dest}, {addr}"),
+            MInstr::MoveSlot{dest, slot} =>
+                write!(f, "mv {dest}, {slot}"),
+            MInstr::Call{dest, args: (name, args)} => {
+                write!(f, "call {dest}, {name}(")?;
+                for i in 0..args.len() {
+                    if i != 0 { write!(f, ", ")?; }
+                    write!(f, "{}", args[i])?;
+                }
+                write!(f, ")")
+            }
+            MInstr::Phi{dest, args} => {
+                write!(f, "phi {dest}, ")?;
+                for i in 0..args.len() {
+                    if i != 0 { write!(f, " ")?; }
+                    write!(f, "({}, {})", args[i].0, args[i].1)?;
+                }
+                write!(f, "")
+            }
+            MInstr::Jump{label} =>
+                write!(f, "j {label}"),
+            MInstr::Nop =>
+                write!(f, "nop"),
+            MInstr::Return{rs1} =>
+                write!(f, "ret {rs1}"),
+            MInstr::BranchR{cond, rs1, l1, l2} =>
+                write!(f, "b{cond} {rs1}, {l1}, {l2}"),
+            MInstr::BranchRR{cond, rs1, rs2, l1, l2} =>
+                write!(f, "b{cond} {rs1}, {rs2}, {l1}, {l2}"),
+            MInstr::Load{dest, addr, offset, kind: MemopKind::Signed8} =>
+                write!(f, "lb {dest}, {offset}({addr})"),
+            MInstr::Load{dest, addr, offset, kind: MemopKind::Signed16} =>
+                write!(f, "lh {dest}, {offset}({addr})"),
+            MInstr::Load{dest, addr, offset, kind: MemopKind::Unsigned8} =>
+                write!(f, "lbu {dest}, {offset}({addr})"),
+            MInstr::Load{dest, addr, offset, kind: MemopKind::Unsigned16} =>
+                write!(f, "lhu {dest}, {offset}({addr})"),
+            MInstr::Load{dest, addr, offset, kind: MemopKind::Word} =>
+                write!(f, "lw {dest}, {offset}({addr})"),
+            MInstr::LoadLocal{dest, addr, offset, kind: MemopKind::Signed8} =>
+                write!(f, "lb {dest}, {offset}({addr})"),
+            MInstr::LoadLocal{dest, addr, offset, kind: MemopKind::Signed16} =>
+                write!(f, "lh {dest}, {offset}({addr})"),
+            MInstr::LoadLocal{dest, addr, offset, kind: MemopKind::Unsigned8} =>
+                write!(f, "lbu {dest}, {offset}({addr})"),
+            MInstr::LoadLocal{dest, addr, offset, kind: MemopKind::Unsigned16} =>
+                write!(f, "lhu {dest}, {offset}({addr})"),
+            MInstr::LoadLocal{dest, addr, offset, kind: MemopKind::Word} =>
+                write!(f, "lw {dest}, {offset}({addr})"),
+            MInstr::Store{val, addr, offset, kind: MemopKind::Signed8} =>
+                write!(f, "sb {val}, {offset}({addr})"),
+            MInstr::Store{val, addr, offset, kind: MemopKind::Signed16} =>
+                write!(f, "sh {val}, {offset}({addr})"),
+            MInstr::Store{val, addr, offset, kind: MemopKind::Unsigned8} =>
+                write!(f, "sbu {val}, {offset}({addr})"),
+            MInstr::Store{val, addr, offset, kind: MemopKind::Unsigned16} =>
+                write!(f, "shu {val}, {offset}({addr})"),
+            MInstr::Store{val, addr, offset, kind: MemopKind::Word} =>
+                write!(f, "sw {val}, {offset}({addr})"),
+            MInstr::StoreLocal{val, addr, offset, kind: MemopKind::Signed8} =>
+                write!(f, "sb {val}, {offset}({addr})"),
+            MInstr::StoreLocal{val, addr, offset, kind: MemopKind::Signed16} =>
+                write!(f, "sh {val}, {offset}({addr})"),
+            MInstr::StoreLocal{val, addr, offset, kind: MemopKind::Unsigned8} =>
+                write!(f, "sbu {val}, {offset}({addr})"),
+            MInstr::StoreLocal{val, addr, offset, kind: MemopKind::Unsigned16} =>
+                write!(f, "shu {val}, {offset}({addr})"),
+            MInstr::StoreLocal{val, addr, offset, kind: MemopKind::Word} =>
+                write!(f, "sw {val}, {offset}({addr})"),
+        }
+    }
+}
+
 impl MachineInstr for MInstr {
     fn is_move(&self) -> bool {
         matches!(self, MInstr::Move{..})
@@ -532,7 +691,7 @@ impl Translator {
     }
 
     pub fn translate(mut self) -> Rtl {
-        for label in self.cfg.labels() {
+        for label in self.cfg.postorder() {
             self.translate_block(label);
         }
 
@@ -559,7 +718,7 @@ impl std::fmt::Display for Rtl {
             write!(f, "\n{}:", name)?;
 
             for instr in block.iter() {
-                write!(f, "\n\t{:?}", instr)?;
+                write!(f, "\n\t{}", instr)?;
             }
 
             write!(f, "\n")?;
