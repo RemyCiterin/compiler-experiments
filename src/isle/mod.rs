@@ -604,6 +604,29 @@ impl Context for Translator {
             } else {break;}
         }
 
+        if let Some((label, pos)) = ret {
+            let ins = &self.cfg[(label,pos)];
+
+            if matches!(ins, I::Load{..} | I::Call(..)) {
+                if label != self.current_instr.0 {return None;}
+
+                for i in pos+1..self.current_instr.1 {
+                    match self.cfg[(label,i)] {
+                        I::Store{..}
+                        | I::Call(..)
+                        | I::StoreLocal{..}
+                        | I::Load{volatile: true, ..}
+                            => return None,
+                        I::Load{..}
+                        | I::LoadLocal{..}
+                            => if matches!(ins, I::Call(..) | I::Load{volatile: true, ..})
+                                {return None;}
+                        _ => {}
+                    }
+                }
+            }
+        }
+
         ret
     }
 
