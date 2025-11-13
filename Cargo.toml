@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+smallvec = "*"
 cranelift-isle = "*"
 slotmap = "1.0"
 parsable = "*"

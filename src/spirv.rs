@@ -1415,6 +1415,12 @@ self.gen_ptr_cast_to_generic(instr),
 
         self.cfg.gc();
         println!("{}", self.cfg);
+
+        let cfg =
+            std::mem::replace(&mut self.cfg, Cfg::new(false));
+        let tr = crate::isle::Translator::new(cfg);
+        let rtl = tr.translate();
+        println!("{rtl}");
     }
 }
 

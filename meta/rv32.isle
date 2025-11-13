@@ -64,14 +64,15 @@
         (Move (dest Var) (rs1 Var))
         (Call (dest Var) (args CallArgs))
         (Phi (dest Var) (args PhiArgs))
-        (Load (dest Var) (addr Var) (kind MemopKind))
-        (LoadLocal (dest Var) (addr Slot) (kind MemopKind))
-        (Store (val Var) (addr Var) (kind MemopKind))
-        (StoreLocal (val Var) (addr Slot) (kind MemopKind))
+        (Load (dest Var) (addr Var) (offset i16) (kind MemopKind))
+        (LoadLocal (dest Var) (addr Slot) (offset i16) (kind MemopKind))
+        (Store (val Var) (addr Var) (offset i16) (kind MemopKind))
+        (StoreLocal (val Var) (addr Slot) (offset i16) (kind MemopKind))
         (BranchRR (cond RvCondRR) (rs1 Var) (rs2 Var) (l1 Label) (l2 Label))
-        (BranchR (cond RvCondR) (rs2 Var) (l1 Label) (l2 Label))
-        (Jump (Label Label))
-        (Return (var Var)) ))
+        (BranchR (cond RvCondR) (rs1 Var) (l1 Label) (l2 Label))
+        (Jump (label Label))
+        (Return (rs1 Var))
+        Nop ))
 
 (decl rv_imm (i16) i32)
 (extern extractor rv_imm rv_imm)
@@ -346,19 +347,43 @@
 
 (rule 20
   (lower (load addr kind))
-  (MInstr.Load (destination) addr kind))
+  (MInstr.Load (destination) addr 0 kind))
 
 (rule 21
   (lower (load_local addr kind))
-  (MInstr.LoadLocal (destination) addr kind))
+  (MInstr.LoadLocal (destination) addr 0 kind))
 
 (rule 22
   (lower (store val addr kind))
-  (MInstr.Store val addr kind))
+  (MInstr.Store val addr 0 kind))
 
 (rule 23
   (lower (store_local val addr kind))
-  (MInstr.StoreLocal val addr kind))
+  (MInstr.StoreLocal val addr 0 kind))
+
+(rule 24
+  (lower (load (from_slot slot) kind))
+  (MInstr.LoadLocal (destination) slot 0 kind))
+
+(rule 25
+  (lower (store val (from_slot slot) kind))
+  (MInstr.StoreLocal val slot 0 kind))
+
+(rule 26
+  (lower (load (ptr_add addr (immediate (rv_imm offset))) kind))
+  (MInstr.Load (destination) addr offset kind))
+
+(rule 27
+  (lower (store val (ptr_add addr (immediate (rv_imm offset))) kind))
+  (MInstr.Store val addr offset kind))
+
+(rule 28
+  (lower (load (ptr_add (from_slot slot) (immediate (rv_imm offset))) kind))
+  (MInstr.LoadLocal (destination) slot offset kind))
+
+(rule 29
+  (lower (store val (ptr_add (from_slot slot) (immediate (rv_imm offset))) kind))
+  (MInstr.StoreLocal val slot offset kind))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Calls and returns

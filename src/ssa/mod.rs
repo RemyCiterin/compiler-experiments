@@ -137,7 +137,7 @@ impl<Op: std::fmt::Display, Cond: std::fmt::Display> std::fmt::Display for Instr
 }
 
 
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Lit {
     /// Define the address of a symbol
     Addr(String),
@@ -866,6 +866,13 @@ impl std::fmt::Display for Lit {
         }
     }
 }
+
+impl std::fmt::Debug for Lit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{self}")
+    }
+}
+
 impl<Op: Operation, Cond: Condition> std::fmt::Display for Cfg<Op, Cond> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "entry: {} args:", self.entry())?;
@@ -895,7 +902,7 @@ impl<Op: Operation, Cond: Condition> std::fmt::Display for Cfg<Op, Cond> {
     }
 }
 
-#[derive(Clone, PartialEq, PartialOrd, Eq, Ord, Debug, Hash)]
+#[derive(Clone, PartialEq, PartialOrd, Eq, Ord, Debug, Hash, Copy)]
 pub enum COp {
     And,
     Or,

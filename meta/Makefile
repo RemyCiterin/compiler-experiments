@@ -1,3 +1,3 @@
 all:
-	cargo run --release -- prelude.isle tutorial.isle > \
+	cargo run --release -- prelude.isle rv32.isle > \
 		../src/isle/generated.rs
