@@ -68,14 +68,6 @@ pub fn translate(table: ssa::SymbolTable<COp, CCond>) ->
             ssa::Section::Text(cfg) => {
                 let mut cfg = arch::rv32::translate(cfg);
 
-                let mut gvn = gvn::ValueTable::new();
-                gvn.run(&mut cfg);
-
-                //licm::licm(&mut cfg);
-
-                let mut dce = dce::Dce::new();
-                dce.run(&mut cfg);
-
                 out_of_ssa::out_of_ssa(&mut cfg);
 
                 symbols.insert(name, ssa::Section::Text(cfg));
@@ -161,9 +153,12 @@ fn main() {
 
     //println!("{ltl_table}");
 
-    //let mut interp =
-    //    ltl::interpreter::Interpreter::new(&ltl_table);
-    //interp.interpret_function();
+    let mut interp =
+        ltl::interpreter::Interpreter::new(&ltl_table);
+    interp.interpret_function();
+    for (name,stats) in interp.stats.iter() {
+        println!("{name}: {stats}");
+    }
 
 
     // for (name, stats) in interp.stats.iter() {

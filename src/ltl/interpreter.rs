@@ -276,7 +276,6 @@ impl<'a, A: Arch> Interpreter<'a, A> {
                     }
                     LInstr::Jcc(cond, args, l) => {
                         let args = args.iter().map(|p|self.env[p]).collect();
-                        //println!("{:?}", args);
                         let jump =
                             self.condition(cond.clone(), args);
                         if jump {

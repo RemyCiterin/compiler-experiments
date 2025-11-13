@@ -1,3 +1,8 @@
+/// Deinfe the conversion from a subset of spirv into IR
+///
+/// This subset doesn't contains floats, vector, matrix and images
+
+
 use rspirv::dr::*;
 use rspirv::spirv::{Op, Word};
 use rspirv::binary::parse_bytes;
@@ -28,13 +33,6 @@ pub enum Type {
         count: usize
     },
 
-
-    /// A type of vectors of `count` elements of type identifier `item`. Vectors can only be
-    /// constructed for builtin types like I*, U*, Pointer(*), Void and Bool.
-    Vector{
-        items: Word,
-        count: usize,
-    },
 
     Function{
         args: Vec<Word>,
@@ -88,7 +86,6 @@ impl std::fmt::Display for Type {
             Self::Void => write!(f, "void"),
             Self::Pointer(raw) => write!(f, "*t{raw}"),
             Self::Array{items, count} => write!(f, "t{items}[{count}]"),
-            Self::Vector{items, count} => write!(f, "t{items}[{count}]"),
             Self::Function{args, ret} => {
                 write!(f, "t{ret} (")?;
 
@@ -133,6 +130,9 @@ pub struct Env {
     globals: Vec<Option<(Word, Vec<SWord>)>>,
 
     variables: Vec<Vec<SWord>>,
+
+    // Name of the variables and function in the program
+    names: Vec<Option<String>>,
 }
 
 pub fn up2(x: usize) -> usize {
@@ -146,16 +146,17 @@ impl Env {
             types: Vec::new(),
             globals: Vec::new(),
             variables: Vec::new(),
+            names: Vec::new(),
         }
     }
 
+    // Alignment of a type, muts be a power of two
     pub fn get_type_align(&self, x: Word) -> usize {
         match self.get_type(x) {
             Type::Void => 0,
             Type::Bool => 1,
             Type::Pointer(..) => 4,
             Type::Function{..} => 4,
-            Type::Vector{items, count} => up2(count * self.get_type_align(*items)),
             Type::Struct{align, ..} => *align,
             Type::Array{items, ..} => self.get_type_align(*items),
             Type::I64 | Type::U64 | Type::Double => 8,
@@ -172,7 +173,6 @@ impl Env {
             Type::Bool => 1,
             Type::Pointer(..) => 4,
             Type::Function{..} => 4,
-            Type::Vector{items, count} => up2(count * self.get_type_size(*items)),
             Type::Array{items, count} => count * self.get_type_size(*items),
             Type::Struct{size, ..} => *size,
             Type::I64 | Type::U64 | Type::Double => 8,
@@ -192,7 +192,6 @@ impl Env {
             Type::Bool => 1,
             Type::Pointer(..) => 4,
             Type::Function{..} => 4,
-            Type::Vector{items, count} => count * self.get_type_size(*items),
             Type::Array{items, count} => count * self.get_type_size(*items),
             Type::Struct{size, ..} => *size,
             Type::I64 | Type::U64 | Type::Double => 8,
@@ -227,6 +226,17 @@ impl Env {
         self.types[x as usize] = Some(ty);
     }
 
+    fn add_name(&mut self, x: Word, name: String) {
+        while self.names.len() as u32 <= x {self.names.push(None);}
+        if self.names[x as usize].is_some() { return; }
+        self.names[x as usize] = Some(name);
+    }
+
+    fn get_name(&mut self, x: Word) -> Option<&String> {
+        while self.names.len() as u32 <= x {self.names.push(None);}
+        self.names[x as usize].as_ref()
+    }
+
     fn add_global(&mut self, x: Word, ty: Word, vec: Vec<SWord>) {
         while self.globals.len() as u32 <= x {self.globals.push(None);}
         self.globals[x as usize] = Some((ty, vec.clone()));
@@ -239,6 +249,7 @@ impl Env {
 
         println!();
     }
+
 
     fn add_type_int(&mut self, instr: &Instruction) {
         let width = instr.operands[0].unwrap_literal_bit32() as usize;
@@ -260,16 +271,6 @@ impl Env {
 
 
         self.add_type(instr.result_id.unwrap(), ty);
-    }
-
-    fn add_type_vector(&mut self, instr: &Instruction) {
-        let items = instr.operands[0].unwrap_id_ref();
-        let count = instr.operands[1].unwrap_literal_bit32();
-
-        self.add_type(
-            instr.result_id.unwrap(),
-            Type::Vector{items, count: count as usize}
-        );
     }
 
     fn add_type_array(&mut self, instr: &Instruction) {
@@ -379,8 +380,11 @@ impl Env {
             }
         }
 
-        let name = format!("__anonymous{}", self.variables.len());
-        self.add_global(instr.result_id.unwrap(), ty, vec![SWord::Addr(name, 0)]);
+        let id = instr.result_id.unwrap();
+        let name = if let Some(name) = self.get_name(id) { name.clone() }
+        else {format!("__anonymous{}", self.variables.len())};
+
+        self.add_global(id, ty, vec![SWord::Addr(name, 0)]);
         self.variables.push(vec);
     }
 
@@ -431,7 +435,6 @@ impl Env {
                 Op::TypeVoid => _ = self.add_type(instr.result_id.unwrap(), Type::Void),
                 Op::TypeBool => _ = self.add_type(instr.result_id.unwrap(), Type::Bool),
                 Op::TypeInt => _ = self.add_type_int(instr),
-                Op::TypeVector => _ = self.add_type_vector(instr),
                 Op::TypeArray => _ = self.add_type_array(instr),
                 Op::TypePointer => _ = self.add_type_pointer(instr),
                 Op::TypeFloat => _ = self.add_type_float(instr),
@@ -465,7 +468,7 @@ pub struct CfgBuilder {
     env: Env,
 
     // Associate a cfg label to each spir-v label
-    labels: HashMap<Word, Label>,
+    labels: HashMap<Word, (Label,Label)>,
 
     // As some spir-v variables are more than 32 bits long,
     // variables are represented using multiple words
@@ -500,13 +503,25 @@ impl CfgBuilder {
         }
     }
 
-    pub fn to_label(&mut self, k: Word) -> Label {
-        if !self.labels.contains_key(&k) {self.labels.insert(k, self.cfg.fresh_label());}
+    pub fn to_label(&mut self, k: Word) -> (Label,Label) {
+        if !self.labels.contains_key(&k) {
+            let entry = self.cfg.fresh_label();
+            let exit = self.cfg.fresh_label();
+            self.labels.insert(k, (entry, exit));
+        }
+
         self.labels[&k]
     }
 
     pub fn new_value_with(&mut self, k: Word, v: Value) {
-        assert!( !self.vars.contains_key(&k) );
+        if self.vars.contains_key(&k) {
+            for i in 0..v.val.len() {
+                self.stmt.push(Instr::Move(self.vars[&k][i], Lit::Var(v.val[i])));
+            }
+
+            return;
+        }
+
         self.types.insert(k, v.ty);
         self.vars.insert(k, v.val);
     }
@@ -660,7 +675,6 @@ impl CfgBuilder {
     pub fn chain(&mut self, ptr: Var, ty: Word, index: Word) -> (Var,Word) {
         let item = match self.env.get_type(ty) {
             Type::Struct{..} => return self.chain_struct(ptr, ty, index),
-            Type::Vector{items, ..}
             | Type::Array{items, ..} =>
                 *items,
             _ => panic!("not a composite type")
@@ -698,6 +712,23 @@ impl CfgBuilder {
         self.new_value_with(out, Value{ty: instr.result_type.unwrap(), val: vec![ret]});
     }
 
+    pub fn gen_bitcast(&mut self, instr: &Instruction) {
+        let value = self.value(instr.operands[0].unwrap_id_ref());
+        let ty = instr.result_type.unwrap();
+
+        let mut val = value.val;
+
+        while val.len() < self.env.get_type_words(ty) {
+            val.push(self.load_imm(0));
+        }
+
+        while val.len() > self.env.get_type_words(ty) {
+            val.pop();
+        }
+
+        self.new_value_with(instr.result_id.unwrap(), Value{val, ty});
+    }
+
     pub fn gen_ptr_access_chain(&mut self, instr: &Instruction) {
         let base = self.value(instr.operands[0].unwrap_id_ref());
         let elem = self.value(instr.operands[1].unwrap_id_ref());
@@ -730,7 +761,6 @@ impl CfgBuilder {
     pub fn extract1(&mut self, value: Value, index: usize) -> Value {
         let offset = match self.env.get_type(value.ty) {
             Type::Struct{offsets, ..} => offsets[index],
-            Type::Vector{items, ..}
             | Type::Array{items, ..} =>
                 index * self.env.get_type_size(*items),
             _ => panic!("not a composite type")
@@ -738,7 +768,6 @@ impl CfgBuilder {
 
         let ty = match self.env.get_type(value.ty) {
             Type::Struct{fields, ..} => fields[index],
-            Type::Vector{items, ..}
             | Type::Array{items, ..} => *items,
             _ => panic!("not a composite type")
         };
@@ -809,195 +838,546 @@ impl CfgBuilder {
         self.new_value_with(instr.result_id.unwrap(), value);
     }
 
-
-    pub fn gen_jump(&mut self, id: Word) {
-        let label = self.to_label(id);
-        self.stmt.push(Instr::Jump(label));
+    pub fn finish_block(&mut self) {
         self.cfg.set_block_stmt(self.label, std::mem::take(&mut self.stmt));
     }
 
-    pub fn gen_load(&mut self, instr: &Instruction) {
-        let result = instr.result_id.unwrap();
-        let mut pointer = self.to_vars(instr.operands[0].unwrap_id_ref())[0];
+    pub fn gen_jump(&mut self, id: Word) {
+        let label = self.to_label(id).0;
+        self.stmt.push(Instr::Jump(label));
+        self.finish_block();
+    }
 
-        self.new_value(result, instr.result_type.unwrap());
+    pub fn load_imm(&mut self, imm: i32) -> Var {
+       let cst = self.cfg.fresh_var();
+       self.stmt.push(Instr::Move(cst, Lit::Int(imm)));
+       return cst;
+    }
 
-        let mut kind: MemopKind = match self.env.get_type_bytes(instr.result_type.unwrap()) {
-            0 => MemopKind::Unsigned8,
-            1 => MemopKind::Unsigned8,
-            2 => MemopKind::Unsigned16,
-            _ => MemopKind::Word,
+    pub fn add_imm(&mut self, pointer: Var, imm: i32) -> Var {
+       let cst = self.load_imm(imm);
+       let new_pointer = self.cfg.fresh_var();
+       self.stmt.push(
+           Instr::Operation(new_pointer, COp::PtrAdd, vec![pointer, cst]));
+       return new_pointer;
+    }
+
+    pub fn load(&mut self, mut pointer: Var, bytes: usize, align: usize, signed: bool)
+        -> Vec<Var> {
+        let kind = match align {
+            1 => if signed {MemopKind::Signed8} else {MemopKind::Unsigned8},
+            2 => if signed {MemopKind::Signed16} else {MemopKind::Unsigned16},
+            _ => MemopKind::Word
         };
 
-        if matches!(self.env.get_type(instr.result_type.unwrap()), Type::I8) {
-            kind = MemopKind::Signed8;
-        }
+        let elem_size = if align > 4 {4} else {align};
 
-        if matches!(self.env.get_type(instr.result_type.unwrap()), Type::I16) {
-            kind = MemopKind::Signed16;
-        }
+        let mut result = vec![];
+        for i in 0..(bytes+3)/4 {
 
-        for i in 0..self.to_vars(result).len() {
-            if i != 0 {
-                let four = self.cfg.fresh_var();
-                let new_pointer = self.cfg.fresh_var();
-                self.stmt.push(Instr::Move(four, Lit::Int(4)));
-                self.stmt
-                    .push(Instr::Operation(new_pointer, COp::PtrAdd, vec![new_pointer, four]));
-                pointer = new_pointer;
+            let mut value = self.cfg.fresh_var();
+
+            for j in 0..4/elem_size {
+                if i * 4 + j * elem_size >= bytes { break; }
+
+                // Increment the pointer if necessary
+                if i != 0 || j != 0 {
+                    pointer = self.add_imm(pointer, elem_size as i32);
+                }
+
+                let dest = if j == 0 {value} else {self.cfg.fresh_var()};
+                self.stmt.push(
+                    Instr::Load{
+                        addr: pointer,
+                        volatile: false,
+                        kind,
+                        dest,
+                    }
+                );
+
+                if j != 0 {
+                    let tmp = self.cfg.fresh_var();
+                    let ret = self.cfg.fresh_var();
+                    let cst = self.load_imm((elem_size * j * 8) as i32);
+                    self.stmt.push(Instr::Operation(tmp, COp::Srl, vec![dest, cst]));
+                    self.stmt.push(Instr::Operation(ret, COp::Or, vec![tmp, value]));
+                    value = ret;
+                }
             }
 
-            let dest = self.to_vars(result)[i];
+            result.push(value);
+        }
 
-            self.stmt.push(
-                Instr::Load{
-                    addr: pointer,
-                    volatile: false,
-                    kind,
-                    dest,
+        return result;
+    }
+
+    pub fn store(&mut self, mut pointer: Var, buf: Vec<Var>, bytes: usize, align: usize) {
+        let kind = match align {
+            1 => MemopKind::Unsigned8,
+            2 => MemopKind::Unsigned16,
+            _ => MemopKind::Word
+        };
+
+        let elem_size = if align > 4 {4} else {align};
+        let num_elem = match align {
+            1 => bytes,
+            2 => (bytes+1) / 2,
+            _ => (bytes+3) / 4,
+        };
+
+        let cst = self.cfg.fresh_var();
+        if num_elem > 1 { self.stmt.push(Instr::Move(cst, Lit::Int(elem_size as i32 * 8))); }
+
+        for i in 0..(bytes+3)/4 {
+            let mut val = buf[i];
+
+            for j in 0..4/elem_size {
+                if i * 4 + j * elem_size >= bytes { break; }
+
+                // Increment the pointer if necessary
+                if i != 0 || j != 0 {
+                    pointer = self.add_imm(pointer, elem_size as i32);
                 }
-            );
+
+                self.stmt.push(
+                    Instr::Store{
+                        addr: pointer,
+                        volatile: false,
+                        kind,
+                        val,
+                    }
+                );
+
+                if j != 0 {
+                    let ret = self.cfg.fresh_var();
+                    self.stmt.push(Instr::Operation(ret, COp::Srl, vec![val, cst]));
+                    val = ret;
+                }
+            }
         }
     }
 
-    pub fn gen_compare(&mut self, _instr: &Instruction) {
-        todo!()
-        //let lhs = self.to_vars(instr.operands[0].unwrap_id_ref());
-        //let rhs = self.to_vars(instr.operands[0].unwrap_id_ref());
 
-        //assert!(lhs.len() == rhs.len());
+    pub fn gen_load(&mut self, instr: &Instruction) {
+        let pointer = self.to_vars(instr.operands[0].unwrap_id_ref())[0];
 
-        //let result_reg = instr.result_id.unwrap();
-        //self.new_value(result_reg, instr.result_type.unwrap());
-        //let mut result = self.to_vars(result_reg)[0];
+        let ty = instr.result_type.unwrap();
+        let result = instr.result_id.unwrap();
 
-        //for (l,r) in lhs.into_iter().zip(rhs.into_iter()) {
+        let signed = match self.env.get_type(ty) {
+            Type::I16 | Type::I8 | Type::Half => true,
+            _ => false
+        };
 
-        //    match instr.class.opcode {
-        //        Op::UGreaterThan
-        //        Op::UGreaterThanEqual
-        //        Op::SLessThan
-        //        Op::SLessThanEqual
-        //        Op::SGreaterThan
-        //        Op::SGreaterThanEqual
-        //        _ => unreachable!(),
-        //    }
-        //}
+        let bytes = self.env.get_type_bytes(ty);
+        let align = self.env.get_type_align(ty);
+        let val = self.load(pointer, bytes, align, signed);
+
+        self.new_value_with(result, Value{ty, val});
+    }
+
+    pub fn gen_store(&mut self, instr: &Instruction) {
+        let pointer = self.value(instr.operands[0].unwrap_id_ref()).val[0];
+        let object = self.value(instr.operands[1].unwrap_id_ref());
+
+        let bytes = self.env.get_type_bytes(object.ty);
+        let align = self.env.get_type_align(object.ty);
+        self.store(pointer, object.val, bytes, align);
+    }
+
+    pub fn logical_or(&mut self, lhs: Var, rhs: Var) -> Var {
+        let ret = self.cfg.fresh_var();
+        let l0 = self.label;
+        let l1 = self.cfg.fresh_label();
+        let l2 = self.cfg.fresh_label();
+
+        self.stmt.push(Instr::Branch(CCond::Nez, vec![lhs], l2, l1));
+        self.finish_block();
+        self.cfg.set_block_stmt(l1, vec![Instr::Jump(l2)]);
+        self.label = l2;
+
+        self.stmt.push(Instr::Phi(ret, vec![(Lit::Int(1), l0), (Lit::Var(rhs), l1)]));
+        return ret;
+    }
+
+    pub fn logical_and(&mut self, lhs: Var, rhs: Var) -> Var {
+        let ret = self.cfg.fresh_var();
+        let l0 = self.label;
+        let l1 = self.cfg.fresh_label();
+        let l2 = self.cfg.fresh_label();
+
+        self.stmt.push(Instr::Branch(CCond::Nez, vec![lhs], l1, l2));
+        self.finish_block();
+
+        self.cfg.set_block_stmt(l1, vec![Instr::Jump(l2)]);
+        self.label = l2;
+
+        self.stmt.push(Instr::Phi(ret, vec![(Lit::Int(0), l0), (Lit::Var(rhs), l1)]));
+        return ret;
+    }
+
+    pub fn add_64(&mut self, lhs: Vec<Var>, rhs: Vec<Var>) -> Vec<Var> {
+        let ret = vec![self.cfg.fresh_var(), self.cfg.fresh_var()];
+        let tmp1 = self.cfg.fresh_var();
+        let tmp2 = self.cfg.fresh_var();
+
+        self.stmt.push(Instr::Operation(ret[0], COp::Add, vec![lhs[0],rhs[0]]));
+        self.stmt.push(Instr::Operation(tmp1, COp::ULessThan, vec![ret[0], lhs[0]]));
+        self.stmt.push(Instr::Operation(tmp2, COp::Add, vec![lhs[1],rhs[1]]));
+        self.stmt.push(Instr::Operation(ret[1], COp::Add, vec![tmp1,tmp2]));
+
+        ret
+    }
+
+    pub fn sub_64(&mut self, lhs: Vec<Var>, rhs: Vec<Var>) -> Vec<Var> {
+        let ret = vec![self.cfg.fresh_var(), self.cfg.fresh_var()];
+        let tmp1 = self.cfg.fresh_var();
+        let tmp2 = self.cfg.fresh_var();
+
+        self.stmt.push(Instr::Operation(ret[0], COp::Sub, vec![lhs[0],rhs[0]]));
+        self.stmt.push(Instr::Operation(tmp1, COp::ULessThan, vec![lhs[0], ret[0]]));
+        self.stmt.push(Instr::Operation(tmp2, COp::Sub, vec![lhs[1],rhs[1]]));
+        self.stmt.push(Instr::Operation(ret[1], COp::Add, vec![tmp2,tmp1]));
+
+        ret
+    }
+
+    //pub fn mul_64(&mut self, lhs: Vec<Var>, rhs: Vec<Var>) -> Vec<Var> {
+    //    // (2**32 * x + y) + (2**32 * z + w) =
+    //    // 2**64 * ... + 2**32 * (x*w + z*x) + y*w
+
+    //    unimplemented!()
+    //}
+
+    pub fn add_carry(&mut self, lhs: Var, rhs: Var) -> Vec<Var> {
+        let ret = vec![self.cfg.fresh_var(), self.cfg.fresh_var()];
+
+        self.stmt.push(Instr::Operation(ret[0], COp::Add, vec![lhs,rhs]));
+        self.stmt.push(Instr::Operation(ret[1], COp::ULessThan, vec![ret[0], lhs]));
+
+        ret
+    }
+
+    pub fn small_unop(&mut self, op: Op, arg: Var, size: usize, signed: bool) -> Var {
+        let ret = self.cfg.fresh_var();
+        match op {
+            Op::LogicalNot => {
+                let cst1 = self.load_imm(1);
+                _ = self.stmt.push(Instr::Operation(ret, COp::ULessThan, vec![arg, cst1]));
+            }
+            Op::Not =>
+                _ = self.stmt.push(Instr::Operation(ret, COp::Not, vec![arg])),
+            Op::SNegate =>
+                _ = self.stmt.push(Instr::Operation(ret, COp::Neg, vec![arg])),
+            _ => todo!()
+        }
+
+        match (size, signed) {
+            (1, true) => self.sign_extend_8(ret),
+            (1, false) => self.zero_extend_8(ret),
+            (2, true) => self.sign_extend_8(ret),
+            (2, false) => self.zero_extend_8(ret),
+            _ => ret
+        }
+    }
+
+    pub fn small_binop(&mut self, op: Op, lhs: Var, rhs: Var, size: usize, signed: bool) -> Var {
+        let mut ret = self.cfg.fresh_var();
+        match op {
+            Op::IAdd =>
+                _ = self.stmt.push(Instr::Operation(ret, COp::Add, vec![lhs,rhs])),
+            Op::ISub =>
+                _ = self.stmt.push(Instr::Operation(ret, COp::Sub, vec![lhs,rhs])),
+            Op::IMul =>
+                _ = self.stmt.push(Instr::Operation(ret, COp::Mul, vec![lhs,rhs])),
+            Op::PtrEqual =>
+                _ = self.stmt.push(Instr::Operation(ret, COp::Equal, vec![lhs,rhs])),
+            Op::IEqual =>
+                _ = self.stmt.push(Instr::Operation(ret, COp::Equal, vec![lhs,rhs])),
+            Op::PtrDiff =>
+                _ = self.stmt.push(Instr::Operation(ret, COp::NotEqual, vec![lhs,rhs])),
+            Op::INotEqual =>
+                _ = self.stmt.push(Instr::Operation(ret, COp::NotEqual, vec![lhs,rhs])),
+            Op::UGreaterThan =>
+                _ = self.stmt.push(Instr::Operation(ret, COp::ULessThan, vec![rhs,lhs])),
+            Op::SGreaterThan =>
+                _ = self.stmt.push(Instr::Operation(ret, COp::LessThan, vec![rhs,lhs])),
+            Op::UGreaterThanEqual =>
+                _ = self.stmt.push(Instr::Operation(ret, COp::ULessEqual, vec![rhs,lhs])),
+            Op::SGreaterThanEqual =>
+                _ = self.stmt.push(Instr::Operation(ret, COp::LessEqual, vec![rhs,lhs])),
+            Op::ULessThan =>
+                _ = self.stmt.push(Instr::Operation(ret, COp::ULessThan, vec![lhs,rhs])),
+            Op::SLessThan =>
+                _ = self.stmt.push(Instr::Operation(ret, COp::LessThan, vec![lhs,rhs])),
+            Op::ULessThanEqual =>
+                _ = self.stmt.push(Instr::Operation(ret, COp::ULessEqual, vec![lhs,rhs])),
+            Op::SLessThanEqual =>
+                _ = self.stmt.push(Instr::Operation(ret, COp::LessEqual, vec![lhs,rhs])),
+            Op::ShiftLeftLogical =>
+                _ = self.stmt.push(Instr::Operation(ret, COp::Sll, vec![lhs,rhs])),
+            Op::ShiftRightLogical =>
+                _ = self.stmt.push(Instr::Operation(ret, COp::Srl, vec![lhs,rhs])),
+            Op::ShiftRightArithmetic =>
+                _ = self.stmt.push(Instr::Operation(ret, COp::Sra, vec![lhs,rhs])),
+            Op::BitwiseOr =>
+                _ = self.stmt.push(Instr::Operation(ret, COp::Or, vec![lhs,rhs])),
+            Op::BitwiseXor =>
+                _ = self.stmt.push(Instr::Operation(ret, COp::Xor, vec![lhs,rhs])),
+            Op::BitwiseAnd =>
+                _ = self.stmt.push(Instr::Operation(ret, COp::And, vec![lhs,rhs])),
+            Op::LogicalEqual =>
+                _ = self.stmt.push(Instr::Operation(ret, COp::Equal, vec![lhs,rhs])),
+            Op::LogicalNotEqual =>
+                _ = self.stmt.push(Instr::Operation(ret, COp::NotEqual, vec![lhs,rhs])),
+            Op::LogicalOr => ret = self.logical_or(lhs, rhs),
+            Op::LogicalAnd => ret = self.logical_and(lhs, rhs),
+            _ => todo!()
+        }
+
+        match (size, signed) {
+            (1, true) => self.sign_extend_8(ret),
+            (1, false) => self.zero_extend_8(ret),
+            (2, true) => self.sign_extend_8(ret),
+            (2, false) => self.zero_extend_8(ret),
+            _ => ret
+        }
+    }
+
+    pub fn gen_binop(&mut self, instr: &Instruction) {
+        let lhs = self.value(instr.operands[0].unwrap_id_ref());
+        let rhs = self.value(instr.operands[1].unwrap_id_ref());
+        let ty = instr.result_type.unwrap();
+
+        let (size,signed) = match self.env.get_type(ty) {
+            Type::I8 => (1,true),
+            Type::U8 | Type::Bool => (1,false),
+            Type::I16 | Type::Half => (2,true),
+            Type::U16 => (2,false),
+            Type::U32 | Type::I32 | Type::Pointer(_) | Type::Float => (4,false),
+            Type::Double | Type::U64 | Type::I64 => (8,false),
+            _ => panic!("unexpected type")
+        };
+
+        let ret =
+            self.small_binop(instr.class.opcode, lhs.val[0], rhs.val[0], size, signed);
+        self.new_value_with(instr.result_id.unwrap(), Value{val: vec![ret], ty});
+    }
+
+    pub fn gen_unop(&mut self, instr: &Instruction) {
+        let arg = self.value(instr.operands[0].unwrap_id_ref());
+        let ty = instr.result_type.unwrap();
+
+        let (size,signed) = match self.env.get_type(ty) {
+            Type::I8 => (1,true),
+            Type::U8 | Type::Bool => (1,false),
+            Type::I16 | Type::Half => (2,true),
+            Type::U16 => (2,false),
+            Type::U32 | Type::I32 | Type::Pointer(_) | Type::Float => (4,false),
+            Type::Double | Type::U64 | Type::I64 => (8,false),
+            _ => panic!("unexpected type")
+        };
+
+        let ret =
+            self.small_unop(instr.class.opcode, arg.val[0], size, signed);
+        self.new_value_with(instr.result_id.unwrap(), Value{val: vec![ret], ty});
     }
 
     pub fn gen_return(&mut self, _instr: &Instruction) {
         let id = self.cfg.fresh_var();
         self.stmt.push(Instr::Move(id, Lit::Int(0)));
         self.stmt.push(Instr::Return(id));
-        self.cfg.set_block_stmt(self.label, std::mem::take(&mut self.stmt));
+        self.finish_block();
+
         self.label = self.cfg.fresh_label();
     }
 
-    pub fn gen_store(&mut self, instr: &Instruction) {
-        let mut pointer = self.value(instr.operands[0].unwrap_id_ref()).val[0];
-        let object = self.value(instr.operands[1].unwrap_id_ref());
-
-        let kind: MemopKind = match self.env.get_type_bytes(object.ty) {
-            0 => MemopKind::Unsigned8,
-            1 => MemopKind::Unsigned8,
-            2 => MemopKind::Unsigned16,
-            _ => MemopKind::Word,
-        };
-
-        for i in 0..object.val.len() {
-            if i != 0 {
-                let four = self.cfg.fresh_var();
-                let new_pointer = self.cfg.fresh_var();
-                self.stmt.push(Instr::Move(four, Lit::Int(4)));
-                self.stmt
-                    .push(Instr::Operation(new_pointer, COp::PtrAdd, vec![new_pointer, four]));
-                pointer = new_pointer;
-            }
-
-            let val = object.val[i];
-
-            self.stmt.push(
-                Instr::Store{
-                    addr: pointer,
-                    volatile: false,
-                    kind,
-                    val,
-                }
-            );
-        }
-    }
-
-    pub fn gen_branch_conditional(&mut self, instr: &Instruction) {
+    pub fn gen_branch_conditional(&mut self, exit: Label, instr: &Instruction) {
         let cond = instr.operands[0].unwrap_id_ref();
+        let condition = self.to_vars(cond)[0];
+
         let l1 = instr.operands[1].unwrap_id_ref();
         let l2 = instr.operands[2].unwrap_id_ref();
 
-        let label1 = self.to_label(l1);
-        let label2 = self.to_label(l2);
+        let label1 = self.to_label(l1).0;
+        let label2 = self.to_label(l2).0;
 
-        let condition = self.to_vars(cond)[0];
-        self.stmt.push(Instr::Branch(CCond::Nez, vec![condition], label1, label2));
-        self.cfg.set_block_stmt(self.label, std::mem::take(&mut self.stmt));
+        self.stmt.push(Instr::Jump(exit));
+        self.finish_block();
+
+        self.cfg.set_block_stmt(
+            exit,
+            vec![Instr::Branch(CCond::Nez, vec![condition], label1, label2)]
+        );
     }
 
-    pub fn gen_branch(&mut self, instr: &Instruction) {
-        self.gen_jump(instr.operands[0].unwrap_id_ref());
+    pub fn gen_branch(&mut self, exit: Label, instr: &Instruction) {
+        let label = self.to_label(instr.operands[0].unwrap_id_ref()).0;
+
+        self.stmt.push(Instr::Jump(exit));
+        self.finish_block();
+
+        self.cfg.set_block_stmt(
+            exit,
+            vec![Instr::Jump(label)]
+        );
+    }
+
+    pub fn gen_phi(&mut self, instr: &Instruction) {
+        let ty = instr.result_type.unwrap();
+        let words = self.env.get_type_words(ty);
+        let count = instr.operands.len() / 2;
+        let rd = instr.result_id.unwrap();
+
+        self.new_value(rd, ty);
+        let val = self.value(rd);
+
+        let mut values = vec![];
+        for j in 0..count {
+            self.new_value(instr.operands[2*j].unwrap_id_ref(), ty);
+            values.push(self.value(instr.operands[2*j].unwrap_id_ref()));
+        }
+
+        for i in 0..words {
+            let mut args = vec![];
+
+            for j in 0..count {
+                let exit = self.to_label(instr.operands[2*j+1].unwrap_id_ref()).1;
+                args.push((Lit::Var(values[j].val[i]),exit));
+            }
+
+            self.stmt.push(Instr::Phi(val.val[i], args));
+        }
+    }
+
+    pub fn gen_variable(&mut self, instr: &Instruction) {
+        let ptr_ty = instr.result_type.unwrap();
+        let ty = if let Type::Pointer(t) = self.env.get_type(ptr_ty) {*t}
+        else {panic!()};
+
+        let size = self.env.get_type_size(ty);
+        let align = usize::ilog2(self.env.get_type_align(ty)) as u8;
+        let slot = self.cfg.fresh_stack_var(size, align);
+
+        let val = vec![self.cfg.fresh_var()];
+        self.stmt.push(Instr::Move(val[0], Lit::Stack(slot)));
+        self.new_value_with(instr.result_id.unwrap(), Value{val, ty});
+    }
+
+    pub fn gen_ptr_cast_to_generic(&mut self, instr: &Instruction) {
+        let pointer = self.value(instr.operands[0].unwrap_id_ref());
+        let ty = instr.result_type.unwrap();
+        let id = instr.result_id.unwrap();
+
+        self.new_value_with(id, Value{val: pointer.val, ty});
+    }
+
+    pub fn gen_function_call(&mut self, instr: &Instruction) {
+        let mut args = vec![];
+
+        for i in 1..instr.operands.len() {
+            let value = self.value(instr.operands[i].unwrap_id_ref());
+            for x in value.val { args.push(x); }
+        }
+
+        let name =
+            self.env.get_name(instr.operands[0].unwrap_id_ref()).unwrap().clone();
+
+        let ret: Var;
+        if let Some(id) = instr.result_id {
+            let ty = instr.result_type.unwrap();
+            assert!(self.env.get_type_words(ty) == 0);
+
+            ret = self.cfg.fresh_var();
+            self.new_value_with(id, Value{val: vec![ret], ty});
+        } else {
+            ret = self.cfg.fresh_var();
+        }
+
+        self.stmt.push(Instr::Call(ret, name, args));
     }
 
     pub fn build(&mut self, fun: &Function) {
-        print!("**********************************\nfunction:");
+        let def_id =
+            if let Some(id) = fun.def_id() { id } else { return; };
+        let name =
+            if let Some(name) = self.env.get_name(def_id) { name.clone() }
+            else { "anonymous".to_string() };
+
+        print!("**********************************\nfunction: ");
+
+        println!("{}", name);
 
         for instr in fun.parameters.iter() {
             assert!(instr.class.opcode == Op::FunctionParameter);
+            let ty = instr.result_type.unwrap();
             let id = instr.result_id.unwrap();
 
-            self.new_value(id, instr.result_type.unwrap());
-            self.cfg.args.extend(&self.vars[&id]);
-
-            for var in self.vars[&id].iter() {
-                print!(" {var}");
+            let mut val = vec![];
+            for _ in 0..self.env.get_type_words(ty) {
+                val.push(self.cfg.fresh_arg());
             }
-        }
 
-        println!();
+            self.new_value_with(id, Value{val, ty});
+        }
 
         let mut first_block: bool = true;
 
         for block in fun.blocks.iter() {
             // Generate the label of the current block
             assert!(self.stmt.len() == 0);
+
+            let exit;
             if let Some(id) = block.label_id() {
                 if first_block { self.gen_jump(id); }
-                self.label = self.to_label(id);
+                self.label = self.to_label(id).0;
+                exit = self.to_label(id).1;
             } else {
                 println!("--------------------------------------------no label");
                 let label = self.cfg.fresh_label();
                 if first_block { assert!(false); }
+                exit = self.cfg.fresh_label();
                 self.label = label;
             }
 
-            println!("{}:", self.label);
+            //println!("{}:", self.label);
 
             first_block = false;
 
             for instr in block.instructions.iter() {
                 match instr.class.opcode {
+                    Op::LifetimeStart | Op::LifetimeStop | Op::Nop => {}
+                    Op::Phi => self.gen_phi(instr),
                     Op::Load => self.gen_load(instr),
                     Op::Return => self.gen_return(instr),
-                    Op::BranchConditional => self.gen_branch_conditional(instr),
-                    Op::Branch => self.gen_branch(instr),
+                    Op::BranchConditional => self.gen_branch_conditional(exit, instr),
+                    Op::Branch => self.gen_branch(exit, instr),
                     Op::Store => self.gen_store(instr),
                     Op::CompositeExtract => self.gen_composite_extract(instr),
                     Op::InBoundsPtrAccessChain | Op::PtrAccessChain =>
                         self.gen_ptr_access_chain(instr),
                     Op::InBoundsAccessChain | Op::AccessChain =>
                         self.gen_access_chain(instr),
-                    //Op::ULessThan | Op::ULessThanEqual |
-                    //    Op::UGreaterThan | Op::UGreaterThanEqual |
-                    //    Op::SLessThan | Op::SLessThanEqual |
-                    //    Op::SGreaterThan | Op::SGreaterThanEqual
-                    //    Op::INotEqual | Op::IEqual =>
-                    //    self.gen_compare(instr),
+                    Op::Bitcast => self.gen_bitcast(instr),
+                    Op::IAdd |
+                        Op::ISub | Op::IMul | Op::PtrEqual | Op::IEqual | Op::PtrDiff |
+                        Op::INotEqual | Op::UGreaterThan | Op::SGreaterThan |
+                        Op::UGreaterThanEqual | Op::SGreaterThanEqual | Op::ULessThan |
+                        Op::SLessThan | Op::ULessThanEqual | Op::SLessThanEqual |
+                        Op::ShiftLeftLogical | Op::ShiftRightLogical | Op::ShiftRightArithmetic |
+                        Op::BitwiseOr | Op::BitwiseXor | Op::BitwiseAnd | Op::LogicalEqual |
+                        Op::LogicalNotEqual | Op::LogicalOr | Op::LogicalAnd =>
+                        self.gen_binop(instr),
+                    Op::Variable =>
+                        self.gen_variable(instr),
+                    Op::PtrCastToGeneric =>
+self.gen_ptr_cast_to_generic(instr),
+                    Op::LogicalNot |
+                        Op::Not |
+                        Op::SNegate =>
+                        self.gen_unop(instr),
+                    Op::FunctionCall =>
+                        self.gen_function_call(instr),
                     _ => {
                         println!("instruction {:?} is not implemented", instr.class.opcode);
                         println!("instr: {:?}\n", instr);
@@ -1022,6 +1402,19 @@ impl CfgBuilder {
         }
 
         println!("{}", self.cfg);
+        let mut simplifier = simplify_ssa::Simplifier::new(&self.cfg);
+        simplifier.run(&mut self.cfg);
+
+        instcombine::combine_instructions(&mut self.cfg);
+
+        let mut gvn = gvn::ValueTable::new();
+        gvn.run(&mut self.cfg);
+
+        let mut dce = dce::Dce::new();
+        dce.run(&mut self.cfg);
+
+        self.cfg.gc();
+        println!("{}", self.cfg);
     }
 }
 
@@ -1032,12 +1425,23 @@ pub fn parse_spirv_spec(bytes: &[u8]) -> Module {
     let module = loader.module();
 
     let mut env = Env::new();
+
+    for instr in module.debug_names.iter() {
+        env.add_name(
+            instr.operands[0].unwrap_id_ref(),
+            instr.operands[1].unwrap_literal_string().to_string()
+        );
+    }
+
+    for (x, function) in module.functions.iter().enumerate() {
+        env.add_name(function.def_id().unwrap(), format!("__anonymous_fn{x}"));
+    }
+
     env.build(&module.types_global_values);
 
     for function in module.functions.iter() {
         let mut builder = CfgBuilder::new(env.clone());
         builder.build(function);
-        break;
     }
 
     return module;

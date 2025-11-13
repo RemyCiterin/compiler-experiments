@@ -1,0 +1,182 @@
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Declare translation registers types
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(type Var (primitive Var))
+(type Slot (primitive Slot))
+(type Label (primitive Label))
+(type String (primitive String))
+
+;; Generate a new fresh register
+(decl fresh_var () Var)
+(extern constructor fresh_var fresh_var)
+
+;; destination of the current rewriting
+(decl destination () Var)
+(extern constructor destination destination)
+
+;; Return the destination register of a machine specific instruction
+(decl assign (MInstr) Var)
+(extern constructor assign assign_var)
+
+(type CallArgs (primitive CallArgs))
+(type PhiArgs (primitive PhiArgs))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Declare IR instruction destructors
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(type Instr (primitive Instr))
+
+(type Binop extern
+  (enum And
+        Or
+        Xor
+        Add
+        PtrAdd
+        Sub
+        Sll
+        Sra
+        Srl
+        Equal
+        NotEqual
+        LessThan
+        ULessThan
+        LessEqual
+        ULessEqual
+        Mul
+        Mulh
+        URem
+        SRem
+        UDiv
+        SDiv))
+
+(type Unop extern
+  (enum Not
+        Neg))
+
+(type MemopKind extern
+  (enum Signed8
+        Unsigned8
+        Signed16
+        Unsigned16
+        Unsigned32))
+
+(decl def_instr (Instr) Var)
+(extern extractor def_instr def_instr)
+(convert Instr Var def_instr)
+
+(decl binop (Binop Var Var) Instr)
+(extern extractor binop binop_extract)
+
+(decl add (Var Var) Instr)
+(extractor (add a b) (binop (Binop.Add) a b))
+
+(decl mul (Var Var) Instr)
+(extractor (mul a b) (binop (Binop.Mul) a b))
+
+(decl mulh (Var Var) Instr)
+(extractor (mulh a b) (binop (Binop.Mulh) a b))
+
+(decl srem (Var Var) Instr)
+(extractor (srem a b) (binop (Binop.SRem) a b))
+
+(decl urem (Var Var) Instr)
+(extractor (urem a b) (binop (Binop.URem) a b))
+
+(decl sdiv (Var Var) Instr)
+(extractor (sdiv a b) (binop (Binop.SDiv) a b))
+
+(decl udiv (Var Var) Instr)
+(extractor (udiv a b) (binop (Binop.UDiv) a b))
+
+(decl sub (Var Var) Instr)
+(extractor (sub a b) (binop (Binop.Sub) a b))
+
+(decl ptr_add (Var Var) Instr)
+(extractor (ptr_add a b) (binop (Binop.PtrAdd) a b))
+
+(decl bitwise_and (Var Var) Instr)
+(extractor (bitwise_and a b) (binop (Binop.And) a b))
+
+(decl bitwise_or (Var Var) Instr)
+(extractor (bitwise_or a b) (binop (Binop.Or) a b))
+
+(decl bitwise_xor (Var Var) Instr)
+(extractor (bitwise_xor a b) (binop (Binop.Xor) a b))
+
+(decl sll (Var Var) Instr)
+(extractor (sll a b) (binop (Binop.Sll) a b))
+
+(decl sra (Var Var) Instr)
+(extractor (sra a b) (binop (Binop.Sra) a b))
+
+(decl srl (Var Var) Instr)
+(extractor (srl a b) (binop (Binop.Srl) a b))
+
+(decl equal (Var Var) Instr)
+(extractor (equal a b) (binop (Binop.Equal) a b))
+
+(decl not_equal (Var Var) Instr)
+(extractor (not_equal a b) (binop (Binop.NotEqual) a b))
+
+(decl less_than (Var Var) Instr)
+(extractor (less_than a b) (binop (Binop.LessThan) a b))
+
+(decl uless_than (Var Var) Instr)
+(extractor (uless_than a b) (binop (Binop.ULessThan) a b))
+
+(decl less_equal (Var Var) Instr)
+(extractor (less_equal a b) (binop (Binop.LessEqual) a b))
+
+(decl uless_equal (Var Var) Instr)
+(extractor (uless_equal a b) (binop (Binop.ULessEqual) a b))
+
+(decl unop (Unop Var) Instr)
+(extern extractor unop unop_extract)
+
+(decl bitwise_not (Var) Instr)
+(extractor (bitwise_not a) (unop (Unop.Not) a))
+
+(decl neg (Var) Instr)
+(extractor (neg a) (unop (Unop.Neg) a))
+
+(decl jump (Label) Instr)
+(extern extractor jump jump_extract)
+
+(decl branch (Var Label Label) Instr)
+(extern extractor branch branch_extract)
+
+(decl return (Var) Instr)
+(extern extractor return return_extract)
+
+(decl immediate (i32) Instr)
+(extern extractor immediate immediate_extract)
+
+(decl move (Var) Instr)
+(extern extractor move move_extract)
+
+(decl call (CallArgs) Instr)
+(extern extractor call call_extract)
+
+(decl from_slot (Slot) Instr)
+(extern extractor from_slot slot_extract)
+
+(decl from_addr (String) Instr)
+(extern extractor from_addr addr_extract)
+
+(decl undef () Instr)
+(extern extractor undef undef_extract)
+
+(decl load (Var MemopKind) Instr)
+(extern extractor load load_extract)
+
+(decl load_local (Slot MemopKind) Instr)
+(extern extractor load_local load_local_extract)
+
+(decl store (Var Var MemopKind) Instr)
+(extern extractor store store_extract)
+
+(decl store_local (Var Slot MemopKind) Instr)
+(extern extractor store_local store_local_extract)
+
+(decl phi (PhiArgs) Instr)
+(extern extractor phi phi_extract)

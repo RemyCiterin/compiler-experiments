@@ -8,9 +8,10 @@ example/%.s: example/%.lang
 
 .PHONY: opencl
 opencl:
-	clang -c -target spir test.cl -emit-llvm -o test.bc -cl-std=CL3.0
+	clang -c -target spir test.c -emit-llvm -o test.bc -O2 -cl-std=CL3.0
 	llvm-spirv test.bc -o test.spv
 	spirv-dis test.spv > test.asm
+	llvm-dis test.bc > test.ll
 	rm test.bc
 	make example/brainfuck.s
 

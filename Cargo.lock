@@ -21,12 +21,19 @@ checksum = "812e12b5285cc515a9c72a5c1d3b6d46a19dac5acfef5265968c166106e31dd3"
 name = "compiler-experiments"
 version = "0.1.0"
 dependencies = [
+ "cranelift-isle",
  "lang-c",
  "parsable",
  "peg",
  "rspirv",
  "slotmap",
 ]
+
+[[package]]
+name = "cranelift-isle"
+version = "0.125.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1639b2403365212bd7522a725925d86eb6596ce71af61c43db28b428d189800e"
 
 [[package]]
 name = "lang-c"

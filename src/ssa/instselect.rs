@@ -48,6 +48,7 @@ use super::pattern::*;
 pub struct Selection<Op1, Op2, Cond1, Cond2> {
     new: Cfg<Op2, Cond2>,
     pub old: Cfg<Op1, Cond1>,
+    count: SecondaryMap<Var, usize>,
     labels: SecondaryMap<Label, Label>,
     vars: SparseSecondaryMap<Var, Var>,
     slots: SparseSecondaryMap<Slot, Slot>,
@@ -90,19 +91,24 @@ Selection<Op1, Op2, Cond1, Cond2> {
             }
         }
 
+        let mut count = SecondaryMap::new();
+
         for (v, kind) in old.iter_vars() {
+            count.insert(v, 0);
             match kind {
                 VarKind::Arg => {}
                 _ => {
                     vars.insert(v, new.fresh_var());
                 }
             }
+
         }
 
         Self {
             label: new.entry(),
             stmt: vec![],
             labels,
+            count,
             slots,
             vars,
             new,
@@ -127,6 +133,7 @@ Selection<Op1, Op2, Cond1, Cond2> {
 
     fn set_block(&mut self) {
         let mut stmt = std::mem::take(&mut self.stmt);
+        stmt.reverse();
 
         for instr in stmt.iter_mut() {
             for label in instr.labels_mut() {
@@ -172,6 +179,8 @@ Selection<Op1, Op2, Cond1, Cond2> {
         F1: Fn (&mut Self, Var, Instr<Op1, Cond1>) -> Vec<Instr<Op2, Cond2>>,
         F2: Fn (&mut Self, Cond1, Vec<Var>, Label, Label) -> Vec<Instr<Op2, Cond2>> {
 
+        let mut stmt = std::mem::take(&mut self.stmt);
+
         match instr {
             Instr::Operation(dest, _, _) => {
                 let ops = tr_op(self, *dest, instr.clone());
@@ -210,6 +219,17 @@ Selection<Op1, Op2, Cond1, Cond2> {
                     Instr::Store{val: *val, addr: *addr, volatile: *volatile, kind: *kind});
             }
         }
+
+        for instr in self.stmt.iter() {
+            for op in instr.operands() {
+                if !self.count.contains_key(op) {continue;}
+                self.count[op] += 1;
+            }
+        }
+
+        self.stmt.reverse();
+        stmt.extend(std::mem::take(&mut self.stmt));
+        self.stmt = stmt;
     }
 
     pub fn run<F1, F2>
@@ -219,10 +239,32 @@ Selection<Op1, Op2, Cond1, Cond2> {
         F2: Fn (&mut Self, Cond1, Vec<Var>, Label, Label) -> Vec<Instr<Op2, Cond2>> {
 
         for label in self.old.labels() {
+            for instr in self.old[label].stmt.iter() {
+                if matches!(instr, Instr::Phi(..)) {
+                    for op in instr.operands() {
+                        self.count[op] += 1;
+                    }
+                }
+            }
+        }
+
+        let labels = self.old.postorder();
+
+        for label in labels {
             self.label = label;
 
-            for instr in self.old[label].stmt.clone() {
-                self.translate_instr(&instr, &tr_op, &tr_cond);
+            let mut stmt = self.old[label].stmt.clone();
+            stmt.reverse();
+
+            for instr in stmt {
+                let mut keep = instr.may_have_side_effect();
+                if let Some(dest) = instr.destination() {
+                    if self.count[dest] != 0 {keep = true;}
+                }
+
+                if keep {
+                    self.translate_instr(&instr, &tr_op, &tr_cond);
+                }
             }
 
             self.set_block();

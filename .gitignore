@@ -1,2 +1,6 @@
 target
 example/*.s
+build
+tmp
+test*
+meta/target

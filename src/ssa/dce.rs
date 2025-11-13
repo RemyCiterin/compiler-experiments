@@ -53,7 +53,7 @@ impl Dce {
 
             match cfg[var] {
                 VarKind::Arg => {},
-                VarKind::Undef => panic!(),
+                VarKind::Undef => panic!("{cfg} {var}"),
                 VarKind::Local(block, pos) => {
                     if !self.visited.contains(&block) { continue; }
                     self.used_vars.insert(var);

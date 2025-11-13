@@ -1,0 +1,401 @@
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Declare Risc-V instructions
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(type RvOpRR
+  (enum Add
+        Sub
+        Sll
+        Sra
+        Srl
+        Slt
+        Sltu
+        Sge
+        Sgeu
+        And
+        Or
+        Xor
+        Mul
+        Mulh
+        SDiv
+        SRem
+        UDiv
+        URem))
+
+(type RvOpRI
+  (enum Add
+        Sll
+        Sra
+        Srl
+        Slt
+        Sltu
+        Sge
+        Sgeu
+        Or
+        And
+        Xor))
+
+(type RvOpR
+  (enum Seqz
+        Snez
+        Neg
+        Not))
+
+(type RvCondRR
+  (enum Lt
+        Ltu
+        Ge
+        Geu
+        Eq
+        Ne
+        Eqz
+        Nez))
+
+(type RvCondR
+  (enum Eqz
+        Nez))
+
+(type MInstr
+  (enum (OpRR (dest Var) (op RvOpRR) (rs1 Var) (rs2 Var))
+        (OpRI (dest Var) (op RvOpRI) (rs1 Var) (imm i16))
+        (OpR (dest Var) (op RvOpR) (rs1 Var))
+        (MoveInt (dest Var) (imm i32))
+        (MoveAddr (dest Var) (addr String))
+        (MoveSlot (dest Var) (slot Slot))
+        (Move (dest Var) (rs1 Var))
+        (Call (dest Var) (args CallArgs))
+        (Phi (dest Var) (args PhiArgs))
+        (Load (dest Var) (addr Var) (kind MemopKind))
+        (LoadLocal (dest Var) (addr Slot) (kind MemopKind))
+        (Store (val Var) (addr Var) (kind MemopKind))
+        (StoreLocal (val Var) (addr Slot) (kind MemopKind))
+        (BranchRR (cond RvCondRR) (rs1 Var) (rs2 Var) (l1 Label) (l2 Label))
+        (BranchR (cond RvCondR) (rs2 Var) (l1 Label) (l2 Label))
+        (Jump (Label Label))
+        (Return (var Var)) ))
+
+(decl rv_imm (i16) i32)
+(extern extractor rv_imm rv_imm)
+
+(decl lower ( Instr ) MInstr)
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Arithmetic and bitwise operations
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;;;;;;;; Rules for Add ;;;;;;;;
+(rule
+  (lower (add a b))
+  (MInstr.OpRR (destination) (RvOpRR.Add) a b))
+
+(rule 1
+  (lower (add a (immediate (rv_imm x))))
+  (MInstr.OpRI (destination) (RvOpRI.Add) a x))
+
+(rule 2
+  (lower (add (immediate (rv_imm x)) a))
+  (MInstr.OpRI (destination) (RvOpRI.Add) a x))
+
+(rule 3
+  (lower (add (immediate 0) a))
+  (MInstr.Move (destination) a))
+
+(rule 4
+  (lower (add a (immediate 0)))
+  (MInstr.Move (destination) a))
+
+;;;;;;;; Rules for Mul ;;;;;;;;
+(rule
+  (lower (mul a b))
+  (MInstr.OpRR (destination) (RvOpRR.Mul) a b))
+
+;;;;;;;; Rules for Mulh ;;;;;;;;
+(rule
+  (lower (mulh a b))
+  (MInstr.OpRR (destination) (RvOpRR.Mulh) a b))
+
+;;;;;;;; Rules for SRem ;;;;;;;;
+(rule
+  (lower (srem a b))
+  (MInstr.OpRR (destination) (RvOpRR.SRem) a b))
+
+;;;;;;;; Rules for URem ;;;;;;;;
+(rule
+  (lower (urem a b))
+  (MInstr.OpRR (destination) (RvOpRR.URem) a b))
+
+;;;;;;;; Rules for SDiv ;;;;;;;;
+(rule
+  (lower (sdiv a b))
+  (MInstr.OpRR (destination) (RvOpRR.SDiv) a b))
+
+;;;;;;;; Rules for UDiv ;;;;;;;;
+(rule
+  (lower (udiv a b))
+  (MInstr.OpRR (destination) (RvOpRR.UDiv) a b))
+
+;;;;;;;; Rules for PtrAdd ;;;;;;;;
+(rule
+  (lower (ptr_add a b))
+  (MInstr.OpRR (destination) (RvOpRR.Add) a b))
+
+(rule 1
+  (lower (ptr_add a (immediate (rv_imm x))))
+  (MInstr.OpRI (destination) (RvOpRI.Add) a x))
+
+(rule 2
+  (lower (ptr_add a (immediate 0)))
+  (MInstr.Move (destination) a))
+
+;;;;;;;; Rules for Sub ;;;;;;;;
+(rule
+  (lower (sub a b))
+  (MInstr.OpRR (destination) (RvOpRR.Sub) a b))
+
+;;;;;;;; Rules for And ;;;;;;;;
+(rule
+  (lower (bitwise_and a b))
+  (MInstr.OpRR (destination) (RvOpRR.And) a b))
+
+(rule 1
+  (lower (bitwise_and a (immediate (rv_imm x))))
+  (MInstr.OpRI (destination) (RvOpRI.And) a x))
+
+(rule 2
+  (lower (bitwise_and (immediate (rv_imm x)) a))
+  (MInstr.OpRI (destination) (RvOpRI.And) a x))
+
+;;;;;;;; Rules for Or ;;;;;;;;
+(rule
+  (lower (bitwise_or a b))
+  (MInstr.OpRR (destination) (RvOpRR.Or) a b))
+
+(rule 1
+  (lower (bitwise_or a (immediate (rv_imm x))))
+  (MInstr.OpRI (destination) (RvOpRI.Or) a x))
+
+(rule 2
+  (lower (bitwise_or (immediate (rv_imm x)) a))
+  (MInstr.OpRI (destination) (RvOpRI.Or) a x))
+
+;;;;;;;; Rules for Xor ;;;;;;;;
+(rule
+  (lower (bitwise_xor a b))
+  (MInstr.OpRR (destination) (RvOpRR.Xor) a b))
+
+(rule 1
+  (lower (bitwise_xor a (immediate (rv_imm x))))
+  (MInstr.OpRI (destination) (RvOpRI.Xor) a x))
+
+(rule 2
+  (lower (bitwise_xor (immediate (rv_imm x)) a))
+  (MInstr.OpRI (destination) (RvOpRI.Xor) a x))
+
+;;;;;;;; Rules for Not ;;;;;;;;
+(rule -10
+  (lower (bitwise_not a))
+  (MInstr.OpR (destination) (RvOpR.Not) a))
+
+;;;;;;;; Rules for Neg ;;;;;;;;
+(rule -10
+  (lower (neg a))
+  (MInstr.OpR (destination) (RvOpR.Neg) a))
+
+;;;;;;;; Rules for LessThan ;;;;;;;;
+(rule
+  (lower (less_than a b))
+  (MInstr.OpRR (destination) (RvOpRR.Slt) a b))
+
+;;;;;;;; Rules for ULessThan ;;;;;;;;
+(rule
+  (lower (uless_than a b))
+  (MInstr.OpRR (destination) (RvOpRR.Sltu) a b))
+
+;;;;;;;; Rules for LessEqual ;;;;;;;;
+(rule
+  (lower (less_equal a b))
+  (MInstr.OpR (destination) (RvOpR.Not) (assign (MInstr.OpRR (fresh_var) (RvOpRR.Slt) b a))))
+
+;;;;;;;; Rules for ULessEqual ;;;;;;;;
+(rule
+  (lower (uless_equal a b))
+  (
+    MInstr.OpR
+      (destination) (RvOpR.Not)
+      (assign (
+        MInstr.OpRR (fresh_var) (RvOpRR.Sltu) b a
+      ))
+  )
+)
+
+;;;;;;;; Rules for Equal ;;;;;;;;
+(rule
+  (lower (equal a b))
+  (MInstr.OpR (destination) (RvOpR.Seqz)
+    (assign (
+      MInstr.OpRR (fresh_var) (RvOpRR.Xor) a b
+    ))
+  ))
+
+(rule 1
+  (lower (equal a (immediate 0)))
+  (MInstr.OpR (destination) (RvOpR.Seqz) a))
+
+(rule 2
+  (lower (equal (immediate 0) a))
+  (MInstr.OpR (destination) (RvOpR.Seqz) a))
+
+;;;;;;;; Rules for NotEqual ;;;;;;;;
+(rule
+  (lower (not_equal a b))
+  (MInstr.OpR (destination) (RvOpR.Snez)
+    (assign (
+      MInstr.OpRR (fresh_var) (RvOpRR.Xor) a b
+    ))
+  ))
+
+(rule 1
+  (lower (not_equal a (immediate 0)))
+  (MInstr.OpR (destination) (RvOpR.Snez) a))
+
+(rule 2
+  (lower (not_equal (immediate 0) a))
+  (MInstr.OpR (destination) (RvOpR.Snez) a))
+
+;;;;;;;; Rules for Sll ;;;;;;;;
+(rule
+  (lower (sll a b))
+  (MInstr.OpRR (destination) (RvOpRR.Sll) a b))
+
+(rule 1
+  (lower (sll a (immediate (rv_imm i))))
+  (MInstr.OpRI (destination) (RvOpRI.Sll) a i))
+
+;;;;;;;; Rules for Sra ;;;;;;;;
+(rule
+  (lower (sra a b))
+  (MInstr.OpRR (destination) (RvOpRR.Sra) a b))
+
+(rule 1
+  (lower (sra a (immediate (rv_imm i))))
+  (MInstr.OpRI (destination) (RvOpRI.Sra) a i))
+
+;;;;;;;; Rules for Srl ;;;;;;;;
+(rule
+  (lower (srl a b))
+  (MInstr.OpRR (destination) (RvOpRR.Srl) a b))
+
+(rule 1
+  (lower (srl a (immediate (rv_imm i))))
+  (MInstr.OpRI (destination) (RvOpRI.Srl) a i))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Jump and branches
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(rule 10
+  (lower (jump l))
+  (MInstr.Jump l))
+
+(rule 11
+  (lower (branch a l1 l2))
+  (MInstr.BranchR (RvCondR.Nez) a l1 l2))
+
+(rule 12
+  (lower (branch (equal a b) l1 l2))
+  (MInstr.BranchRR (RvCondRR.Eq) a b l1 l2))
+
+(rule 12
+  (lower (branch (not_equal a b) l1 l2))
+  (MInstr.BranchRR (RvCondRR.Ne) a b l1 l2))
+
+(rule 12
+  (lower (branch (less_than a b) l1 l2))
+  (MInstr.BranchRR (RvCondRR.Lt) a b l1 l2))
+
+(rule 12
+  (lower (branch (uless_than a b) l1 l2))
+  (MInstr.BranchRR (RvCondRR.Ltu) a b l1 l2))
+
+(rule 12
+  (lower (branch (less_equal a b) l1 l2))
+  (MInstr.BranchRR (RvCondRR.Ge) b a l1 l2))
+
+(rule 12
+  (lower (branch (uless_equal a b) l1 l2))
+  (MInstr.BranchRR (RvCondRR.Geu) b a l1 l2))
+
+(rule 13
+  (lower (branch (equal a (immediate 0)) l1 l2))
+  (MInstr.BranchR (RvCondR.Eqz) a l1 l2))
+
+(rule 13
+  (lower (branch (not_equal a (immediate 0)) l1 l2))
+  (MInstr.BranchR (RvCondR.Nez) a l1 l2))
+
+(rule 14
+  (lower (branch (equal (immediate 0) a) l1 l2))
+  (MInstr.BranchR (RvCondR.Eqz) a l1 l2))
+
+(rule 14
+  (lower (branch (not_equal (immediate 0) a) l1 l2))
+  (MInstr.BranchR (RvCondR.Nez) a l1 l2))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Loads and stores
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(rule 20
+  (lower (load addr kind))
+  (MInstr.Load (destination) addr kind))
+
+(rule 21
+  (lower (load_local addr kind))
+  (MInstr.LoadLocal (destination) addr kind))
+
+(rule 22
+  (lower (store val addr kind))
+  (MInstr.Store val addr kind))
+
+(rule 23
+  (lower (store_local val addr kind))
+  (MInstr.StoreLocal val addr kind))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Calls and returns
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(rule 30
+  (lower (call args))
+  (MInstr.Call (destination) args))
+
+(rule 31
+  (lower (return arg))
+  (MInstr.Return arg))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Phi and moves
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(rule 40
+  (lower (phi args))
+  (MInstr.Phi (destination) args))
+
+(rule 41
+  (lower (move arg))
+  (MInstr.Move (destination) arg))
+
+(rule 42
+  (lower (from_slot slot))
+  (MInstr.MoveSlot (destination) slot))
+
+(rule 43
+  (lower (from_addr addr))
+  (MInstr.MoveAddr (destination) addr))
+
+(rule 44
+  (lower (immediate i))
+  (MInstr.MoveInt (destination) i))
+
+(rule 45
+  (lower (undef))
+  (MInstr.MoveInt (destination) 0))

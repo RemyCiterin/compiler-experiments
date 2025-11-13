@@ -9,14 +9,10 @@ var program = "
 ";
 
 print_string(str) {
-  //let i = 0;
-  //while (str[i] != 0) {
-  //  put_char(str[i]);
-  //  i = i + 1;
-  //}
-  while *str != 0 {
-    put_char(*str);
-    str = str + 4;
+  let i = 0;
+  while (str[i] != 0) {
+    put_char(str[i]);
+    i = i + 1;
   }
 
   print_endline();

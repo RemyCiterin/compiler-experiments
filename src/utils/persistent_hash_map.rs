@@ -91,7 +91,7 @@ impl<K: std::hash::Hash+std::cmp::Eq+Clone,V: Clone + std::cmp::Eq> PHashMap<K,V
         self.map.get(key)
     }
 
-    pub fn iter(&self) -> std::collections::hash_map::Iter<K, V> {
+    pub fn iter(&self) -> std::collections::hash_map::Iter<'_, K, V> {
         self.map.iter()
     }
 }
