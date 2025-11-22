@@ -1,3 +1,27 @@
+//! This file define the register allocator of the compiler, it is based on a graph coloring
+//! approach and use agressive coalescing coalescing.
+//!
+//! It works using multiple steps:
+//! - First we solve the calling conventions of the internal function calls of the current
+//!     procedure, allocate pre-allocated fresh variables (or local loads/stores) for the
+//!     arguments of the function, and at each call/return instructions.
+//! - Then we loop until we find a solution:
+//!     - We remove all the moves without interference: if we have `move rd,rs` and `rs` and `rd`
+//!         doen't interfer, then we remove the instruction from the CFG and we remove the
+//!         instruction, this is agressive coalescing
+//!     - We solve the coloring problem to allocate all the virtual registers in the CFG.
+//!     - If we doesn't find a solution, we spill the unallocated variables: if `r` is not
+//!         allocated we allocate a stack slot `s`, then each instructions of the form
+//!         `x := op(..., r, ...)` is replaced by `r' := load.local 0(s); x := op(..., r', ...)`
+//!         with r' a fresh variable, and each instructions of the form `r := op(...)` is replaced
+//!         by `r' := op(...); store.local r', 0(s)`
+//!
+//! This module depends on the instruction type with the following interface:
+//! - It need to known the register dependencies of the instructions (operands/destination)
+//! - It need to pattern match on Move, Call and Return instructions.
+//! - It need to create Move, Call, Return, Load, LocalLocal, StoreLocal (register spilling/calling
+//!     conventions).
+
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 use crate::utils::union_find::*;
@@ -250,17 +274,16 @@ pub fn solve_coloring<A: Arch>(
     coloring: &mut Coloring,
     graph: InterferenceGraph,
 ) -> BTreeSet<Var> {
-    let avail: BTreeSet<usize> =
+    let avail: PhysSet =
         A::callee_saved().into_iter()
         .chain(A::caller_saved().into_iter())
-        .map(|x|x.0)
         .collect();
 
-    let callee_saved: BTreeSet<usize> =
-        A::callee_saved().into_iter().map(|x|x.0).collect();
+    let callee_saved: PhysSet =
+        A::callee_saved().into_iter().collect();
 
-    let caller_saved: BTreeSet<usize> =
-        A::caller_saved().into_iter().map(|x|x.0).collect();
+    let caller_saved: PhysSet =
+        A::caller_saved().into_iter().collect();
 
     let mut spill_set: BTreeSet<Var> = BTreeSet::new();
 
@@ -271,29 +294,29 @@ pub fn solve_coloring<A: Arch>(
     while let Some(var) = worklist.pop() {
         if coloring.contains_key(var) { continue; }
 
-        let others: BTreeSet<usize> =
+        let others: PhysSet =
             graph.get(var)
             .unwrap_or(&HashSet::new())
             .iter()
             .filter_map(|v| {
                 coloring.get(*v).cloned()
-            }).collect();
+            }).map(|x| Phys(x)).collect();
 
-        if must_be_saved.contains(&var) {
-            if let Some(c) = callee_saved.difference(&others).into_iter().next() {
-                coloring.insert(var, *c);
-                continue;
-            }
-        } else {
-            if let Some(c) = caller_saved.difference(&others).into_iter().next() {
-                coloring.insert(var, *c);
-                continue;
-            }
+        let mut set =
+            if must_be_saved.contains(&var) { callee_saved.clone() }
+            else { caller_saved.clone() };
+
+        set.difference(others.clone());
+        if let Some(c) = set.next() {
+            coloring.insert(var, c.0);
+            continue;
         }
 
+        set = avail.clone();
+        set.difference(others);
         // Allocation succede without spilling the variable
-        if let Some(c) = avail.difference(&others).into_iter().next() {
-            coloring.insert(var, *c);
+        if let Some(c) = set.next() {
+            coloring.insert(var, c.0);
             continue;
         }
 

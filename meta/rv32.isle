@@ -49,23 +49,23 @@
         Nez))
 
 (type MInstr
-  (enum (OpRR (dest Var) (op RvOpRR) (rs1 Var) (rs2 Var))
-        (OpRI (dest Var) (op RvOpRI) (rs1 Var) (imm i16))
-        (OpR (dest Var) (op RvOpR) (rs1 Var))
-        (MoveInt (dest Var) (imm i32))
-        (MoveAddr (dest Var) (addr String))
-        (MoveSlot (dest Var) (slot Slot))
-        (Move (dest Var) (rs1 Var))
-        (Call (dest Var) (args CallArgs))
-        (Phi (dest Var) (args PhiArgs))
-        (Load (dest Var) (addr Var) (offset i16) (kind MemopKind))
-        (LoadLocal (dest Var) (addr Slot) (offset i16) (kind MemopKind))
-        (Store (val Var) (addr Var) (offset i16) (kind MemopKind))
-        (StoreLocal (val Var) (addr Slot) (offset i16) (kind MemopKind))
-        (BranchRR (cond RvCondRR) (rs1 Var) (rs2 Var) (l1 Label) (l2 Label))
-        (BranchR (cond RvCondR) (rs1 Var) (l1 Label) (l2 Label))
+  (enum (OpRR (dest Reg) (op RvOpRR) (rs1 Reg) (rs2 Reg))
+        (OpRI (dest Reg) (op RvOpRI) (rs1 Reg) (imm i16))
+        (OpR (dest Reg) (op RvOpR) (rs1 Reg))
+        (MoveInt (dest Reg) (imm i32))
+        (MoveAddr (dest Reg) (addr String))
+        (MoveSlot (dest Reg) (slot Slot))
+        (Move (dest Reg) (rs1 Reg))
+        (Call (dest Reg) (args CallArgs))
+        (Phi (dest Reg) (args PhiArgs))
+        (Load (dest Reg) (addr Reg) (offset i16) (kind MemopKind))
+        (LoadLocal (dest Reg) (addr Slot) (offset i16) (kind MemopKind))
+        (Store (val Reg) (addr Reg) (offset i16) (kind MemopKind))
+        (StoreLocal (val Reg) (addr Slot) (offset i16) (kind MemopKind))
+        (BranchRR (cond RvCondRR) (rs1 Reg) (rs2 Reg) (l1 Label) (l2 Label))
+        (BranchR (cond RvCondR) (rs1 Reg) (l1 Label) (l2 Label))
         (Jump (label Label))
-        (Return (rs1 Var))
+        (Return (rs1 Reg))
         Nop ))
 
 (decl rv_imm (i16) i32)
@@ -208,7 +208,7 @@
 ;;;;;;;; Rules for LessEqual ;;;;;;;;
 (rule
   (lower (less_equal a b))
-  (MInstr.OpR (destination) (RvOpR.Not) (assign (MInstr.OpRR (fresh_var) (RvOpRR.Slt) b a))))
+  (MInstr.OpR (destination) (RvOpR.Not) (assign 0 (MInstr.OpRR (fresh_var) (RvOpRR.Slt) b a))))
 
 ;;;;;;;; Rules for ULessEqual ;;;;;;;;
 (rule
@@ -216,7 +216,7 @@
   (
     MInstr.OpR
       (destination) (RvOpR.Not)
-      (assign (
+      (assign 0 (
         MInstr.OpRR (fresh_var) (RvOpRR.Sltu) b a
       ))
   )
@@ -226,7 +226,7 @@
 (rule
   (lower (equal a b))
   (MInstr.OpR (destination) (RvOpR.Seqz)
-    (assign (
+    (assign 0 (
       MInstr.OpRR (fresh_var) (RvOpRR.Xor) a b
     ))
   ))
@@ -243,7 +243,7 @@
 (rule
   (lower (not_equal a b))
   (MInstr.OpR (destination) (RvOpR.Snez)
-    (assign (
+    (assign 0 (
       MInstr.OpRR (fresh_var) (RvOpRR.Xor) a b
     ))
   ))

@@ -2,6 +2,7 @@
 ;; Declare translation registers types
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (type Var (primitive Var))
+(type Reg (primitive Reg))
 (type Slot (primitive Slot))
 (type Label (primitive Label))
 (type String (primitive String))
@@ -10,12 +11,17 @@
 (decl fresh_var () Var)
 (extern constructor fresh_var fresh_var)
 
+;; Generate a register from a variable
+(decl convert_var_reg (Var) Reg)
+(extern constructor convert_var_reg convert_var_reg)
+(convert Var Reg convert_var_reg)
+
 ;; destination of the current rewriting
 (decl destination () Var)
 (extern constructor destination destination)
 
-;; Return the destination register of a machine specific instruction
-(decl assign (MInstr) Var)
+;; Return the i-th destination register of a machine specific instruction
+(decl assign (usize MInstr) Var)
 (extern constructor assign assign_var)
 
 (type CallArgs (primitive CallArgs))

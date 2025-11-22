@@ -1,4 +1,5 @@
 pub mod generated;
+pub mod reg;
 
 use crate::ssa::{Lit, Var, VarKind, SlotKind};
 use std::collections::BTreeSet;
@@ -14,6 +15,7 @@ pub type CallArgs = (String, Vec<Var>);
 pub type PhiArgs = Vec<(Lit, Label)>;
 pub type MemopKind = crate::ssa::MemopKind;
 
+use reg::*;
 use generated::*;
 
 pub type COp = crate::ssa::COp;
@@ -21,7 +23,15 @@ pub type CCond = crate::ssa::CCond;
 pub type I = crate::ssa::Instr<COp,CCond>;
 pub type Cfg = crate::ssa::Cfg<COp,CCond>;
 
-//type SVec<T> = SmallVec<[T;4]>;
+
+impl std::fmt::Display for Reg {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Phys(phys) => write!(f, "{phys}"),
+            Self::Virt(virt) => write!(f, "{virt}"),
+        }
+    }
+}
 
 pub trait MachineInstr {
     /// Return if an instruction is a move between two registers
@@ -153,13 +163,22 @@ impl std::fmt::Display for MInstr {
                 write!(f, "la {dest}, {addr}"),
             MInstr::MoveSlot{dest, slot} =>
                 write!(f, "mv {dest}, {slot}"),
+            MInstr::Call{dest: Reg::Phys(Phys(0)), args: (name, args)}
+                if args.len() == 0 =>
+                write!(f, "call {name}"),
             MInstr::Call{dest, args: (name, args)} => {
-                write!(f, "call {dest}, {name}(")?;
-                for i in 0..args.len() {
-                    if i != 0 { write!(f, ", ")?; }
-                    write!(f, "{}", args[i])?;
+                if matches!(dest, Reg::Phys(Phys(0))) { write!(f, "call ")?; }
+                else {write!(f, "call {dest}, ")?;}
+
+                if args.len() == 0 { write!(f, "{name}") }
+                else {
+                    write!(f, "{name}(")?;
+                    for i in 0..args.len() {
+                        if i != 0 { write!(f, ", ")?; }
+                        write!(f, "{}", args[i])?;
+                    }
+                    write!(f, ")")
                 }
-                write!(f, ")")
             }
             MInstr::Phi{dest, args} => {
                 write!(f, "phi {dest}, ")?;
@@ -230,24 +249,26 @@ impl MachineInstr for MInstr {
 
     fn is_phi(&self) -> Option<(&Var, &Vec<(Lit,Label)>)> {
         match self {
-            Self::Phi{dest, args} => Some((dest,args)),
+            Self::Phi{dest: Reg::Virt(dest), args} =>
+                Some((dest,args)),
             _ => None
         }
     }
 
     fn is_phi_mut(&mut self) -> Option<(&mut Var, &mut Vec<(Lit,Label)>)> {
         match self {
-            Self::Phi{dest, args} => Some((dest,args)),
+            Self::Phi{dest: Reg::Virt(dest), args} =>
+                Some((dest,args)),
             _ => None
         }
     }
 
     fn gen_move(dest: Var, src: Lit) -> Self {
         match src {
-            Lit::Int(imm) => MInstr::MoveInt{dest, imm},
-            Lit::Var(rs1) => MInstr::Move{dest, rs1},
-            Lit::Addr(addr) => MInstr::MoveAddr{dest, addr},
-            Lit::Stack(slot) => MInstr::MoveSlot{dest, slot},
+            Lit::Int(imm) => MInstr::MoveInt{dest: Reg::Virt(dest), imm},
+            Lit::Var(rs1) => MInstr::Move{dest: Reg::Virt(dest), rs1: Reg::Virt(rs1)},
+            Lit::Addr(addr) => MInstr::MoveAddr{dest: Reg::Virt(dest), addr},
+            Lit::Stack(slot) => MInstr::MoveSlot{dest: Reg::Virt(dest), slot},
             Lit::Undef => MInstr::Nop
         }
     }
@@ -257,110 +278,126 @@ impl MachineInstr for MInstr {
     }
 
     fn destinations(&self) -> Vec<Var> {
-        match self {
-            MInstr::OpR{dest,..}
-            | MInstr::OpRR{dest, ..}
-            | MInstr::OpRI{dest, ..}
-            | MInstr::Move{dest, ..}
-            | MInstr::MoveInt{dest, ..}
-            | MInstr::MoveAddr{dest, ..}
-            | MInstr::MoveSlot{dest, ..}
-            | MInstr::Load{dest, ..}
-            | MInstr::LoadLocal{dest, ..}
-            | MInstr::Phi{dest, ..}
-            | MInstr::Call{dest, ..} =>
-                vec![*dest],
-            _ =>
-                vec![],
-
-        }
+        let dest =
+            match self {
+                MInstr::OpR{dest,..}
+                | MInstr::OpRR{dest, ..}
+                | MInstr::OpRI{dest, ..}
+                | MInstr::Move{dest, ..}
+                | MInstr::MoveInt{dest, ..}
+                | MInstr::MoveAddr{dest, ..}
+                | MInstr::MoveSlot{dest, ..}
+                | MInstr::Load{dest, ..}
+                | MInstr::LoadLocal{dest, ..}
+                | MInstr::Phi{dest, ..}
+                | MInstr::Call{dest, ..} =>
+                    vec![*dest],
+                _ =>
+                    vec![],
+            };
+        dest.into_iter().filter_map(|reg| {
+            if let Reg::Virt(var) = reg {Some(var)}
+            else {None}
+        }).collect()
     }
 
     fn destinations_mut(&mut self) -> Vec<&mut Var> {
-        match self {
-            MInstr::OpR{dest,..}
-            | MInstr::OpRR{dest, ..}
-            | MInstr::OpRI{dest, ..}
-            | MInstr::Move{dest, ..}
-            | MInstr::MoveInt{dest, ..}
-            | MInstr::MoveAddr{dest, ..}
-            | MInstr::MoveSlot{dest, ..}
-            | MInstr::Load{dest, ..}
-            | MInstr::LoadLocal{dest, ..}
-            | MInstr::Call{dest, ..}
-            | MInstr::Phi{dest, ..} =>
-                vec![dest],
-            MInstr::Nop
-            | MInstr::Store{..}
-            | MInstr::StoreLocal{..}
-            | MInstr::BranchR{..}
-            | MInstr::BranchRR{..}
-            | MInstr::Jump{..}
-            | MInstr::Return{..} =>
-                vec![],
-        }
+        let dest =
+            match self {
+                MInstr::OpR{dest,..}
+                | MInstr::OpRR{dest, ..}
+                | MInstr::OpRI{dest, ..}
+                | MInstr::Move{dest, ..}
+                | MInstr::MoveInt{dest, ..}
+                | MInstr::MoveAddr{dest, ..}
+                | MInstr::MoveSlot{dest, ..}
+                | MInstr::Load{dest, ..}
+                | MInstr::LoadLocal{dest, ..}
+                | MInstr::Call{dest, ..}
+                | MInstr::Phi{dest, ..} =>
+                    vec![dest],
+                MInstr::Nop
+                | _ =>
+                    vec![],
+            };
+        dest.into_iter().filter_map(|reg| {
+            if let Reg::Virt(var) = reg {Some(var)}
+            else {None}
+        }).collect()
     }
 
     fn operands(&self) -> Vec<Var> {
-        match self {
-            MInstr::Call{args: (_, args), ..} =>
-                args.iter().cloned().collect(),
-            MInstr::Phi{args, ..} =>
-                args.iter().filter_map(|(l,_)| {
-                    if let Lit::Var(v) = l {Some(*v)}
-                    else {None}
-                }).collect(),
-            MInstr::OpRR{rs1, rs2, ..}
-            | MInstr::Store{val: rs1, addr: rs2, ..}
-            | MInstr::BranchRR{rs1, rs2, ..} =>
-                vec![*rs1, *rs2],
-            MInstr::OpRI{rs1, ..}
-            | MInstr::OpR{rs1, ..}
-            | MInstr::Load{addr: rs1, ..}
-            | MInstr::StoreLocal{val: rs1, ..}
-            | MInstr::BranchR{rs1, ..}
-            | MInstr::Return{rs1}
-            | MInstr::Move{rs1, ..} =>
-                vec![*rs1],
-            MInstr::Nop
-            | MInstr::Jump{..}
-            | MInstr::MoveSlot{..}
-            | MInstr::MoveAddr{..}
-            | MInstr::LoadLocal{..}
-            | MInstr::MoveInt{..} =>
-                vec![]
-        }
+        let ops =
+            match self {
+                MInstr::Call{args: (_, args), ..} =>
+                    return args.iter().copied().collect(),
+                MInstr::Phi{args, ..} =>
+                    return args.iter().filter_map(|(l,_)| {
+                        if let Lit::Var(v) = l {Some(*v)}
+                        else {None}
+                    }).collect(),
+                MInstr::OpRR{rs1, rs2, ..}
+                | MInstr::Store{val: rs1, addr: rs2, ..}
+                | MInstr::BranchRR{rs1, rs2, ..} =>
+                    vec![*rs1, *rs2],
+                MInstr::OpRI{rs1, ..}
+                | MInstr::OpR{rs1, ..}
+                | MInstr::Load{addr: rs1, ..}
+                | MInstr::StoreLocal{val: rs1, ..}
+                | MInstr::BranchR{rs1, ..}
+                | MInstr::Return{rs1}
+                | MInstr::Move{rs1, ..} =>
+                    vec![*rs1],
+                MInstr::Nop
+                | MInstr::Jump{..}
+                | MInstr::MoveSlot{..}
+                | MInstr::MoveAddr{..}
+                | MInstr::LoadLocal{..}
+                | MInstr::MoveInt{..} =>
+                    vec![]
+            };
+
+        ops.into_iter().filter_map(|reg| {
+            if let Reg::Virt(var) = reg {Some(var)}
+            else {None}
+        }).collect()
     }
 
     fn operands_mut(&mut self) -> Vec<&mut Var> {
-        match self {
-            MInstr::Call{args: (_, args), ..} =>
-                args.iter_mut().collect(),
-            MInstr::Phi{args, ..} =>
-                args.iter_mut().filter_map(|(l,_)| {
-                    if let Lit::Var(v) = l {Some(v)}
-                    else {None}
-                }).collect(),
-            MInstr::OpRR{rs1, rs2, ..}
-            | MInstr::Store{val: rs1, addr: rs2, ..}
-            | MInstr::BranchRR{rs1, rs2, ..} =>
-                vec![rs1, rs2],
-            MInstr::OpRI{rs1, ..}
-            | MInstr::OpR{rs1, ..}
-            | MInstr::Load{addr: rs1, ..}
-            | MInstr::StoreLocal{val: rs1, ..}
-            | MInstr::BranchR{rs1, ..}
-            | MInstr::Return{rs1}
-            | MInstr::Move{rs1, ..} =>
-                vec![rs1],
-            MInstr::Nop
-            | MInstr::Jump{..}
-            | MInstr::MoveSlot{..}
-            | MInstr::MoveAddr{..}
-            | MInstr::LoadLocal{..}
-            | MInstr::MoveInt{..} =>
-                vec![]
-        }
+        let ops =
+            match self {
+                MInstr::Call{args: (_, args), ..} =>
+                    return args.iter_mut().collect(),
+                MInstr::Phi{args, ..} =>
+                    return args.iter_mut().filter_map(|(l,_)| {
+                        if let Lit::Var(v) = l {Some(v)}
+                        else {None}
+                    }).collect(),
+                MInstr::OpRR{rs1, rs2, ..}
+                | MInstr::Store{val: rs1, addr: rs2, ..}
+                | MInstr::BranchRR{rs1, rs2, ..} =>
+                    vec![rs1, rs2],
+                MInstr::OpRI{rs1, ..}
+                | MInstr::OpR{rs1, ..}
+                | MInstr::Load{addr: rs1, ..}
+                | MInstr::StoreLocal{val: rs1, ..}
+                | MInstr::BranchR{rs1, ..}
+                | MInstr::Return{rs1}
+                | MInstr::Move{rs1, ..} =>
+                    vec![rs1],
+                MInstr::Nop
+                | MInstr::Jump{..}
+                | MInstr::MoveSlot{..}
+                | MInstr::MoveAddr{..}
+                | MInstr::LoadLocal{..}
+                | MInstr::MoveInt{..} =>
+                    vec![]
+            };
+
+        ops.into_iter().filter_map(|reg| {
+            if let Reg::Virt(var) = reg {Some(var)}
+            else {None}
+        }).collect()
     }
 
     fn targets(&self) -> Vec<Label> {
@@ -729,6 +766,10 @@ impl std::fmt::Display for Rtl {
 }
 
 impl Context for Translator {
+    fn convert_var_reg(&mut self, var: Var) -> Reg {
+        Reg::Virt(var)
+    }
+
     fn rv_imm(&mut self, imm: i32) -> Option<i16> {
         if imm >= -2048 && imm <= 2047 {Some(imm as i16)} else {None}
     }
@@ -746,9 +787,9 @@ impl Context for Translator {
         instr.destination().unwrap()
     }
 
-    fn assign_var(&mut self, mi: &MInstr) -> Var {
+    fn assign_var(&mut self, index: usize, mi: &MInstr) -> Var {
         self.instr_stmt.push(mi.clone());
-        *mi.destinations().first().unwrap()
+        mi.destinations()[index]
     }
 
     // Return the instruction that define a given variable, and skip some moves if possible

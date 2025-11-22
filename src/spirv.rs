@@ -416,6 +416,72 @@ impl Env {
         self.add_global(instr.result_id.unwrap(), ty, vec![SWord::Int(1)]);
     }
 
+    fn compose_element(&mut self, buf: &mut Vec<SWord>, item: SWord, offset: usize) {
+        while buf.len() < offset / 4 { buf.push(SWord::Int(0)); }
+
+        if offset % 4 == 0 {
+            buf.push(item);
+            return;
+        }
+
+        let SWord::Int(x) = item else {panic!("unaligned reference")};
+
+        if buf.len() != offset / 4 { buf.push(SWord::Int(0)); }
+        let SWord::Int(y) = item else {panic!("unaligned reference")};
+
+        let bits = (offset % 4) * 8;
+        let mask = (1i32 << bits) - 1;
+        let nmask = !mask;
+
+        buf[offset / 4] = SWord::Int((y & mask) | ((x << bits) & nmask));
+        buf.push(SWord::Int((x >> (32 - bits)) & mask));
+    }
+
+    fn add_constant_composite(&mut self, instr: &Instruction) {
+        let ty = instr.result_type.unwrap();
+        let id = instr.result_id.unwrap();
+
+        let mut array = vec![];
+        match self.get_type(ty).clone() {
+            Type::Array{items, count} => {
+                let size = self.get_type_size(items);
+
+                for i in 0..count {
+                    let idx = instr.operands[i].unwrap_id_ref() as usize;
+
+                    for j in 0..self.get_type_words(items) {
+                        let item: SWord =
+                            self.globals[idx]
+                            .as_ref().unwrap().1[j].clone();
+                        self.compose_element(&mut array, item, size*i + j*4);
+                    }
+                }
+
+            }
+            Type::Struct{fields, offsets, ..} => {
+                assert!(fields.len() == instr.operands.len());
+
+                for i in 0..fields.len() {
+                    let idx = instr.operands[i].unwrap_id_ref() as usize;
+
+                    for j in 0..self.get_type_words(fields[i]) {
+                        let item: SWord =
+                            self.globals[idx]
+                            .as_ref().unwrap().1[j].clone();
+                        self.compose_element(&mut array, item, offsets[i] + j*4);
+                    }
+                }
+            }
+            _ => unreachable!("not a composite type")
+        }
+
+        let size = self.get_type_words(ty);
+        while array.len() < size { array.push(SWord::Int(0)); }
+        while array.len() > size { array.pop(); }
+
+        self.add_global(id, ty, array);
+    }
+
     fn add_constant_false(&mut self, instr: &Instruction) {
         let ty = instr.result_type.unwrap();
 
@@ -446,7 +512,9 @@ impl Env {
                 Op::SpecConstant | Op::Constant => _ = self.add_constant(instr),
                 Op::Variable => _ = self.add_variable(instr),
                 Op::SpecConstantOp => _ = self.add_spec_constant_op(instr),
-                _ => unreachable!(),
+                Op::ConstantComposite | Op::SpecConstantComposite =>
+                    _ = self.add_constant_composite(instr),
+                _ => unreachable!("\n{:?}\n", instr),
             }
         }
     }
