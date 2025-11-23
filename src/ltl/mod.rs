@@ -267,7 +267,7 @@ impl<A: Arch> Ltl<A> {
             A::gen_layout(&self.stack, self.contains_call());
         //let (stack_size, slots) = self.layout();
 
-        write!(f, "\t{push}\n")?;
+        write!(f, "  {push}\n")?;
 
         for (i, block) in self.blocks.iter().enumerate() {
             let from_label = |j: usize| {
@@ -283,10 +283,10 @@ impl<A: Arch> Ltl<A> {
             for instr in block.iter().cloned() {
 
                 if matches!(instr, LInstr::Return) {
-                    write!(f, "\t{pop}\n")?;
+                    write!(f, "  {pop}\n")?;
                 }
 
-                write!(f, "\t")?;
+                write!(f, "  ")?;
                 match instr {
                     LInstr::Operation(dest, op, args) =>
                         _ = A::pp_op(f, dest, op, args)?,
@@ -426,7 +426,7 @@ impl<A: Arch> std::fmt::Display for LtlSection<A> {
             Self::Text(cfg) =>  write!(f, "{cfg}"),
             Self::Data(items) => {
                 for x in items.iter() {
-                    write!(f, "\n\t.word {x}")?;
+                    write!(f, "\n  .word {x}")?;
                 }
 
                 write!(f, "\n")?;

@@ -291,6 +291,8 @@ pub fn solve_coloring<A: Arch>(
 
     let must_be_saved = search_caller_saved::<A>(cfg);
 
+    let mut last_allocated = Phys(0);
+
     while let Some(var) = worklist.pop() {
         if coloring.contains_key(var) { continue; }
 
@@ -307,16 +309,18 @@ pub fn solve_coloring<A: Arch>(
             else { caller_saved.clone() };
 
         set.difference(others.clone());
-        if let Some(c) = set.next() {
+        if let Some(c) = set.first_from(last_allocated) {
             coloring.insert(var, c.0);
+            last_allocated = c;
             continue;
         }
 
         set = avail.clone();
         set.difference(others);
         // Allocation succede without spilling the variable
-        if let Some(c) = set.next() {
+        if let Some(c) = set.first_from(last_allocated) {
             coloring.insert(var, c.0);
+            last_allocated = c;
             continue;
         }
 

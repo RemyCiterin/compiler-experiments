@@ -16,6 +16,10 @@ pub struct Btl {
     pub stack: SlotMap<Slot, SlotKind>,
 }
 
+pub const MAX_OP: usize = 4;
+pub const MAX_MEM: usize = 1;
+pub const MAX_INS: usize = 4;
+
 impl Btl {
     pub fn new(ltl: Ltl<RvArch>) -> Self {
         let mut blocks = vec![];
@@ -53,11 +57,11 @@ impl Btl {
                         LInstr::Move(..)
                             | LInstr::Operation(..)
                             | LInstr::Ls(..) =>
-                            used = num_op < 2,
+                            used = num_op < MAX_OP,
 
 
                         LInstr::Li(_, i) if rv32::check_riscv_immediate(*i) =>
-                            used = num_op < 2,
+                            used = num_op < MAX_OP,
 
                         // Generic `li` and `la` instructions are encodded using two instructions
                         LInstr::Li(..) | LInstr::La(..) =>
@@ -70,12 +74,12 @@ impl Btl {
                             used = all_instr,
 
                         LInstr::LoadLocal{..} | LInstr::Load{..} =>
-                            used = num_mem == 0 && !store_effect,
+                            used = num_mem < MAX_MEM && !store_effect,
                         LInstr::StoreLocal{..} | LInstr::Store{..} =>
-                            used = num_mem == 0 && !load_effect,
+                            used = num_mem < MAX_MEM && !load_effect && !store_effect,
                     }
 
-                    if num_ins > 4 { used = false; }
+                    if num_ins > MAX_INS { used = false; }
 
                     if let Some(dest) = instr.destination() && read.contains(dest) {
                         used = false;
@@ -160,7 +164,7 @@ impl Btl {
         let (push, pop, slots) =
             RvArch::gen_layout(&self.stack, self.contains_call());
 
-        write!(f, "\t{push}\n")?;
+        write!(f, "  {push}\n")?;
 
         for (i, block) in self.blocks.iter().enumerate() {
             let from_label = |j: usize| {
@@ -178,10 +182,10 @@ impl Btl {
                     let instr = bundle.0[idx].clone();
 
                     if matches!(instr, LInstr::Return) {
-                        write!(f, "\t{pop}\n")?;
+                        write!(f, "  {pop}\n")?;
                     }
 
-                    write!(f, "\t")?;
+                    write!(f, "  ")?;
                     match instr {
                         LInstr::Operation(dest, op, args) =>
                             _ = RvArch::pp_op(f, dest, op, args)?,
@@ -284,7 +288,7 @@ impl std::fmt::Display for BtlSection {
             Self::Text(cfg) =>  write!(f, "{cfg}"),
             Self::Data(items) => {
                 for x in items.iter() {
-                    write!(f, "\n\t.word {x}")?;
+                    write!(f, "\n  .word {x}")?;
                 }
 
                 write!(f, "\n")?;

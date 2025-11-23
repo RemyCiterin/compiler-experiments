@@ -110,12 +110,12 @@ impl Arch for RvArch {
 
     fn pp_push(f: &mut Formatter<'_>, size: i32) -> Result {
         write!(f, "addi sp, sp, {}\n", -size)?;
-        write!(f, "\tsw ra, {}(sp)", (size-4))
+        write!(f, "  sw ra, {}(sp)", (size-4))
     }
 
     fn pp_pop(f: &mut Formatter<'_>, size: i32) -> Result {
         write!(f, "lw ra, {}(sp)\n", (size-4))?;
-        write!(f, "\taddi sp, sp, {}", size)
+        write!(f, "  addi sp, sp, {}", size)
     }
 
     fn ret_reg() -> Phys {
@@ -219,10 +219,10 @@ impl Arch for RvArch {
 
         if contains_calls {
             let push =
-                format!("addi sp, sp, {};;\n\tsw ra, {}(sp);;", -stack_size, stack_size-4);
+                format!("addi sp, sp, {};;\n  sw ra, {}(sp);;", -stack_size, stack_size-4);
 
             let pop =
-                format!("lw ra, {}(sp);;\n\taddi sp, sp, {};;", stack_size-4, stack_size);
+                format!("lw ra, {}(sp);;\n  addi sp, sp, {};;", stack_size-4, stack_size);
 
             (push, pop, slots)
         } else {

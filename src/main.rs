@@ -176,18 +176,15 @@ fn main() {
         format!("{output_dir}/{file_name}.asm")
     );
 
-    file = std::fs::File::open(
-        format!("test.spv")
-    ).unwrap();
+    //file = std::fs::File::open(
+    //    format!("test.spv")
+    //).unwrap();
 
-    let vec: Vec<u8> =
-        file
-        .bytes()
-        .map(|r| r.unwrap())
-        .collect();
+    //let vec: Vec<u8> =
+    //    file
+    //    .bytes()
+    //    .map(|r| r.unwrap())
+    //    .collect();
 
-    parse_spirv_spec(&vec);
-
-    //let config = Config::default();
-    //println!("{:?}", parse(&config, "test/main.c"));
+    //parse_spirv_spec(&vec);
 }

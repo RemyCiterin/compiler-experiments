@@ -58,6 +58,35 @@ impl PhysSet {
             self.0[i] &= !other.0[i];
         }
     }
+
+    pub fn first_from(&self, phys: Phys) -> Option<Phys> {
+        let mask: u64 = (1u64 << (phys.0 % 64)) - 1;
+
+        if self.0[phys.0 / 64] & mask != 0 {
+            let idx = phys.0 / 64;
+
+            let x = (self.0[idx] & mask).ilog2() as u64;
+            return Some(Phys(x as usize + idx * 64));
+        }
+
+        for i in 1..LEN {
+            let idx = (i + (phys.0 / 64)) % LEN;
+
+            if self.0[idx] != 0 {
+                let x = self.0[idx].ilog2() as u64;
+                return Some(Phys(x as usize + idx * 64));
+            }
+        }
+
+        if self.0[phys.0 / 64] != 0 {
+            let idx = phys.0 / 64;
+
+            let x = self.0[idx].ilog2() as u64;
+            return Some(Phys(x as usize + idx * 64));
+        }
+
+        return None;
+    }
 }
 
 impl FromIterator<Phys> for PhysSet {
