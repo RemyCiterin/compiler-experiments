@@ -170,6 +170,12 @@ fn main() {
         format!("{output_dir}/{file_name}.s")
     );
 
+    let btl_table = crate::ltl::bundle::BtlSymbolTable::new(ltl_table);
+    write(
+        format!("{btl_table}"),
+        format!("{output_dir}/{file_name}.asm")
+    );
+
     file = std::fs::File::open(
         format!("test.spv")
     ).unwrap();

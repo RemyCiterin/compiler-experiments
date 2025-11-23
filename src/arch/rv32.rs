@@ -218,10 +218,10 @@ impl Arch for RvArch {
 
         if contains_calls {
             let push =
-                format!("addi sp, sp, {}\n\tsw ra, {}(sp)", -stack_size, stack_size-4);
+                format!("addi sp, sp, {};;\n\tsw ra, {}(sp);;", -stack_size, stack_size-4);
 
             let pop =
-                format!("lw ra, {}(sp)\n\taddi sp, sp, {}", stack_size-4, stack_size);
+                format!("lw ra, {}(sp);;\n\taddi sp, sp, {};;", stack_size-4, stack_size);
 
             (push, pop, slots)
         } else {
@@ -230,12 +230,56 @@ impl Arch for RvArch {
             }
 
             let push =
-                format!("addi sp, sp, {}", -stack_size);
+                format!("addi sp, sp, {};;", -stack_size);
 
             let pop =
-                format!("addi sp, sp, {}", stack_size);
+                format!("addi sp, sp, {};;", stack_size);
 
             (push, pop, slots)
+        }
+    }
+
+    fn opcode_class(opcode: Opcode<Self::Op, Self::Cond>) -> usize {
+        match opcode {
+            Opcode::Operation(_) => 0,
+            Opcode::Ls => 0,
+
+            Opcode::Jcc(_) => 1,
+            Opcode::Call => 1,
+            Opcode::Jump => 1,
+            Opcode::Ret => 1,
+
+            Opcode::Store => 2,
+            Opcode::Load => 2,
+
+            Opcode::La => 3,
+            Opcode::Li => 3,
+        }
+    }
+
+    fn class_kind(class: usize) -> ClassKind {
+        match class {
+            0 => ClassKind::InBundle(2),
+            1 => ClassKind::InBundle(1),
+            2 => ClassKind::InBundle(1),
+            _ => ClassKind::Alone,
+        }
+    }
+
+    fn maximum_bundle_size() -> usize {4}
+
+    fn can_reorder(op1: Opcode<Self::Op, Self::Cond>, op2: Opcode<Self::Op, Self::Cond>) -> bool {
+        match (op1, op2) {
+            (Opcode::Load, Opcode::Call) => false,
+            (Opcode::Store, Opcode::Call) => false,
+            (Opcode::Call, Opcode::Load) => false,
+            (Opcode::Call, Opcode::Store) => false,
+
+            (Opcode::Load, Opcode::Store) => false,
+            (Opcode::Store, Opcode::Store) => false,
+            (Opcode::Store, Opcode::Load) => false,
+
+            _ => true,
         }
     }
 }

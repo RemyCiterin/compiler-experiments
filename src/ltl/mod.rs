@@ -4,6 +4,7 @@
 //! translation relatively easy.
 
 pub mod interpreter;
+pub mod bundle;
 
 use std::collections::{HashMap, HashSet};
 use crate::arch::regalloc::*;
@@ -55,6 +56,41 @@ pub enum LInstr<Op, Cond> {
 
     /// Call instruction
     Call(String),
+}
+
+impl<Op, Cond> LInstr<Op, Cond> {
+    fn destination(&self) -> Option<Phys> {
+        match self {
+            Self::Operation(dest, ..)
+                | Self::Move(dest, _)
+                | Self::Li(dest, _)
+                | Self::Ls(dest, _)
+                | Self::La(dest, _)
+                | Self::LoadLocal{dest, ..}
+                | Self::Load{dest, ..}
+                => Some(*dest),
+            _ => None
+        }
+    }
+
+    fn operands(&self) -> Vec<Phys> {
+        match self {
+            Self::Operation(_, _, args) => args.clone(),
+            Self::Move(_, arg) => vec![*arg],
+            Self::Li(_, _)
+                | Self::Ls(_, _)
+                | Self::La(_, _)
+                => vec![],
+            Self::LoadLocal{..} => vec![],
+            Self::Load{addr, ..} => vec![*addr],
+            Self::Store{addr, val, ..} => vec![*addr, *val],
+            Self::StoreLocal{val, ..} => vec![*val],
+            Self::Jcc(_, args, _) => args.clone(),
+            Self::Jump(_) => vec![],
+            Self::Call(_) => vec![],
+            Self::Return => vec![],
+        }
+    }
 }
 
 pub struct Ltl<A: Arch> {

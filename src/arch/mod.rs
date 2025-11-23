@@ -128,6 +128,27 @@ impl Reg {
     }
 }
 
+pub enum Opcode<Op, Cond> {
+    Operation(Op),
+    Jcc(Cond),
+    Store,
+    Load,
+    Call,
+    Jump,
+    Ret,
+    Li,
+    Ls,
+    La,
+}
+
+pub enum ClassKind {
+    /// The operation can be in a bundle with `n` operations of the same class
+    InBundle(usize),
+
+    /// The operation can't be in a bundle with other instructions
+    Alone,
+}
+
 pub trait Arch {
     type Cond: Condition;
     type Op: Operation;
@@ -197,4 +218,17 @@ pub trait Arch {
     /// address and save some space in the stack
     fn gen_layout(stack: &slotmap::SlotMap<Slot, SlotKind>, contain_calls: bool) ->
         (String, String, slotmap::SparseSecondaryMap<Slot, i32>);
+
+    /// Dispatch the opcodes in different classes for VLIW scheduling, then each class has a
+    /// maximum number of occurence per bundle
+    fn opcode_class(opcode: Opcode<Self::Op, Self::Cond>) -> usize;
+
+    /// The number of occurence of a
+    fn class_kind(class: usize) -> ClassKind;
+
+    /// Maximum size of a bundle
+    fn maximum_bundle_size() -> usize;
+
+    /// Return if we can reorder two operations
+    fn can_reorder(op1: Opcode<Self::Op, Self::Cond>, op2: Opcode<Self::Op, Self::Cond>) -> bool;
 }

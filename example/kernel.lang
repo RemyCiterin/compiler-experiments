@@ -1,0 +1,101 @@
+extern start_timestamp;
+extern finish_timestamp;
+extern bitmask;
+print_endline() {
+  let x = 10;
+  printf(&x);
+}
+main() {
+  print_endline();
+}
+kernel(threadid, frame_buffer, z_buffer, triangles, num_triangles) {
+  let idx = threadid;
+  while (idx < 320 * 240) {
+    z_buffer[idx] = ((1 << 31) - 1);
+    frame_buffer[idx] = 0;
+    idx = idx + (16 * 4);
+  }
+  if (threadid == 0) {
+    init_timestamp(&start_timestamp);
+  }
+  let tri = 0;
+  while (tri < num_triangles) {
+    dump_triangle(threadid, z_buffer, frame_buffer, triangles[tri], tri);
+    tri = tri + 1;
+  }
+  if (threadid == 0) {
+    init_timestamp(&finish_timestamp);
+  }
+  let locks = &bitmask;
+  locks[threadid] = 1;
+}
+into_x_coord(x) {
+  let ret = ((x+(1 << 16)) * 320) / (2 * (1 << 16));
+  if (ret >= 320) { ret = 320 - 1; }
+  if (ret < 0) { ret = 0; }
+  return ret;
+}
+into_y_coord(y) {
+  let ret = ((y+(1 << 16)) * 240) / (2 * (1 << 16));
+  if (ret >= 240) { ret = 240 - 1; }
+  if (ret < 0) { ret = 0; }
+  return ret;
+}
+dump_triangle(threadid, z_buffer, frame_buffer, triangle, tri_id) {
+  let xpos, ypos;
+  let xstep = (2*(1 << 16)) / 320;
+  let ystep = (2*(1 << 16)) / 240;
+  let inv_det, Ax, Ay, Az, Bx, By, Bz, Cx, Cy, Cz, AAx, AAy, BBx, BBy, Au, Bu, Cu, Av, Bv, Cv;
+  AAx = triangle[10];
+  AAy = triangle[11];
+  BBx = triangle[12];
+  BBy = triangle[13];
+  AAx = into_x_coord(AAx-10);
+  AAy = into_y_coord(AAy-10);
+  BBx = into_x_coord(BBx+10);
+  BBy = into_y_coord(BBy+10);
+  xpos = AAx + (threadid % 8);
+  ypos = AAy + (threadid / 8);
+  inv_det = triangle[0];
+  Ax = triangle[1];
+  Ay = triangle[2];
+  Bx = triangle[3];
+  By = triangle[4];
+  Cx = triangle[5];
+  Cy = triangle[6];
+  while (ypos < BBy) {
+    if (xpos <= BBx) {
+      let idx = xpos + ypos * 320;
+      let u, v, w;
+      {
+        let a = Bx - Ax;
+        let b = Cx - Ax;
+        let c = By - Ay;
+        let d = Cy - Ay;
+        let x = (xpos * xstep) - (1 << 16);
+        let y = (ypos * ystep) - (1 << 16);
+        let X = x - Ax;
+        let Y = y - Ay;
+        v = @fmul(inv_det, @fmul(d,X) - @fmul(b,Y));
+        w = @fmul(inv_det, @fmul(a,Y) - @fmul(c,X));
+        u = ((1 << 16) - w) - v;
+      }
+      if ((inv_det != 0) && (v >= 0) && (u >= 0) && (w >= 0)) {
+        Az = triangle[7];
+        Bz = triangle[8];
+        Cz = triangle[9];
+        let z = @fmul(Az,u) + @fmul(Bz,v) + @fmul(Cz,w);
+        if ((z >= (1 << 16)) && (z < z_buffer[idx])) {
+          z_buffer[idx] = z;
+          frame_buffer[idx] = tri_id * 16 + 23;
+        }
+      }
+    }
+    if (xpos + 8 > BBx) {
+      xpos = AAx + (threadid % 8);
+      ypos = ypos + 8;
+    } else {
+      xpos = xpos + 8;
+    }
+  }
+}
