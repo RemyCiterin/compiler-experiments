@@ -3,7 +3,7 @@
 /// but it dosn't requires to use an SSA form and use machine specific instructions
 /// that may write into multiple registers at a time.
 
-use crate::ssa::{Label, Slot, Var, SlotKind, Lit, VarKind, Cfg, COp, CCond, Instr, InstrId};
+use crate::ssa::{Label, Slot, Var, SlotKind, Lit, VarKind};
 use slotmap::{SlotMap, SecondaryMap};
 use std::collections::BTreeSet;
 

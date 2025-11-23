@@ -17,7 +17,8 @@ impl Arch for RvArch {
     }
 
     fn pp_from_int(f: &mut Formatter<'_>, dest: Phys, src: i32) -> Result {
-        write!(f, "li {dest}, {src}")
+        if check_riscv_immediate(src) { write!(f, "addi {dest}, x0, {src}") }
+        else { write!(f, "li {dest}, {src}") }
     }
 
     fn pp_from_addr(f: &mut Formatter<'_>, dest: Phys, src: &str) -> Result {

@@ -1,6 +1,7 @@
 //! This module take a LTL representation of a program and perform sofware pipelining on each block
 //! to build bundles for a VLIW architecture.
 
+use super::rv32::*;
 use crate::arch::*;
 use crate::ssa::*;
 use slotmap::*;
@@ -8,20 +9,20 @@ use slotmap::*;
 use crate::ltl::*;
 
 #[derive(Clone)]
-pub struct Bundle<Op, Cond>(pub Vec<LInstr<Op, Cond>>);
+pub struct Bundle(pub Vec<LInstr<RvOp, RvCond>>);
 
-pub struct Btl<A: Arch> {
-    pub blocks: Vec<Vec<Bundle<A::Op, A::Cond>>>,
+pub struct Btl {
+    pub blocks: Vec<Vec<Bundle>>,
     pub stack: SlotMap<Slot, SlotKind>,
 }
 
-impl<A: Arch> Btl<A> {
-    pub fn new(ltl: Ltl<A>) -> Self {
+impl Btl {
+    pub fn new(ltl: Ltl<RvArch>) -> Self {
         let mut blocks = vec![];
         let stack = ltl.stack;
 
         for block in ltl.blocks {
-            let mut stmt: Vec<Bundle<A::Op, A::Cond>> = vec![];
+            let mut stmt: Vec<Bundle> = vec![];
 
             let mut avail = vec![];
             for _ in block.iter() {
@@ -31,12 +32,13 @@ impl<A: Arch> Btl<A> {
             while block.len() > 0 {
                 if avail.iter().all(|b| !b) { break; }
 
-                let mut bundle: Vec<LInstr<A::Op, A::Cond>> = vec![];
+                let mut bundle: Vec<LInstr<RvOp, RvCond>> = vec![];
                 let mut written = PhysSet::empty();
                 let mut read = PhysSet::empty();
 
                 let mut num_op: usize = 0;
                 let mut num_mem: usize = 0;
+                let mut num_ins: usize = 0;
 
                 let mut store_effect: bool = false;
                 let mut load_effect: bool = false;
@@ -44,20 +46,27 @@ impl<A: Arch> Btl<A> {
 
                 for index in 0..block.len() {
                     if !avail[index] { continue; }
-                    let instr: &LInstr<A::Op, A::Cond> = &block[index];
+                    let instr: &LInstr<RvOp, RvCond> = &block[index];
                     let mut used: bool;
 
                     match instr {
-                        LInstr::Move(..) => used = num_op < 4,
-                        LInstr::Operation(..) => used = num_op < 4,
-                        LInstr::Li(..) | LInstr::Ls(..) | LInstr::La(..) => used = num_op < 4,
-                        LInstr::Call(..) =>
-                            used = all_instr,
-                        LInstr::Jcc(..) =>
-                            used = all_instr,
-                        LInstr::Jump(..) =>
-                            used = all_instr,
-                        LInstr::Return =>
+                        LInstr::Move(..)
+                            | LInstr::Operation(..)
+                            | LInstr::Ls(..) =>
+                            used = num_op < 2,
+
+
+                        LInstr::Li(_, i) if rv32::check_riscv_immediate(*i) =>
+                            used = num_op < 2,
+
+                        // Generic `li` and `la` instructions are encodded using two instructions
+                        LInstr::Li(..) | LInstr::La(..) =>
+                            used = num_ins == 0,
+
+                        LInstr::Call(..)
+                            | LInstr::Jcc(..)
+                            | LInstr::Jump(..)
+                            | LInstr::Return =>
                             used = all_instr,
 
                         LInstr::LoadLocal{..} | LInstr::Load{..} =>
@@ -65,6 +74,8 @@ impl<A: Arch> Btl<A> {
                         LInstr::StoreLocal{..} | LInstr::Store{..} =>
                             used = num_mem == 0 && !load_effect,
                     }
+
+                    if num_ins > 4 { used = false; }
 
                     if let Some(dest) = instr.destination() && read.contains(dest) {
                         used = false;
@@ -81,6 +92,7 @@ impl<A: Arch> Btl<A> {
                     if used {
                         bundle.push(instr.clone());
                         avail[index] = false;
+                        num_ins += 1;
                     }
 
                     if !used { all_instr = false; }
@@ -102,7 +114,9 @@ impl<A: Arch> Btl<A> {
                         }
                         LInstr::Li(..)
                             | LInstr::La(..)
-                            | LInstr::Ls(..) => {}
+                            | LInstr::Ls(..) => {
+                            break;
+                        }
                         LInstr::LoadLocal{..}
                             | LInstr::Load{..} => {
                             if !used { load_effect = true; }
@@ -144,7 +158,7 @@ impl<A: Arch> Btl<A> {
 
     pub fn pp(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let (push, pop, slots) =
-            A::gen_layout(&self.stack, self.contains_call());
+            RvArch::gen_layout(&self.stack, self.contains_call());
 
         write!(f, "\t{push}\n")?;
 
@@ -170,31 +184,31 @@ impl<A: Arch> Btl<A> {
                     write!(f, "\t")?;
                     match instr {
                         LInstr::Operation(dest, op, args) =>
-                            _ = A::pp_op(f, dest, op, args)?,
+                            _ = RvArch::pp_op(f, dest, op, args)?,
                         LInstr::Jcc(cond, args, label) =>
-                            _ = A::pp_jcc(f, cond, args, &from_label(label))?,
+                            _ = RvArch::pp_jcc(f, cond, args, &from_label(label))?,
                         LInstr::Jump(label) =>
-                            _ = A::pp_jump(f, &from_label(label))?,
+                            _ = RvArch::pp_jump(f, &from_label(label))?,
                         LInstr::Move(dest, src) =>
-                            _ = A::pp_mv(f, dest, src)?,
+                            _ = RvArch::pp_mv(f, dest, src)?,
                         LInstr::Li(dest, src) =>
-                            _ = A::pp_from_int(f, dest, src)?,
+                            _ = RvArch::pp_from_int(f, dest, src)?,
                         LInstr::Ls(dest, src) =>
-                            _ = A::pp_from_stack(f, dest, slots[src])?,
+                            _ = RvArch::pp_from_stack(f, dest, slots[src])?,
                         LInstr::La(dest, src) =>
-                            _ = A::pp_from_addr(f, dest, &src)?,
+                            _ = RvArch::pp_from_addr(f, dest, &src)?,
                         LInstr::Call(name) =>
-                            _ = A::pp_call(f, &name)?,
+                            _ = RvArch::pp_call(f, &name)?,
                         LInstr::Return =>
-                            _ = A::pp_return(f)?,
+                            _ = RvArch::pp_return(f)?,
                         LInstr::Load{addr, dest, kind} =>
-                            _ = A::pp_load(f, dest, addr, kind)?,
+                            _ = RvArch::pp_load(f, dest, addr, kind)?,
                         LInstr::Store{addr, val, kind} =>
-                            _ = A::pp_store(f, addr, val, kind)?,
+                            _ = RvArch::pp_store(f, addr, val, kind)?,
                         LInstr::LoadLocal{addr, dest, kind} =>
-                            _ = A::pp_load_local(f, dest, slots[addr], kind)?,
+                            _ = RvArch::pp_load_local(f, dest, slots[addr], kind)?,
                         LInstr::StoreLocal{addr, val, kind} =>
-                            _ = A::pp_store_local(f, slots[addr], val, kind)?,
+                            _ = RvArch::pp_store_local(f, slots[addr], val, kind)?,
                     }
 
                     if idx == bundle.0.len() - 1 { write!(f, ";;")?; }
@@ -209,26 +223,26 @@ impl<A: Arch> Btl<A> {
     }
 }
 
-impl<A: Arch> std::fmt::Display for Btl<A> {
+impl std::fmt::Display for Btl {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.pp(f)
     }
 }
 
-pub enum BtlSection<A: Arch> {
-    Text(Btl<A>),
+pub enum BtlSection {
+    Text(Btl),
     Data(Vec<Word>),
     Bss(usize),
 }
 
 
-impl<A: Arch> BtlSection<A> {
-    pub fn as_text(&self) -> Option<&Btl<A>> {
+impl BtlSection {
+    pub fn as_text(&self) -> Option<&Btl> {
         if let Self::Text(cfg) = self {return Some(cfg);}
         return None;
     }
 
-    pub fn as_text_mut(&mut self) -> Option<&mut Btl<A>> {
+    pub fn as_text_mut(&mut self) -> Option<&mut Btl> {
         if let Self::Text(cfg) = self {return Some(cfg);}
         return None;
     }
@@ -239,13 +253,13 @@ impl<A: Arch> BtlSection<A> {
     }
 }
 
-pub struct BtlSymbolTable<A: Arch> {
-    pub symbols: HashMap<String, BtlSection<A>>,
+pub struct BtlSymbolTable {
+    pub symbols: HashMap<String, BtlSection>,
 }
 
-impl<A: Arch> BtlSymbolTable<A> {
-    pub fn new(table: LtlSymbolTable<A>) -> Self {
-        let mut symbols: HashMap<String, BtlSection<A>> = HashMap::new();
+impl BtlSymbolTable {
+    pub fn new(table: LtlSymbolTable<RvArch>) -> Self {
+        let mut symbols: HashMap<String, BtlSection> = HashMap::new();
 
         for (name, section) in table.symbols {
             match section {
@@ -263,7 +277,7 @@ impl<A: Arch> BtlSymbolTable<A> {
     }
 }
 
-impl<A: Arch> std::fmt::Display for BtlSection<A> {
+impl std::fmt::Display for BtlSection {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Bss(size) => write!(f, ".zero {size}"),
@@ -280,7 +294,7 @@ impl<A: Arch> std::fmt::Display for BtlSection<A> {
     }
 }
 
-impl<A: Arch> std::fmt::Display for BtlSymbolTable<A> {
+impl std::fmt::Display for BtlSymbolTable {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         for (symbol, section) in self.symbols.iter() {
             let is_text = matches!(section, BtlSection::Text(..));
