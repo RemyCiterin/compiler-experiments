@@ -64,6 +64,7 @@ impl Btl {
                             used = num_op < MAX_OP,
 
                         // Generic `li` and `la` instructions are encodded using two instructions
+                        // so they can't be combined with other instructions
                         LInstr::Li(..) | LInstr::La(..) =>
                             used = num_ins == 0,
 
@@ -110,17 +111,19 @@ impl Btl {
                     }
 
                     match instr {
-                        LInstr::Operation(..) => {
-                            num_op += 1;
-                        }
-                        LInstr::Move(..) => {
-                            num_op += 1;
-                        }
+                        LInstr::Operation(..)
+                        | LInstr::Ls(..)
+                        | LInstr::Move(..) =>
+                            num_op += 1,
+
+                        LInstr::Li(_, i) if rv32::check_riscv_immediate(*i) =>
+                            num_op += 1,
+
                         LInstr::Li(..)
-                            | LInstr::La(..)
-                            | LInstr::Ls(..) => {
-                            break;
+                            | LInstr::La(..) => {
+                            if used { break; }
                         }
+
                         LInstr::LoadLocal{..}
                             | LInstr::Load{..} => {
                             if !used { load_effect = true; }
@@ -131,6 +134,7 @@ impl Btl {
                             if used { num_mem += 1; }
                             store_effect = true;
                         }
+
                         LInstr::Jcc(..) => break,
                         LInstr::Return => break,
                         LInstr::Jump(_) => break,
