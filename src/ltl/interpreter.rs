@@ -209,16 +209,72 @@ impl<'a, A: Arch> Interpreter<'a, A> {
         cond.eval(args).unwrap()
     }
 
-    pub fn load(&self, addr: i32) -> i32 {
-        assert!(addr % 4 == 0);
-        self.memory[&(addr / 4)]
+    fn signed_extension_8(x: i32) -> i32 {
+        let mask = !0x255i32;
+
+        if x & (1 << 7) != 0 {
+            return x | mask;
+        } else {
+            return x & !mask;
+        }
     }
 
-    pub fn store(&mut self, addr: i32, val: i32) {
-        assert!(addr % 4 == 0);
-        self.memory.insert(addr / 4, val);
+    fn signed_extension_16(x: i32) -> i32 {
+        let mask = !0x65535i32;
+
+        if x & (1 << 15) != 0 {
+            return x | mask;
+        } else {
+            return x & !mask;
+        }
     }
 
+    pub fn load(&self, addr: i32, kind: MemopKind) -> i32 {
+        if !self.memory.contains_key(&(addr / 4)) {
+            println!("addr: {addr}");
+        }
+
+        let value = self.memory[&(addr / 4)];
+        let offset = addr % 4;
+
+        match kind {
+            MemopKind::Word => {
+                assert!(offset == 0);
+                value
+            }
+
+            MemopKind::Signed8 =>
+                Self::signed_extension_8(value >> (8 * offset)),
+
+            MemopKind::Signed16 =>
+                Self::signed_extension_16(value >> (8 * offset)),
+
+            MemopKind::Unsigned8 => {
+                assert!(addr % 2 == 0);
+                (value >> (8 * offset)) & 0x255
+            }
+
+            MemopKind::Unsigned16 => {
+                assert!(addr % 2 == 0);
+                (value >> (8 * offset)) & 0x65535
+            }
+        }
+    }
+
+    pub fn store(&mut self, addr: i32, val: i32, kind: MemopKind) {
+        let value: i32 = if let Some(x) = self.memory.get(&(addr / 4)) { *x } else { 0 };
+        let offset = addr % 4;
+
+        let data = val << (8 * offset);
+
+        let mask = match kind {
+            MemopKind::Word => -1,
+            MemopKind::Signed8 | MemopKind::Unsigned8 => 255,
+            MemopKind::Signed16 | MemopKind::Unsigned16 => 65535,
+        } << 8 * offset;
+
+        self.memory.insert(addr / 4, (data & mask) | (value & !mask));
+    }
     pub fn push(&mut self, slot: Slot, size: usize) {
         assert!(size % 4 == 0);
         self.frame.insert(slot, self.sp);
@@ -293,25 +349,25 @@ impl<'a, A: Arch> Interpreter<'a, A> {
                         self.stats_mut().non_trivial += 1;
                         self.stats_mut().branches += 1;
                     }
-                    LInstr::Load{dest, addr, ..} => {
-                        let val = self.load(self.env[addr]);
+                    LInstr::Load{dest, addr, kind} => {
+                        let val = self.load(self.env[addr], *kind);
                         self.write_var(*dest, val);
                         self.stats_mut().non_trivial += 1;
                         self.stats_mut().loads += 1;
                     }
-                    LInstr::Store{val, addr, ..} => {
-                        self.store(self.env[addr], self.env[val]);
+                    LInstr::Store{val, addr, kind} => {
+                        self.store(self.env[addr], self.env[val], *kind);
                         self.stats_mut().non_trivial += 1;
                         self.stats_mut().stores += 1;
                     }
-                    LInstr::LoadLocal{dest, addr, ..} => {
-                        let val = self.load(self.frame[addr]);
+                    LInstr::LoadLocal{dest, addr, kind} => {
+                        let val = self.load(self.frame[addr], *kind);
                         self.write_var(*dest, val);
                         self.stats_mut().non_trivial += 1;
                         self.stats_mut().loads += 1;
                     }
-                    LInstr::StoreLocal{val, addr, ..} => {
-                        self.store(self.frame[addr], self.env[val]);
+                    LInstr::StoreLocal{val, addr, kind} => {
+                        self.store(self.frame[addr], self.env[val], *kind);
                         self.stats_mut().non_trivial += 1;
                         self.stats_mut().stores += 1;
                     }
@@ -465,19 +521,71 @@ impl<'a> BtlInterpreter<'a> {
         cond.eval(args).unwrap()
     }
 
-    pub fn load(&self, addr: i32) -> i32 {
-        assert!(addr % 4 == 0);
+    fn signed_extension_8(x: i32) -> i32 {
+        let mask = !0x255i32;
 
+        if x & (1 << 7) != 0 {
+            return x | mask;
+        } else {
+            return x & !mask;
+        }
+    }
+
+    fn signed_extension_16(x: i32) -> i32 {
+        let mask = !0x65535i32;
+
+        if x & (1 << 15) != 0 {
+            return x | mask;
+        } else {
+            return x & !mask;
+        }
+    }
+
+    pub fn load(&self, addr: i32, kind: MemopKind) -> i32 {
         if !self.memory.contains_key(&(addr / 4)) {
             println!("addr: {addr}");
         }
 
-        self.memory[&(addr / 4)]
+        let value = self.memory[&(addr / 4)];
+        let offset = addr % 4;
+
+        match kind {
+            MemopKind::Word => {
+                assert!(offset == 0);
+                value
+            }
+
+            MemopKind::Signed8 =>
+                Self::signed_extension_8(value >> (8 * offset)),
+
+            MemopKind::Signed16 =>
+                Self::signed_extension_16(value >> (8 * offset)),
+
+            MemopKind::Unsigned8 => {
+                assert!(addr % 2 == 0);
+                (value >> (8 * offset)) & 0x255
+            }
+
+            MemopKind::Unsigned16 => {
+                assert!(addr % 2 == 0);
+                (value >> (8 * offset)) & 0x65535
+            }
+        }
     }
 
-    pub fn store(&mut self, addr: i32, val: i32) {
-        assert!(addr % 4 == 0);
-        self.memory.insert(addr / 4, val);
+    pub fn store(&mut self, addr: i32, val: i32, kind: MemopKind) {
+        let value: i32 = if let Some(x) = self.memory.get(&(addr / 4)) { *x } else { 0 };
+        let offset = addr % 4;
+
+        let data = val << (8 * offset);
+
+        let mask = match kind {
+            MemopKind::Word => -1,
+            MemopKind::Signed8 | MemopKind::Unsigned8 => 255,
+            MemopKind::Signed16 | MemopKind::Unsigned16 => 65535,
+        } << 8 * offset;
+
+        self.memory.insert(addr / 4, (data & mask) | (value & !mask));
     }
 
     pub fn push(&mut self, slot: Slot, size: usize) {
@@ -559,25 +667,25 @@ impl<'a> BtlInterpreter<'a> {
                             self.stats_mut().non_trivial += 1;
                             self.stats_mut().branches += 1;
                         }
-                        LInstr::Load{dest, addr, ..} => {
-                            let val = self.load(self.env[addr]);
+                        LInstr::Load{dest, addr, kind} => {
+                            let val = self.load(self.env[addr], *kind);
                             self.write_var(*dest, val);
                             self.stats_mut().non_trivial += 1;
                             self.stats_mut().loads += 1;
                         }
-                        LInstr::Store{val, addr, ..} => {
-                            self.store(self.env[addr], self.env[val]);
+                        LInstr::Store{val, addr, kind} => {
+                            self.store(self.env[addr], self.env[val], *kind);
                             self.stats_mut().non_trivial += 1;
                             self.stats_mut().stores += 1;
                         }
-                        LInstr::LoadLocal{dest, addr, ..} => {
-                            let val = self.load(self.frame[addr]);
+                        LInstr::LoadLocal{dest, addr, kind} => {
+                            let val = self.load(self.frame[addr], *kind);
                             self.write_var(*dest, val);
                             self.stats_mut().non_trivial += 1;
                             self.stats_mut().loads += 1;
                         }
-                        LInstr::StoreLocal{val, addr, ..} => {
-                            self.store(self.frame[addr], self.env[val]);
+                        LInstr::StoreLocal{val, addr, kind} => {
+                            self.store(self.frame[addr], self.env[val], *kind);
                             self.stats_mut().non_trivial += 1;
                             self.stats_mut().stores += 1;
                         }
