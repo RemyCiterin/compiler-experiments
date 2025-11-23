@@ -14,11 +14,10 @@ static const int malloc_size = 128;
 
 static int __heap_buffer[malloc_size];
 
-//static Header base;
 static Header *freep;
 
 void
-free(void *ap) __attribute__((noinline))
+free(void *ap)
 {
   Header *bp, *p;
 
@@ -41,7 +40,7 @@ free(void *ap) __attribute__((noinline))
 
 
 void*
-malloc(unsigned nbytes) __attribute__((noinline))
+malloc(unsigned nbytes)
 {
   Header *p, *prevp;
   unsigned nunits;

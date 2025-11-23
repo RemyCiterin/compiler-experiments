@@ -806,7 +806,11 @@ impl CfgBuilder {
 
         let mut ty = match self.env.get_type(base.ty) {
             Type::Pointer(ty) => *ty,
-            _ => panic!("not a pointer type {}", self.env.get_type(base.ty))
+            _ =>
+                panic!(
+                    "not a pointer type: {} at instr:\n{:?}",
+                    self.env.get_type(base.ty),
+                    instr)
         };
 
         let ptr = base.val[0];
@@ -1366,7 +1370,7 @@ impl CfgBuilder {
 
         let val = vec![self.cfg.fresh_var()];
         self.stmt.push(Instr::Move(val[0], Lit::Stack(slot)));
-        self.new_value_with(instr.result_id.unwrap(), Value{val, ty});
+        self.new_value_with(instr.result_id.unwrap(), Value{val, ty: ptr_ty});
     }
 
     pub fn gen_ptr_cast_to_generic(&mut self, instr: &Instruction) {
