@@ -173,7 +173,7 @@ fn main() {
     let btl_table = crate::ltl::bundle::BtlSymbolTable::new(ltl_table);
     write(
         format!("{btl_table}"),
-        format!("{output_dir}/{file_name}.asm")
+        format!("{output_dir}/{file_name}.vliw.s")
     );
 
     //file = std::fs::File::open(
