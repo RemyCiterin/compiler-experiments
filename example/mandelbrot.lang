@@ -16,13 +16,14 @@ mandelbrot() {
   while cy <= ymax  {
     cx = xmin;
     while cx <= xmax {
+      let stop = 0;
       x = 0;
       y = 0;
       x2 = 0;
       y2 = 0;
       iter=0;
-      while iter < maxiter {
-        if x2+y2>16384 { break; }
+      while iter < maxiter && !stop {
+        if x2+y2>16384 { stop = 1; }
         y = ((x*y)>>11)+cy;
         x = x2-y2+cx;
         x2 = (x*x)>>12;

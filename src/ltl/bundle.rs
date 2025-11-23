@@ -152,6 +152,47 @@ impl Btl {
         Self{blocks, stack}
     }
 
+    pub fn layout(&self) -> (i32, SparseSecondaryMap<Slot, i32>) {
+        let mut slots: SparseSecondaryMap<Slot, i32> = SparseSecondaryMap::new();
+        let mut stack_size: i32 = 0;
+
+        let mut num_outgoing = 0;
+        for (_, kind) in self.stack.iter() {
+            match kind {
+                SlotKind::Local(size, _align) => {
+                    stack_size += *size as i32;
+                },
+                SlotKind::Outgoing(num) =>
+                    num_outgoing = usize::max(*num + 1, num_outgoing),
+                _ => {}
+            }
+        }
+
+        stack_size += num_outgoing as i32 * 4;
+        stack_size += 4;
+
+        if stack_size % 16 != 0 {
+            stack_size += 16 - (stack_size % 16);
+        }
+
+        let mut offset: i32 = num_outgoing as i32 * 4;
+        for (slot, kind) in self.stack.iter() {
+            match kind {
+                SlotKind::Local(size, _align) => {
+                    slots.insert(slot, offset);
+                    offset += *size as i32;
+                }
+                SlotKind::Outgoing(num) =>
+                    _ = slots.insert(slot, 4 * *num as i32),
+                SlotKind::Incoming(num) =>
+                    _ = slots.insert(slot, stack_size + 4 * *num as i32),
+            }
+        }
+
+        (stack_size, slots)
+    }
+
+
     pub fn contains_call(&self) -> bool {
         for block in self.blocks.iter() {
             for bundle in block.iter() {

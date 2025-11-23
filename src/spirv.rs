@@ -129,7 +129,7 @@ pub struct Env {
     // Return the type of each global variables
     globals: Vec<Option<(Word, Vec<SWord>)>>,
 
-    variables: Vec<Vec<SWord>>,
+    variables: Vec<(String, Vec<SWord>)>,
 
     // Name of the variables and function in the program
     names: Vec<Option<String>>,
@@ -384,8 +384,8 @@ impl Env {
         let name = if let Some(name) = self.get_name(id) { name.clone() }
         else {format!("__anonymous{}", self.variables.len())};
 
-        self.add_global(id, ty, vec![SWord::Addr(name, 0)]);
-        self.variables.push(vec);
+        self.add_global(id, ty, vec![SWord::Addr(name.clone(), 0)]);
+        self.variables.push((name, vec));
     }
 
     fn add_constant(&mut self, instr: &Instruction) {
@@ -535,6 +535,8 @@ pub struct CfgBuilder {
     // Global variables and types
     env: Env,
 
+    name: String,
+
     // Associate a cfg label to each spir-v label
     labels: HashMap<Word, (Label,Label)>,
 
@@ -560,6 +562,7 @@ impl CfgBuilder {
         let label = cfg.fresh_label();
         cfg.set_block_stmt(cfg.entry(), vec![Instr::Jump(label)]);
         Self {
+            name: "".to_string(),
             cfg: cfg,
             stmt: vec![],
             labels: HashMap::new(),
@@ -803,7 +806,7 @@ impl CfgBuilder {
 
         let mut ty = match self.env.get_type(base.ty) {
             Type::Pointer(ty) => *ty,
-            _ => panic!("not a pointer type")
+            _ => panic!("not a pointer type {}", self.env.get_type(base.ty))
         };
 
         let ptr = base.val[0];
@@ -1068,6 +1071,39 @@ impl CfgBuilder {
         return ret;
     }
 
+    pub fn select(&mut self, cond: Var, lhs: Value, rhs: Value) -> Value {
+        assert!(lhs.val.len() == rhs.val.len());
+        assert!(lhs.ty == rhs.ty);
+
+        let l1 = self.cfg.fresh_label();
+        let l2 = self.cfg.fresh_label();
+
+        self.stmt.push(Instr::Branch(CCond::Nez, vec![cond], l1, l2));
+        self.finish_block();
+        self.cfg.set_block_stmt(l1, vec![Instr::Jump(l2)]);
+        self.label = l2;
+
+        let mut val = vec![];
+
+        for (l,r) in lhs.val.iter().zip(rhs.val.iter()) {
+            let id = self.cfg.fresh_var();
+            val.push(id);
+
+            self.stmt.push(Instr::Phi(id, vec![(Lit::Var(*l), l1), (Lit::Var(*r), l2)]));
+        }
+
+        return Value{val, ty: lhs.ty};
+    }
+
+    pub fn gen_select(&mut self, instr: &Instruction) {
+        let cond = self.value(instr.operands[0].unwrap_id_ref()).val[0];
+        let lhs = self.value(instr.operands[1].unwrap_id_ref());
+        let rhs = self.value(instr.operands[2].unwrap_id_ref());
+        let new_value = self.select(cond, lhs, rhs);
+
+        self.new_value_with(instr.result_id.unwrap(), new_value);
+    }
+
     pub fn logical_and(&mut self, lhs: Var, rhs: Var) -> Var {
         let ret = self.cfg.fresh_var();
         let l0 = self.label;
@@ -1109,13 +1145,6 @@ impl CfgBuilder {
 
         ret
     }
-
-    //pub fn mul_64(&mut self, lhs: Vec<Var>, rhs: Vec<Var>) -> Vec<Var> {
-    //    // (2**32 * x + y) + (2**32 * z + w) =
-    //    // 2**64 * ... + 2**32 * (x*w + z*x) + y*w
-
-    //    unimplemented!()
-    //}
 
     pub fn add_carry(&mut self, lhs: Var, rhs: Var) -> Vec<Var> {
         let ret = vec![self.cfg.fresh_var(), self.cfg.fresh_var()];
@@ -1260,6 +1289,14 @@ impl CfgBuilder {
         self.label = self.cfg.fresh_label();
     }
 
+    pub fn gen_return_value(&mut self, instr: &Instruction) {
+        let id = self.value(instr.operands[0].unwrap_id_ref()).val[0];
+        self.stmt.push(Instr::Return(id));
+        self.finish_block();
+
+        self.label = self.cfg.fresh_label();
+    }
+
     pub fn gen_branch_conditional(&mut self, exit: Label, instr: &Instruction) {
         let cond = instr.operands[0].unwrap_id_ref();
         let condition = self.to_vars(cond)[0];
@@ -1354,7 +1391,7 @@ impl CfgBuilder {
         let ret: Var;
         if let Some(id) = instr.result_id {
             let ty = instr.result_type.unwrap();
-            assert!(self.env.get_type_words(ty) == 0);
+            assert!(self.env.get_type_words(ty) < 2);
 
             ret = self.cfg.fresh_var();
             self.new_value_with(id, Value{val: vec![ret], ty});
@@ -1375,6 +1412,7 @@ impl CfgBuilder {
         print!("**********************************\nfunction: ");
 
         println!("{}", name);
+        self.name = name;
 
         for instr in fun.parameters.iter() {
             assert!(instr.class.opcode == Op::FunctionParameter);
@@ -1413,11 +1451,14 @@ impl CfgBuilder {
             first_block = false;
 
             for instr in block.instructions.iter() {
+                //println!("instr: {:?}", instr);
                 match instr.class.opcode {
                     Op::LifetimeStart | Op::LifetimeStop | Op::Nop => {}
                     Op::Phi => self.gen_phi(instr),
                     Op::Load => self.gen_load(instr),
                     Op::Return => self.gen_return(instr),
+                    Op::Unreachable => self.gen_return(instr),
+                    Op::ReturnValue => self.gen_return_value(instr),
                     Op::BranchConditional => self.gen_branch_conditional(exit, instr),
                     Op::Branch => self.gen_branch(exit, instr),
                     Op::Store => self.gen_store(instr),
@@ -1427,6 +1468,8 @@ impl CfgBuilder {
                     Op::InBoundsAccessChain | Op::AccessChain =>
                         self.gen_access_chain(instr),
                     Op::Bitcast => self.gen_bitcast(instr),
+                    Op::ConvertPtrToU => self.gen_bitcast(instr),
+                    Op::Select => self.gen_select(instr),
                     Op::IAdd |
                         Op::ISub | Op::IMul | Op::PtrEqual | Op::IEqual | Op::PtrDiff |
                         Op::INotEqual | Op::UGreaterThan | Op::SGreaterThan |
@@ -1469,9 +1512,38 @@ self.gen_ptr_cast_to_generic(instr),
             }
         }
 
-        println!("{}", self.cfg);
+        // println!("{}", self.cfg);
+        // let mut simplifier = simplify_ssa::Simplifier::new(&self.cfg);
+        // simplifier.run(&mut self.cfg);
+
+        // instcombine::combine_instructions(&mut self.cfg);
+
+        // let mut gvn = gvn::ValueTable::new();
+        // gvn.run(&mut self.cfg);
+
+        // let mut dce = dce::Dce::new();
+        // dce.run(&mut self.cfg);
+
+        // self.cfg.gc();
+        // println!("{}", self.cfg);
+
+        // let cfg =
+        //     std::mem::replace(&mut self.cfg, Cfg::new(false));
+        // let tr = crate::isle::Translator::new(cfg);
+        // let rtl = tr.translate();
+        // println!("{rtl}");
+    }
+
+    pub fn as_rtl(&mut self) -> Cfg<crate::arch::rv32::RvOp, crate::arch::rv32::RvCond> {
         let mut simplifier = simplify_ssa::Simplifier::new(&self.cfg);
         simplifier.run(&mut self.cfg);
+
+        instcombine::combine_instructions(&mut self.cfg);
+
+        let mut gvn = gvn::ValueTable::new();
+        gvn.run(&mut self.cfg);
+
+        tail_call_elim::tail_call_elim(&self.name, &mut self.cfg);
 
         instcombine::combine_instructions(&mut self.cfg);
 
@@ -1482,13 +1554,15 @@ self.gen_ptr_cast_to_generic(instr),
         dce.run(&mut self.cfg);
 
         self.cfg.gc();
-        println!("{}", self.cfg);
 
         let cfg =
             std::mem::replace(&mut self.cfg, Cfg::new(false));
-        let tr = crate::isle::Translator::new(cfg);
-        let rtl = tr.translate();
-        println!("{rtl}");
+        let mut rtl =
+            crate::arch::rv32::translate(cfg);
+
+        out_of_ssa::out_of_ssa(&mut rtl);
+
+        rtl
     }
 }
 
@@ -1513,9 +1587,35 @@ pub fn parse_spirv_spec(bytes: &[u8]) -> Module {
 
     env.build(&module.types_global_values);
 
+    let mut rtl_table: SymbolTable<crate::arch::rv32::RvOp, crate::arch::rv32::RvCond> =
+        SymbolTable{symbols: HashMap::new()};
+
+    for (name, words) in env.variables.iter() {
+        rtl_table.symbols.insert(name.clone(), Section::Data(words.clone()));
+    }
+
     for function in module.functions.iter() {
         let mut builder = CfgBuilder::new(env.clone());
         builder.build(function);
+
+        rtl_table.symbols.insert(builder.name.clone(), Section::Text(builder.as_rtl()));
+    }
+
+    let ltl_table: crate::ltl::LtlSymbolTable<crate::arch::rv32::RvArch> =
+        crate::ltl::LtlSymbolTable::new(rtl_table);
+
+    let btl_table = crate::ltl::bundle::BtlSymbolTable::new(ltl_table);
+
+    println!("btl_table: {btl_table}");
+
+    let mut interp =
+        crate::ltl::interpreter::BtlInterpreter::new(&btl_table, "interp_main".to_string());
+    interp.interpret_function();
+
+    for (name,stats) in interp.stats.iter() {
+        if stats.bundles > 0 {
+            println!("{name}: {stats}");
+        }
     }
 
     return module;

@@ -675,6 +675,7 @@ impl Translator {
         }
 
         for op in instr.destinations_mut() {
+            if !self.vars.contains_key(*op) { println!("{}", *op); }
             *op = self.vars[*op];
         }
 
@@ -709,7 +710,7 @@ impl Translator {
 
             for mi in self.instr_stmt.iter() {
                 for op in mi.operands() {
-                    self.used[op] = true;
+                    self.used.insert(op, true);
                 }
             }
 
@@ -779,7 +780,7 @@ impl Context for Translator {
         let new = self.rtl.fresh_var();
         self.used.insert(old,false);
         self.vars.insert(old, new);
-        new
+        old
     }
 
     fn destination(&mut self) -> Var {

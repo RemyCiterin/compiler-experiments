@@ -176,15 +176,23 @@ fn main() {
         format!("{output_dir}/{file_name}.vliw.s")
     );
 
-    //file = std::fs::File::open(
-    //    format!("test.spv")
-    //).unwrap();
+    let mut interp =
+        ltl::interpreter::BtlInterpreter::new(&btl_table, "main".to_string());
+    interp.interpret_function();
 
-    //let vec: Vec<u8> =
-    //    file
-    //    .bytes()
-    //    .map(|r| r.unwrap())
-    //    .collect();
+    for (name,stats) in interp.stats.iter() {
+        println!("{name}: {stats}");
+    }
 
-    //parse_spirv_spec(&vec);
+    file = std::fs::File::open(
+        format!("test.spv")
+    ).unwrap();
+
+    let vec: Vec<u8> =
+        file
+        .bytes()
+        .map(|r| r.unwrap())
+        .collect();
+
+    parse_spirv_spec(&vec);
 }

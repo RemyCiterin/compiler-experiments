@@ -60,17 +60,16 @@ eratosthene(N) {
   while i < N {
     if !buffer[i] {
       i = i + 1;
-      continue;
+    } else {
+      j = i * i;
+
+      while j < N {
+        buffer[j] = 0;
+        j = j + i;
+      }
+
+      i = i + 1;
     }
-
-    j = i * i;
-
-    while j < N {
-      buffer[j] = 0;
-      j = j + i;
-    }
-
-    i = i + 1;
   }
 }
 
