@@ -7,6 +7,7 @@ pkgs.mkShell {
     pkgs.spirv-tools
     pkgs.spirv-llvm-translator
     pkgs.llvmPackages_19.clang-unwrapped
+    pkgs.libxml2
     pkgs.llvm
     pkgs.qemu
   ];

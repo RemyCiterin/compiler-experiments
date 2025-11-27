@@ -8,5 +8,6 @@ pub mod arch;
 pub mod ltl;
 pub mod utils;
 pub mod spirv;
+pub mod llvm;
 pub mod rtl;
 pub mod isle;

@@ -9,12 +9,20 @@ example/%.s: example/%.lang
 OCL_FLAGS = \
 					 -target spir -emit-llvm -O2 -cl-std=CL3.0
 
-build/%.bc: stdlib/%.c
-	clang $(OCL_FLAGS) -Istdlib -c $< -o $@
+LL_FLAGS = -emit-llvm -O2 -target riscv32
+
+.PHONY: llvm
+llvm:
+	clang $(LL_FLAGS) -I stdlib -c stdlib/malloc.c -o build/malloc.bc
+	clang $(LL_FLAGS) -I stdlib -c test.c -o build/test.bc
+	llvm-link build/test.bc build/malloc.bc -o build/main.bc
+	llvm-dis build/main.bc > build/main.ll
+	make example/brainfuck.s
 
 .PHONY: opencl
-opencl: clean build/malloc.bc
+opencl: clean
 	# Generate the llvm bytecode for each the input files
+	clang $(OCL_FLAGS) -Istdlib -c stdlib/malloc.c -o build/malloc.bc
 	clang $(OCL_FLAGS) -c test.c \
 		-Istdlib -Lstdlib
 	# Link the llvm bytecode of all the inputs

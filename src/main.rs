@@ -184,6 +184,8 @@ fn main() {
         println!("{name}: {stats}");
     }
 
+    //crate::llvm::run();
+
     file = std::fs::File::open(
         format!("test.spv")
     ).unwrap();

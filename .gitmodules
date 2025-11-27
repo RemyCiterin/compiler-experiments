@@ -1,0 +1,3 @@
+[submodule "llvm-ir"]
+	path = llvm-ir
+	url = git@github.com:RemyCiterin/llvm-ir.git
