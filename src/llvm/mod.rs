@@ -7,7 +7,6 @@ use llvm_ir::*;
 use either::*;
 
 use crate::ssa::*;
-use crate::ast::*;
 use std::collections::HashMap;
 
 
@@ -39,6 +38,7 @@ pub fn type_shorts(types: &Types, ty: &TypeRef) -> usize {
 /// return the number of bits of an integer type
 pub fn type_bits(ty: &TypeRef) -> u32 {
     match ty.as_ref() {
+        Type::PointerType { .. } => 32,
         Type::IntegerType { bits } => *bits,
         _ => panic!("{ty} is not an integer type"),
     }
@@ -78,7 +78,7 @@ pub fn type_size(types: &Types, ty: &TypeRef) -> usize {
         Type::PointerType { .. } => 4,
         Type::IntegerType { bits } => (*bits+7) as usize / 8,
         Type::ArrayType { element_type, num_elements } =>
-            *num_elements as usize * type_alignment(types, &element_type),
+            *num_elements as usize * type_size(types, &element_type),
         Type::StructType { element_types, .. } =>
             StructLayout::size(types, element_types.as_slice()),
         Type::NamedStructType { name } => {
@@ -186,10 +186,13 @@ pub struct CfgBuilder<'a> {
 
     exits: HashMap<(Label, Label), Label>,
 
+    /// A map used to associate to each label a unique integer, used for indirect branches
     blocks_addresses: HashMap<Name, i32>,
 
+    /// A counter used to associate to each label a unique integer, used to indirect branches
     next_block_address: i32,
 
+    /// Return the name of the current LLVM block, used to compute `Constant::BlockAddress`
     current_block: Option<Name>,
 }
 
@@ -288,9 +291,9 @@ impl<'a> CfgBuilder<'a> {
     }
 
     /// Generate a constant integer
-    pub fn mk_int(&mut self, bits: usize, value: u64) -> Value {
-        let lsb: u32 = (value & ((1u64 << 32) - 1)) as u32;
-        let msb: u32 = (value >> 32) as u32;
+    pub fn mk_int(&mut self, bits: usize, int: u64) -> Value {
+        let lsb: u32 = (int & ((1u64 << 32) - 1)) as u32;
+        let msb: u32 = (int >> 32) as u32;
 
         if bits <= 32 {
             let ret = self.cfg.fresh_var();
@@ -304,6 +307,12 @@ impl<'a> CfgBuilder<'a> {
         self.stmt.push(Instr::Move(r1, Lit::Int(lsb.cast_signed())));
         self.stmt.push(Instr::Move(r2, Lit::Int(msb.cast_signed())));
         return vec![r1,r2];
+    }
+
+    pub fn mk_cst(&mut self, cst: i32) -> Var {
+        let ret = self.cfg.fresh_var();
+        self.stmt.push(Instr::Move(ret, Lit::Int(cst)));
+        return ret;
     }
 
     /// Perform a bitwise operation
@@ -325,7 +334,7 @@ impl<'a> CfgBuilder<'a> {
         assert!(lhs.len() == rhs.len());
         let mut ret = vec![];
 
-        let mut carry = self.mk_int(32, 0)[0];
+        let mut carry = self.mk_cst(0);
 
         for (x,y) in lhs.into_iter().zip(rhs.into_iter()) {
             let tmp1 = self.cfg.fresh_var();
@@ -355,7 +364,7 @@ impl<'a> CfgBuilder<'a> {
         assert!(lhs.len() == rhs.len());
         let mut ret = vec![];
 
-        let mut carry = self.mk_int(32, 0)[0];
+        let mut carry = self.mk_cst(0);
 
         for (x,y) in lhs.into_iter().zip(rhs.into_iter()) {
             let tmp1 = self.cfg.fresh_var();
@@ -372,12 +381,8 @@ impl<'a> CfgBuilder<'a> {
         ret
     }
 
-    pub fn mk_mul(&mut self, lhs: Value, rhs: Value) -> Value {
-        todo!()
-    }
-
     pub fn mk_neq(&mut self, lhs: Value, rhs: Value) -> Var {
-        let mut ret = self.mk_int(32, 0)[0];
+        let mut ret = self.mk_cst(0);
         assert!(lhs.len() == rhs.len());
 
         for (i, (x,y)) in lhs.into_iter().zip(rhs.into_iter()).enumerate() {
@@ -398,7 +403,7 @@ impl<'a> CfgBuilder<'a> {
     }
 
     pub fn mk_eq(&mut self, lhs: Value, rhs: Value) -> Var {
-        let mut ret = self.mk_int(32, 1)[0];
+        let mut ret = self.mk_cst(1);
         assert!(lhs.len() == rhs.len());
 
         for (i, (x,y)) in lhs.into_iter().zip(rhs.into_iter()).enumerate() {
@@ -420,7 +425,7 @@ impl<'a> CfgBuilder<'a> {
 
     pub fn mk_logical_not(&mut self, val: Var) -> Var {
         let ret = self.cfg.fresh_var();
-        let zero = self.mk_int(32, 0)[0];
+        let zero = self.mk_cst(0);
         self.stmt.push(Instr::Operation(ret, COp::Equal, vec![val, zero]));
         return ret;
     }
@@ -430,7 +435,7 @@ impl<'a> CfgBuilder<'a> {
         self.mk_select(lhs,
             |_| vec![rhs],
             |builder|
-                builder.mk_int(32,0),
+                vec![builder.mk_cst(0)],
         )[0]
     }
 
@@ -438,7 +443,7 @@ impl<'a> CfgBuilder<'a> {
     pub fn mk_logical_or(&mut self, lhs: Var, rhs: Var) -> Var {
         self.mk_select(lhs,
             |builder|
-                builder.mk_int(32,1),
+                vec![builder.mk_cst(1)],
             |_| vec![rhs],
         )[0]
     }
@@ -491,7 +496,7 @@ impl<'a> CfgBuilder<'a> {
     pub fn mk_uless(&mut self, equal: bool, lhs: &[Var], rhs: &[Var]) -> Var {
         assert!(lhs.len() == rhs.len());
 
-        if lhs.len() == 0 { return self.mk_int(32,if equal {1} else {0})[0]; }
+        if lhs.len() == 0 { return self.mk_cst(if equal {1} else {0}); }
 
         let l = *lhs.last().unwrap();
         let r = *rhs.last().unwrap();
@@ -515,11 +520,11 @@ impl<'a> CfgBuilder<'a> {
                     |builder|
                         vec![builder.mk_uless(equal, &lhs[0..lhs.len()-1], &rhs[0..rhs.len()-1])],
                     |builder|
-                        builder.mk_int(32, 1)
+                        vec![builder.mk_cst(1)]
                 )
             },
             |builder| {
-                builder.mk_int(32, 0)
+                vec![builder.mk_cst(0)]
             }
         )[0]
     }
@@ -527,7 +532,7 @@ impl<'a> CfgBuilder<'a> {
     pub fn mk_sless(&mut self, equal: bool, lhs: &[Var], rhs: &[Var]) -> Var {
         assert!(lhs.len() == rhs.len());
 
-        if lhs.len() == 0 { return self.mk_int(32,if equal {1} else {0})[0]; }
+        if lhs.len() == 0 { return self.mk_cst(if equal {1} else {0}); }
 
         let l = *lhs.last().unwrap();
         let r = *rhs.last().unwrap();
@@ -551,11 +556,11 @@ impl<'a> CfgBuilder<'a> {
                     |builder|
                         vec![builder.mk_uless(equal, &lhs[0..lhs.len()-1], &rhs[0..rhs.len()-1])],
                     |builder|
-                        builder.mk_int(32, 1)
+                        vec![builder.mk_cst(1)]
                 )
             },
             |builder| {
-                builder.mk_int(32, 0)
+                vec![builder.mk_cst(0)]
             }
         )[0]
     }
@@ -631,27 +636,54 @@ impl<'a> CfgBuilder<'a> {
 
     pub fn mk_zext(&mut self, mut val: Value, bits: u32) -> Value {
         while val.len() < ((bits+31) / 32) as usize {
-            val.push(self.mk_int(32, 0)[0]);
+            val.push(self.mk_cst(0));
         }
 
         val
     }
 
-    pub fn mk_sext(&mut self, mut val: Value, bits: u32) -> Value {
-        todo!()
+    pub fn mk_sext(&mut self, mut val: Value, from: u32, to: u32) -> Value {
+        // First we sign-extend the most significant word
+        let last = (from-1) as usize / 32;
+
+        let tmp1;
+
+        if from % 32 == 0 {
+            tmp1 = val[last];
+        } else {
+            // Sign extend the most significant word
+            tmp1 =self.cfg.fresh_var();
+            let tmp2 = self.cfg.fresh_var();
+            let tmp3 = self.mk_cst(32 - (from % 32) as i32);
+
+            self.stmt.push(Instr::Operation(tmp1, COp::Sll, vec![val[last], tmp3]));
+            self.stmt.push(Instr::Operation(tmp2, COp::Sra, vec![tmp1, tmp3]));
+            val[last] = tmp2;
+        }
+
+        while val.len() as u32 != (to+31) / 32 {
+            // Use the most significant bits of the most significant word to add all the others
+            let cst31 = self.mk_cst(31);
+            let dst = self.cfg.fresh_var();
+
+            self.stmt.push(Instr::Operation(dst, COp::Srl, vec![tmp1, cst31]));
+            val.push(dst);
+        }
+
+        val
     }
 
     pub fn mk_gep(&mut self, ptr: Var, ty: &TypeRef, indices: &[Operand]) -> Var {
         let rest = &indices[1..indices.len()];
         let index: Operand = indices[0].clone();
 
-        let size = self.mk_int(32, type_size(self.types, ty) as u64);
+        let size = self.mk_cst(type_size(self.types, ty) as i32);
         let mut value = self.mk_operand(&index);
         value = self.mk_truncate(value, 32);
         assert!(value.len() == 1);
 
         let tmp = self.cfg.fresh_var();
-        self.stmt.push(Instr::Operation(tmp, COp::Mul, vec![size[0], value[0]]));
+        self.stmt.push(Instr::Operation(tmp, COp::Mul, vec![size, value[0]]));
         let ret = self.mk_ptr_add(ptr, vec![tmp]);
 
         return self.mk_ptr_chain(ret, ty, rest);
@@ -668,8 +700,8 @@ impl<'a> CfgBuilder<'a> {
                 let idx = operand_as_int(index).unwrap();
 
                 let offset =
-                    self.mk_int(32, layout.offsets[idx as usize] as u64);
-                let ret = self.mk_ptr_add(ptr, offset);
+                    self.mk_cst(layout.offsets[idx as usize] as i32);
+                let ret = self.mk_ptr_add(ptr, vec![offset]);
 
                 return
                     self.mk_ptr_chain(ret,
@@ -677,7 +709,7 @@ impl<'a> CfgBuilder<'a> {
             }
             Type::ArrayType { element_type, .. } => {
                 let size =
-                    self.mk_int(32, type_size(self.types, element_type) as u64)[0];
+                    self.mk_cst(type_size(self.types, element_type) as i32);
 
                 let tmp = self.cfg.fresh_var();
 
@@ -707,7 +739,7 @@ impl<'a> CfgBuilder<'a> {
     pub fn mk_bitcast(&mut self, mut val: Value, words: usize) -> Value {
         while val.len() > words { val.pop(); }
         while val.len() < words {
-            val.push(self.mk_int(32, 0)[0]);
+            val.push(self.mk_cst(0));
         }
 
         val
@@ -812,7 +844,7 @@ impl<'a> CfgBuilder<'a> {
                 vec![self.mk_gep(addr[0], &gep.indexed_type, &indices)]
             }
             Constant::Null(..) =>
-                self.mk_int(32, 0),
+                vec![self.mk_cst(0)],
             Constant::Undef(ty) =>
                 self.mk_undef(type_words(self.types, ty)),
             Constant::Poison(ty) =>
@@ -825,8 +857,8 @@ impl<'a> CfgBuilder<'a> {
                 panic!("A global reference must be a string"),
             Constant::BlockAddress => {
                 let id = self.current_block.clone().unwrap();
-                let val = self.block_address(id) as u64;
-                self.mk_int(32, val)
+                let val = self.block_address(id) as i32;
+                vec![self.mk_cst(val)]
             }
             Constant::Struct {name, values, ..} =>
                 todo!(),
@@ -886,8 +918,8 @@ impl<'a> CfgBuilder<'a> {
 
                 // Increment the pointer if necessary
                 if i != 0 || j != 0 {
-                    let cst = self.mk_int(32, elem_size as u64);
-                    pointer = self.mk_ptr_add(pointer, cst);
+                    let cst = self.mk_cst(elem_size as i32);
+                    pointer = self.mk_ptr_add(pointer, vec![cst]);
                 }
 
                 self.stmt.push(
@@ -928,8 +960,8 @@ impl<'a> CfgBuilder<'a> {
 
                 // Increment the pointer if necessary
                 if i != 0 || j != 0 {
-                    let cst = self.mk_int(32, elem_size as u64);
-                    pointer = self.mk_ptr_add(pointer, cst);
+                    let cst = self.mk_cst(elem_size as i32);
+                    pointer = self.mk_ptr_add(pointer, vec![cst]);
                 }
 
                 let dest = if j == 0 {value} else {self.cfg.fresh_var()};
@@ -945,7 +977,7 @@ impl<'a> CfgBuilder<'a> {
                 if j != 0 {
                     let tmp = self.cfg.fresh_var();
                     let ret = self.cfg.fresh_var();
-                    let cst = self.mk_int(32, (elem_size * j * 8) as u64)[0];
+                    let cst = self.mk_cst((elem_size * j * 8) as i32);
                     self.stmt.push(Instr::Operation(tmp, COp::Srl, vec![dest, cst]));
                     self.stmt.push(Instr::Operation(ret, COp::Or, vec![tmp, value]));
                     value = ret;
@@ -999,8 +1031,9 @@ impl<'a> CfgBuilder<'a> {
 
             Instruction::SExt(op) => {
                 let op0: Value = self.mk_operand(&op.operand);
-                let bits = type_bits(&op.to_type);
-                let ret: Value = self.mk_sext(op0, bits);
+                let to = type_bits(&op.to_type);
+                let from = type_bits(&op.operand.get_type(self.types));
+                let ret: Value = self.mk_sext(op0, from, to);
                 self.new_value_with(op.dest.clone(), ret);
             }
 
@@ -1025,7 +1058,7 @@ impl<'a> CfgBuilder<'a> {
                 let op1: Value = self.mk_operand(&op.operand1);
                 let mut ret: Value = self.mk_add(op0, op1);
                 let bits = type_bits(&op.operand0.get_type(self.types));
-                if !op.nuw && !op .nsw { ret = self.mk_truncate(ret, bits); }
+                ret = self.mk_truncate(ret, bits);
                 self.new_value_with(op.dest.clone(), ret);
             }
 
@@ -1034,7 +1067,7 @@ impl<'a> CfgBuilder<'a> {
                 let op1: Value = self.mk_operand(&op.operand1);
                 let mut ret: Value = self.mk_sub(op0, op1);
                 let bits = type_bits(&op.operand0.get_type(self.types));
-                if !op.nuw && !op .nsw { ret = self.mk_truncate(ret, bits); }
+                ret = self.mk_truncate(ret, bits);
                 self.new_value_with(op.dest.clone(), ret);
             }
 
@@ -1043,7 +1076,7 @@ impl<'a> CfgBuilder<'a> {
                 let op1: Value = self.mk_operand(&op.operand1);
                 let mut ret: Value = self.mk_mul(op0, op1);
                 let bits = type_bits(&op.operand0.get_type(self.types));
-                if !op.nuw && !op .nsw { ret = self.mk_truncate(ret, bits); }
+                ret = self.mk_truncate(ret, bits);
                 self.new_value_with(op.dest.clone(), ret);
             }
 
@@ -1097,8 +1130,25 @@ impl<'a> CfgBuilder<'a> {
             }
 
             Instruction::ICmp(op) => {
-                let op0: Value = self.mk_operand(&op.operand0);
-                let op1: Value = self.mk_operand(&op.operand1);
+                let mut op0: Value = self.mk_operand(&op.operand0);
+                let mut op1: Value = self.mk_operand(&op.operand1);
+                let bits = type_bits(&op.operand0.get_type(self.types));
+                let upper = ((bits+31)/32) * 32;
+
+                // Signed comparison of integers is only possible
+                // if those integers are sign-extended
+                match op.predicate {
+                    IntPredicate::SGT
+                        | IntPredicate::SGE
+                        | IntPredicate::SLT
+                        | IntPredicate::SLE
+                        => {
+                            op0 = self.mk_sext(op0, bits, upper);
+                            op1 = self.mk_sext(op1, bits, upper);
+                        }
+                    _ => {}
+                }
+
                 let ret = self.mk_icmp(op.predicate, op0, op1);
                 self.new_value_with(op.dest.clone(), vec![ret]);
             }
@@ -1108,7 +1158,7 @@ impl<'a> CfgBuilder<'a> {
                 let op1: Value = self.mk_operand(&op.operand1);
                 let mut ret: Value = self.mk_sll(op0, op1);
                 let bits = type_bits(&op.operand0.get_type(self.types));
-                if !op.nuw && !op .nsw { ret = self.mk_truncate(ret, bits); }
+                ret = self.mk_truncate(ret, bits);
                 self.new_value_with(op.dest.clone(), ret);
             }
 
@@ -1260,7 +1310,7 @@ impl<'a> CfgBuilder<'a> {
     pub fn mk_sll(&mut self, mut lhs: Value, rhs: Value) -> Value {
         if lhs.len() != 1 {
             lhs.extend(&rhs);
-            lhs.insert(0, self.mk_int(32, rhs.len() as u64)[0]);
+            lhs.insert(0, self.mk_cst(rhs.len() as i32));
             return self.mk_custom_intrinsic("__sll", rhs.len()+1, lhs);
         }
 
@@ -1272,7 +1322,7 @@ impl<'a> CfgBuilder<'a> {
     pub fn mk_sra(&mut self, mut lhs: Value, rhs: Value) -> Value {
         if lhs.len() != 1 {
             lhs.extend(&rhs);
-            lhs.insert(0, self.mk_int(32, rhs.len() as u64)[0]);
+            lhs.insert(0, self.mk_cst(rhs.len() as i32));
             return self.mk_custom_intrinsic("__sra", rhs.len()+1, lhs);
         }
 
@@ -1284,7 +1334,7 @@ impl<'a> CfgBuilder<'a> {
     pub fn mk_srl(&mut self, mut lhs: Value, rhs: Value) -> Value {
         if lhs.len() != 1 {
             lhs.extend(&rhs);
-            lhs.insert(0, self.mk_int(32, rhs.len() as u64)[0]);
+            lhs.insert(0, self.mk_cst(rhs.len() as i32));
             return self.mk_custom_intrinsic("__srl", rhs.len()+1, lhs);
         }
 
@@ -1293,27 +1343,40 @@ impl<'a> CfgBuilder<'a> {
         vec![ret]
     }
 
+
+    pub fn mk_mul(&mut self, mut lhs: Value, rhs: Value) -> Value {
+        if lhs.len() != 1 {
+            lhs.extend(&rhs);
+            lhs.insert(0, self.mk_cst(rhs.len() as i32));
+            return self.mk_custom_intrinsic("__mul", rhs.len()+1, lhs);
+        }
+
+        let ret = self.cfg.fresh_var();
+        self.stmt.push(Instr::Operation(ret, COp::Mul, vec![lhs[0], rhs[0]]));
+        vec![ret]
+    }
+
     pub fn mk_udiv(&mut self, mut lhs: Value, rhs: Value) -> Value {
         lhs.extend(&rhs);
-        lhs.insert(0, self.mk_int(32, rhs.len() as u64)[0]);
+        lhs.insert(0, self.mk_cst(rhs.len() as i32));
         return self.mk_custom_intrinsic("__udiv", rhs.len()+1, lhs);
     }
 
     pub fn mk_sdiv(&mut self, mut lhs: Value, rhs: Value) -> Value {
         lhs.extend(&rhs);
-        lhs.insert(0, self.mk_int(32, rhs.len() as u64)[0]);
+        lhs.insert(0, self.mk_cst(rhs.len() as i32));
         return self.mk_custom_intrinsic("__sdiv", rhs.len()+1, lhs);
     }
 
     pub fn mk_urem(&mut self, mut lhs: Value, rhs: Value) -> Value {
         lhs.extend(&rhs);
-        lhs.insert(0, self.mk_int(32, rhs.len() as u64)[0]);
+        lhs.insert(0, self.mk_cst(rhs.len() as i32));
         return self.mk_custom_intrinsic("__urem", rhs.len()+1, lhs);
     }
 
     pub fn mk_srem(&mut self, mut lhs: Value, rhs: Value) -> Value {
         lhs.extend(&rhs);
-        lhs.insert(0, self.mk_int(32, rhs.len() as u64)[0]);
+        lhs.insert(0, self.mk_cst(rhs.len() as i32));
         return self.mk_custom_intrinsic("__srem", rhs.len()+1, lhs);
     }
 
@@ -1324,7 +1387,7 @@ impl<'a> CfgBuilder<'a> {
             Terminator::Ret(op) => {
                 match &op.return_operand {
                     None => {
-                        let zero = self.mk_int(32, 0)[0];
+                        let zero = self.mk_cst(0);
                         self.stmt.push(Instr::Return(zero));
                         self.finish_block();
                     }
@@ -1357,7 +1420,7 @@ impl<'a> CfgBuilder<'a> {
             }
 
             Terminator::Unreachable(..) => {
-                let zero = self.mk_int(32, 0)[0];
+                let zero = self.mk_cst(0);
                 self.stmt.push(Instr::Return(zero));
                 self.finish_block();
             }
@@ -1376,7 +1439,7 @@ impl<'a> CfgBuilder<'a> {
                     } else {
                         let tmp = self.cfg.fresh_var();
                         let next = self.cfg.fresh_label();
-                        let val = self.mk_int(32, v as u64)[0];
+                        let val = self.mk_cst(v as i32);
                         self.stmt.push(Instr::Operation(tmp, COp::Sub, vec![id, val]));
                         self.stmt.push(Instr::Branch(CCond::Nez, vec![tmp], next, l));
                         self.finish_block();

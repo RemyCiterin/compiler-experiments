@@ -8,8 +8,6 @@ use builder;
 
 use ssa::*;
 
-use spirv::*;
-
 pub fn into_ssa(table: &mut ssa::SymbolTable<COp, CCond>) {
     for (_, section) in table.symbols.iter_mut() {
         match section {
@@ -184,17 +182,17 @@ fn main() {
         println!("{name}: {stats}");
     }
 
-    //crate::llvm::run();
+    crate::frontend::llvm::run();
 
-    file = std::fs::File::open(
-        format!("test.spv")
-    ).unwrap();
+    //file = std::fs::File::open(
+    //    format!("test.spv")
+    //).unwrap();
 
-    let vec: Vec<u8> =
-        file
-        .bytes()
-        .map(|r| r.unwrap())
-        .collect();
+    //let vec: Vec<u8> =
+    //    file
+    //    .bytes()
+    //    .map(|r| r.unwrap())
+    //    .collect();
 
-    parse_spirv_spec(&vec);
+    //crate::spirv::parse_spirv_spec(&vec);
 }

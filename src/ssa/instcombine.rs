@@ -236,6 +236,10 @@ pub fn combine_instructions(cfg: &mut Cfg<COp, CCond>) {
             dest => Instr::Operation(dest, COp::ULessEqual, vec![x, y])
         ),
 
+        // Need to read imm in the resulting instruction
+        //op_rule!( (Sll ( Sra ( Sll (reg x) imm ) imm ) imm), true,
+        //    dest => Instr::Operation(dest, COp::Sll, vec![x, imm])
+        //),
 
         op_rule!(
             ( Equal 0 ( LessThan (reg x) (reg y) ) ), true,
