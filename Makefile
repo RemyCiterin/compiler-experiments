@@ -19,6 +19,12 @@ llvm:
 	llvm-dis build/main.bc > build/main.ll
 	make example/brainfuck.s
 
+.PHONY: zig
+zig:
+	cp example/zig/test.bc build/main.bc
+	cp example/zig/test.ll build/main.ll
+	make example/brainfuck.s
+
 .PHONY: opencl
 opencl: clean
 	# Generate the llvm bytecode for each the input files

@@ -1,3 +1,14 @@
+//! TODO:
+//!     - alloca
+//!     - insertvalue
+//!     - extractvalue
+//!     - constant struct
+//!     - constant array
+//!     - non-string global reference
+//!     - initialize global variables
+//!     - llvm intrisics
+//!     - exceptions handling
+
 use llvm_ir::module::Module;
 use llvm_ir::predicates::*;
 use llvm_ir::constant::*;
@@ -165,6 +176,8 @@ pub struct CfgBuilder<'a> {
 
     types: &'a Types,
 
+    module: &'a Module,
+
     exits: HashMap<(Label, Label), Label>,
 
     /// A map used to associate to each label a unique integer, used for indirect branches
@@ -184,6 +197,7 @@ impl<'a> CfgBuilder<'a> {
 
         Self {
             cfg,
+            module,
             types: &module.types,
             labels: HashMap::new(),
             names: HashMap::new(),
@@ -502,17 +516,27 @@ impl<'a> CfgBuilder<'a> {
                 self.mk_zero(type_bits(self.types, ty)),
             Constant::GlobalReference{name: Name::Name(name), ..} =>
                 self.mk_global_reference(name.to_string()),
-            Constant::GlobalReference{name: Name::Number(..), ..} =>
-                panic!("A global reference must be a string"),
+            Constant::GlobalReference{name, ..} => {
+                println!("name: {name}");
+                let alias = self.module.get_global_var_by_name(name);
+                //self.mk_constant(&alias.unwrap().)
+                println!("{:?}", alias);
+                //panic!()
+                self.mk_uint(32, 0)
+            }
             Constant::BlockAddress => {
                 let id = self.current_block.clone().unwrap();
                 let val = self.block_address(id) as usize;
                 self.mk_uint(32, val)
             }
-            Constant::Struct {name, values, ..} =>
-                todo!(),
-            Constant::Array { element_type, elements } =>
-                todo!(),
+            Constant::Struct {name, values, ..} => {
+                println!("TODO: add struct constants");
+                self.mk_uint(32, 0)
+            }
+            Constant::Array { element_type, elements } => {
+                println!("TODO: add array constants");
+                self.mk_uint(32, 0)
+            }
             Constant::TokenNone =>
                 todo!(),
             Constant::Vector(..) =>
@@ -1003,7 +1027,7 @@ pub fn run() {
 
     for fun in module.functions.iter() {
         if fun.basic_blocks.len() == 0 { continue; }
-        println!("\n\n\n====================== {} ======================", fun.name);
+        println!("\n\n\n============== {} ==============", fun.name);
 
         let mut builder = CfgBuilder::new(&module);
         let begin_fun = builder.label(fun.basic_blocks[0].name.clone());

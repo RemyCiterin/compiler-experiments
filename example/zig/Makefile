@@ -1,6 +1,6 @@
 
 TARGT = -target riscv32-freestanding-none
-OPT = # -O ReleaseFast
+OPT = -O ReleaseFast
 
 .PHONY: all
 all:
