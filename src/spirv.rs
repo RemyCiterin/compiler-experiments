@@ -655,19 +655,6 @@ impl CfgBuilder {
     }
 
     // Sign-extend the 8 less significant bits of an integer
-    pub fn sign_extend(&mut self, x: Var) -> Var {
-        let cst24 = self.cfg.fresh_var();
-        let y = self.cfg.fresh_var();
-        let z = self.cfg.fresh_var();
-
-        self.stmt.push(Instr::Move(cst24, Lit::Int(24)));
-        self.stmt.push(Instr::Operation(y, COp::Sll, vec![x, cst24]));
-        self.stmt.push(Instr::Operation(z, COp::Sra, vec![y, cst24]));
-
-        return z;
-    }
-
-    // Sign-extend the 8 less significant bits of an integer
     pub fn sign_extend_8(&mut self, x: Var) -> Var {
         let cst24 = self.cfg.fresh_var();
         let y = self.cfg.fresh_var();
@@ -790,7 +777,7 @@ impl CfgBuilder {
         let mut val = value.val;
 
         while val.len() < self.env.get_type_words(ty) {
-            val.push(self.load_imm(0));
+            val.push(self.mk_i32(0));
         }
 
         while val.len() > self.env.get_type_words(ty) {
@@ -923,14 +910,14 @@ impl CfgBuilder {
         self.finish_block();
     }
 
-    pub fn load_imm(&mut self, imm: i32) -> Var {
+    pub fn mk_i32(&mut self, imm: i32) -> Var {
        let cst = self.cfg.fresh_var();
        self.stmt.push(Instr::Move(cst, Lit::Int(imm)));
        return cst;
     }
 
     pub fn add_imm(&mut self, pointer: Var, imm: i32) -> Var {
-       let cst = self.load_imm(imm);
+       let cst = self.mk_i32(imm);
        let new_pointer = self.cfg.fresh_var();
        self.stmt.push(
            Instr::Operation(new_pointer, COp::PtrAdd, vec![pointer, cst]));
@@ -973,7 +960,7 @@ impl CfgBuilder {
                 if j != 0 {
                     let tmp = self.cfg.fresh_var();
                     let ret = self.cfg.fresh_var();
-                    let cst = self.load_imm((elem_size * j * 8) as i32);
+                    let cst = self.mk_i32((elem_size * j * 8) as i32);
                     self.stmt.push(Instr::Operation(tmp, COp::Srl, vec![dest, cst]));
                     self.stmt.push(Instr::Operation(ret, COp::Or, vec![tmp, value]));
                     value = ret;
@@ -1060,7 +1047,7 @@ impl CfgBuilder {
         self.store(pointer, object.val, bytes, align);
     }
 
-    pub fn logical_or(&mut self, lhs: Var, rhs: Var) -> Var {
+    pub fn mk_lor(&mut self, lhs: Var, rhs: Var) -> Var {
         let ret = self.cfg.fresh_var();
         let l0 = self.label;
         let l1 = self.cfg.fresh_label();
@@ -1099,16 +1086,56 @@ impl CfgBuilder {
         return Value{val, ty: lhs.ty};
     }
 
-    pub fn gen_select(&mut self, instr: &Instruction) {
-        let cond = self.value(instr.operands[0].unwrap_id_ref()).val[0];
-        let lhs = self.value(instr.operands[1].unwrap_id_ref());
-        let rhs = self.value(instr.operands[2].unwrap_id_ref());
-        let new_value = self.select(cond, lhs, rhs);
+    pub fn mk_select<F1,F2>(&mut self, cond: Var, f1: F1, f2: F2) -> Value
+    where F1: FnOnce(&mut Self) -> Value, F2: FnOnce(&mut Self) -> Value {
 
-        self.new_value_with(instr.result_id.unwrap(), new_value);
+        let t_begin = self.cfg.fresh_label();
+        let e_begin = self.cfg.fresh_label();
+        let join = self.cfg.fresh_label();
+
+        self.stmt.push(Instr::Branch(CCond::Nez, vec![cond], t_begin, e_begin));
+        self.finish_block();
+
+        self.label = t_begin;
+        let v1 = f1(self);
+        let t_end = self.label;
+        self.stmt.push(Instr::Jump(join));
+        self.finish_block();
+
+        self.label = e_begin;
+        let v2 = f2(self);
+        let e_end = self.label;
+        self.stmt.push(Instr::Jump(join));
+        self.finish_block();
+
+        self.label = join;
+
+        let mut ret = vec![];
+        assert!(v1.ty == v2.ty);
+
+        for (x,y) in v1.val.into_iter().zip(v2.val.into_iter()) {
+            let dest = self.cfg.fresh_var();
+            self.stmt.push(Instr::Phi(dest, vec![(Lit::Var(x), t_end), (Lit::Var(y), e_end)]));
+            ret.push(dest);
+        }
+
+        Value{val: ret, ty: v1.ty}
     }
 
-    pub fn logical_and(&mut self, lhs: Var, rhs: Var) -> Var {
+
+    pub fn gen_select(&mut self, instr: &Instruction) {
+        let cond = self.value(instr.operands[0].unwrap_id_ref()).val[0];
+        let op1 = instr.operands[1].unwrap_id_ref();
+        let op2 = instr.operands[2].unwrap_id_ref();
+
+        let ret =
+            self.mk_select(cond,
+                |builder| builder.value(op1),
+                |builder| builder.value(op2));
+        self.new_value_with(instr.result_id.unwrap(), ret);
+    }
+
+    pub fn mk_land(&mut self, lhs: Var, rhs: Var) -> Var {
         let ret = self.cfg.fresh_var();
         let l0 = self.label;
         let l1 = self.cfg.fresh_label();
@@ -1124,7 +1151,7 @@ impl CfgBuilder {
         return ret;
     }
 
-    pub fn add_64(&mut self, lhs: Vec<Var>, rhs: Vec<Var>) -> Vec<Var> {
+    pub fn mk_add64(&mut self, lhs: Vec<Var>, rhs: Vec<Var>) -> Vec<Var> {
         let ret = vec![self.cfg.fresh_var(), self.cfg.fresh_var()];
         let tmp1 = self.cfg.fresh_var();
         let tmp2 = self.cfg.fresh_var();
@@ -1137,7 +1164,45 @@ impl CfgBuilder {
         ret
     }
 
-    pub fn sub_64(&mut self, lhs: Vec<Var>, rhs: Vec<Var>) -> Vec<Var> {
+    pub fn mk_add32(&mut self, lhs: Vec<Var>, rhs: Vec<Var>) -> Vec<Var> {
+        let ret = vec![self.cfg.fresh_var()];
+        self.stmt.push(Instr::Operation(ret[0], COp::Add, vec![lhs[0],rhs[0]]));
+        ret
+    }
+
+    pub fn mk_add(&mut self, lhs: Value, rhs: Value) -> Value {
+        let ty = lhs.ty;
+
+        match self.env.get_type(ty) {
+            Type::I64 => Value{val: self.mk_add64(lhs.val, rhs.val), ty},
+            Type::U64 => Value{val: self.mk_add64(lhs.val, rhs.val), ty},
+            Type::I32 => Value{val: self.mk_add32(lhs.val, rhs.val), ty},
+            Type::U32 => Value{val: self.mk_add32(lhs.val, rhs.val), ty},
+            Type::I16 => {
+                let ret = vec![self.cfg.fresh_var()];
+                self.stmt.push(Instr::Operation(ret[0], COp::Add, vec![lhs.val[0],rhs.val[0]]));
+                Value{val: vec![self.sign_extend_16(ret[0])], ty}
+            }
+            Type::U16 => {
+                let ret = vec![self.cfg.fresh_var()];
+                self.stmt.push(Instr::Operation(ret[0], COp::Add, vec![lhs.val[0],rhs.val[0]]));
+                Value{val: vec![self.zero_extend_16(ret[0])], ty}
+            }
+            Type::I8 => {
+                let ret = vec![self.cfg.fresh_var()];
+                self.stmt.push(Instr::Operation(ret[0], COp::Add, vec![lhs.val[0],rhs.val[0]]));
+                Value{val: vec![self.sign_extend_8(ret[0])], ty}
+            }
+            Type::U8 => {
+                let ret = vec![self.cfg.fresh_var()];
+                self.stmt.push(Instr::Operation(ret[0], COp::Add, vec![lhs.val[0],rhs.val[0]]));
+                Value{val: vec![self.zero_extend_8(ret[0])], ty}
+            }
+            t => panic!("{t} doesn't support add instruction"),
+        }
+    }
+
+    pub fn mk_sub64(&mut self, lhs: Vec<Var>, rhs: Vec<Var>) -> Vec<Var> {
         let ret = vec![self.cfg.fresh_var(), self.cfg.fresh_var()];
         let tmp1 = self.cfg.fresh_var();
         let tmp2 = self.cfg.fresh_var();
@@ -1150,20 +1215,49 @@ impl CfgBuilder {
         ret
     }
 
-    pub fn add_carry(&mut self, lhs: Var, rhs: Var) -> Vec<Var> {
-        let ret = vec![self.cfg.fresh_var(), self.cfg.fresh_var()];
-
-        self.stmt.push(Instr::Operation(ret[0], COp::Add, vec![lhs,rhs]));
-        self.stmt.push(Instr::Operation(ret[1], COp::ULessThan, vec![ret[0], lhs]));
-
+    pub fn mk_sub32(&mut self, lhs: Vec<Var>, rhs: Vec<Var>) -> Vec<Var> {
+        let ret = vec![self.cfg.fresh_var()];
+        self.stmt.push(Instr::Operation(ret[0], COp::Sub, vec![lhs[0],rhs[0]]));
         ret
+    }
+
+    pub fn mk_sub(&mut self, lhs: Value, rhs: Value) -> Value {
+        let ty = lhs.ty;
+
+        match self.env.get_type(ty) {
+            Type::I64 => Value{val: self.mk_sub64(lhs.val, rhs.val), ty},
+            Type::U64 => Value{val: self.mk_sub64(lhs.val, rhs.val), ty},
+            Type::I32 => Value{val: self.mk_sub32(lhs.val, rhs.val), ty},
+            Type::U32 => Value{val: self.mk_sub32(lhs.val, rhs.val), ty},
+            Type::I16 => {
+                let ret = vec![self.cfg.fresh_var()];
+                self.stmt.push(Instr::Operation(ret[0], COp::Sub, vec![lhs.val[0],rhs.val[0]]));
+                Value{val: vec![self.sign_extend_16(ret[0])], ty}
+            }
+            Type::U16 => {
+                let ret = vec![self.cfg.fresh_var()];
+                self.stmt.push(Instr::Operation(ret[0], COp::Sub, vec![lhs.val[0],rhs.val[0]]));
+                Value{val: vec![self.zero_extend_16(ret[0])], ty}
+            }
+            Type::I8 => {
+                let ret = vec![self.cfg.fresh_var()];
+                self.stmt.push(Instr::Operation(ret[0], COp::Sub, vec![lhs.val[0],rhs.val[0]]));
+                Value{val: vec![self.sign_extend_8(ret[0])], ty}
+            }
+            Type::U8 => {
+                let ret = vec![self.cfg.fresh_var()];
+                self.stmt.push(Instr::Operation(ret[0], COp::Sub, vec![lhs.val[0],rhs.val[0]]));
+                Value{val: vec![self.zero_extend_8(ret[0])], ty}
+            }
+            t => panic!("{t} doesn't support add instruction"),
+        }
     }
 
     pub fn small_unop(&mut self, op: Op, arg: Var, size: usize, signed: bool) -> Var {
         let ret = self.cfg.fresh_var();
         match op {
             Op::LogicalNot => {
-                let cst1 = self.load_imm(1);
+                let cst1 = self.mk_i32(1);
                 _ = self.stmt.push(Instr::Operation(ret, COp::ULessThan, vec![arg, cst1]));
             }
             Op::Not =>
@@ -1231,8 +1325,8 @@ impl CfgBuilder {
                 _ = self.stmt.push(Instr::Operation(ret, COp::Equal, vec![lhs,rhs])),
             Op::LogicalNotEqual =>
                 _ = self.stmt.push(Instr::Operation(ret, COp::NotEqual, vec![lhs,rhs])),
-            Op::LogicalOr => ret = self.logical_or(lhs, rhs),
-            Op::LogicalAnd => ret = self.logical_and(lhs, rhs),
+            Op::LogicalOr => ret = self.mk_lor(lhs, rhs),
+            Op::LogicalAnd => ret = self.mk_land(lhs, rhs),
             _ => todo!()
         }
 

@@ -10,7 +10,7 @@ union header {
 
 typedef union header Header;
 
-static const int __malloc_size = 128;
+static const int __malloc_size = 1024;
 
 static int __malloc_buffer[__malloc_size];
 
