@@ -91,6 +91,7 @@ impl std::fmt::Display for Binop {
 pub enum Instr {
     Binop{ dest: Ref, ty: TYPE, lhs: Ref, binop: Binop, rhs: Ref },
     Jump(Label),
+    Undef{ dest: Ref, ty: TYPE },
     Move{ dest: Ref, ty: TYPE, value: Ref },
     SExt{ dest: Ref, ty: TYPE, value: Ref },
     ZExt{ dest: Ref, ty: TYPE, value: Ref },
@@ -98,7 +99,7 @@ pub enum Instr {
     SetBits{ dest: Ref, ty: TYPE, value: Ref, item: Ref, start: usize },
     Symbol{ dest: Ref, ty: TYPE, value: String },
     Branch(Ref, Label, Label),
-    Return(Ref),
+    Return(Option<Ref>),
     Call{ dest: Ref, ty: TYPE, func: Ref, args: Vec<Ref> },
     Constant{ dest: Ref, ty: TYPE, value: usize },
     Phi{ dest: Ref, ty: TYPE, args: Vec<(Ref, Label)> },
@@ -121,6 +122,8 @@ impl std::fmt::Display for Instr {
         match self {
             Self::Binop { dest, binop, lhs, rhs, ty } =>
                 write!(f, "{dest} = {} {ty} {lhs}, {rhs}", binop),
+            Self::Undef { dest, ty } =>
+                write!(f, "{dest} = undef {ty}"),
             Self::Jump(l) =>
                 write!(f, "jump {l}"),
             Self::Move { dest, value, ty } =>
@@ -130,9 +133,9 @@ impl std::fmt::Display for Instr {
             Self::ZExt { dest, ty, value } =>
                 write!(f, "{dest} = zext {}, {value}", ty),
             Self::GetBits { dest, ty, value, start } =>
-                write!(f, "{dest} = get_bits {ty} {value}, {}, {}", start, start+ty.bits),
+                write!(f, "{dest} = get_bits {ty} {value}, {}", start),
             Self::SetBits { dest, ty, value, item, start } =>
-                write!(f, "{dest} = set_bits {ty} {value}, {item}, {}, {}", start, start+ty.bits),
+                write!(f, "{dest} = set_bits {ty} {value}, {item}, {}", start),
             Self::Symbol { dest, ty, value } =>
                 write!(f, "{dest} = symbol {ty} {value}"),
             Self::Load { dest, ty, addr, volatile: _, align } =>
@@ -156,8 +159,10 @@ impl std::fmt::Display for Instr {
             }
             Self::Branch(cond, l1, l2) =>
                 write!(f, "branch {cond}, {l1}, {l2}"),
-            Self::Return(value) =>
+            Self::Return(Some(value)) =>
                 write!(f, "return {value}"),
+            Self::Return(None) =>
+                write!(f, "return"),
             Self::Constant { dest, ty, value } =>
                 write!(f, "{dest} = const {ty} {value}"),
         }
@@ -178,6 +183,7 @@ impl Instr {
                 | Instr::Load{ty, ..}
                 | Instr::SExt{ty, ..}
                 | Instr::ZExt{ty, ..}
+                | Instr::Undef {ty, ..}
                 => *ty,
             Instr::Branch(..)
                 | Instr::Return(..)
@@ -200,6 +206,7 @@ impl Instr {
                 | Instr::SExt{dest, ..}
                 | Instr::ZExt{dest, ..}
                 | Instr::Call{dest, ..}
+                | Instr::Undef{dest, ..}
                 => Some(*dest),
             Instr::Branch(..)
                 | Instr::Return(..)
@@ -222,7 +229,7 @@ pub enum RefKind {
     Arg(usize),
 
     /// The variable is a stack variable
-    Slot,
+    Slot(usize, usize),
 
     /// The variable is define at a given position
     Local(Label, usize),
@@ -280,8 +287,8 @@ impl Builder {
         self.vars.insert(RefData{ty, kind: RefKind::Undef})
     }
 
-    pub fn fresh_slot(&mut self, ty: TYPE) -> Ref {
-        self.vars.insert(RefData{ty, kind: RefKind::Slot})
+    pub fn fresh_slot(&mut self, size: usize, align: usize) -> Ref {
+        self.vars.insert(RefData{ty: U32, kind: RefKind::Slot(size, align)})
     }
 
     pub fn fresh_arg(&mut self, ty: TYPE) -> Ref {
@@ -299,17 +306,7 @@ impl Builder {
     }
 
     pub fn push(&mut self, instr: Instr) {
-        match instr {
-            Instr::GetBits { ty, value, start, .. }
-                if start == 0 && ty == self[value] => {}
-            Instr::SetBits { ty, item, start, .. }
-                if start == 0 && ty == self[item] => {}
-            Instr::ZExt { ty, value, .. }
-                if ty == self[value] => {}
-            Instr::SExt { ty, value, .. }
-                if ty == self[value] => {}
-            _ => self.stmt.push(instr),
-        }
+        self.stmt.push(instr);
     }
 
     pub fn mk_select<F1, F2>(&mut self, cond: Ref, f1: F1, f2: F2) -> Ref where
@@ -372,15 +369,18 @@ impl Builder {
 
 impl std::fmt::Display for Builder {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "entry: {} args:", self.entry)?;
-        for arg in self.args.iter() {
-            write!(f, " {}", arg)?;
+        write!(f, "entry: {}(", self.entry)?;
+        for (i, arg) in self.args.iter().enumerate() {
+            if i != 0 { write!(f, ", ")?; }
+            write!(f, "{} {}", self[*arg], arg)?;
         }
+        write!(f, ")")?;
 
         write!(f, "\nstack:")?;
         for (slot, data) in self.vars.iter() {
-            if data.kind != RefKind::Slot { continue; }
-            write!(f, " [{slot}; {}]", data.ty)?;
+            if let RefKind::Slot(size, align) = data.kind {
+                write!(f, "\n\t{slot} = alloca(align: {align}, size: {size})")?;
+            }
         }
 
         write!(f, "\n")?;

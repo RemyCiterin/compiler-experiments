@@ -1,10 +1,4 @@
 //! TODO:
-//!     - alloca
-//!     - insertvalue
-//!     - extractvalue
-//!     - constant struct
-//!     - constant array
-//!     - non-string global reference
 //!     - initialize global variables
 //!     - llvm intrisics
 //!     - exceptions handling
@@ -52,8 +46,8 @@ pub fn type_alignment(types: &Types, ty: &TypeRef) -> usize {
             (*bits+7) as usize / 8,
         Type::ArrayType { element_type, .. } =>
             type_alignment(types, &element_type),
-        Type::StructType { element_types, .. } =>
-            StructLayout::align(types, element_types.as_slice()),
+        Type::StructType { element_types, is_packed } =>
+            StructLayout::align(types, element_types.as_slice(), *is_packed),
         Type::NamedStructType { name } => {
             match types.named_struct_def(name).unwrap() {
                 NamedStructDef::Opaque => panic!("Can't infer the alignment of an opaque struct"),
@@ -75,8 +69,8 @@ pub fn type_bits(types: &Types, ty: &TypeRef) -> usize {
         Type::IntegerType { bits } => *bits as usize,
         Type::ArrayType { element_type, num_elements } =>
             *num_elements as usize * type_bits(types, &element_type),
-        Type::StructType { element_types, .. } =>
-            StructLayout::size(types, element_types.as_slice()),
+        Type::StructType { element_types, is_packed } =>
+            StructLayout::bits(types, element_types.as_slice(), *is_packed),
         Type::NamedStructType { name } => {
             match types.named_struct_def(name).unwrap() {
                 NamedStructDef::Opaque => panic!("Can't infer the size of an opaque struct"),
@@ -95,14 +89,16 @@ pub fn type_size(types: &Types, ty: &TypeRef) -> usize {
 
 pub struct StructLayout{
     pub offsets: Vec<usize>,
+    pub is_packed: bool,
     pub align: usize,
-    pub size: usize,
+    pub bits: usize,
 }
 
 impl StructLayout {
     /// Compute the alignment of a struct
-    pub fn align(types: &Types, fields: &[TypeRef]) -> usize {
-        let mut align = 0;
+    pub fn align(types: &Types, fields: &[TypeRef], is_packed: bool) -> usize {
+        if is_packed { return 1; }
+        let mut align = 1;
 
         for op in fields {
             align = usize::max(type_alignment(types, op), align);
@@ -112,55 +108,59 @@ impl StructLayout {
     }
 
     /// Compute the size of a struct
-    pub fn size(types: &Types, fields: &[TypeRef]) -> usize {
-        let mut align = 0;
+    pub fn bits(types: &Types, fields: &[TypeRef], is_packed: bool) -> usize {
+        let mut align = 1;
 
         let mut offset = 0;
         for field in fields {
-            let a = type_alignment(types, field);
-            let s = type_bits(types, field) * 8;
+            let a = if is_packed { 1 } else { type_alignment(types, field) };
+            let s = type_bits(types, field);
 
             align = usize::max(a, align);
 
-            if offset % a != 0 {
-                offset += a - (offset % a);
+            let bits_align = a * 8;
+            if !is_packed && offset % bits_align != 0 {
+                offset += bits_align - (offset % bits_align);
             }
 
             offset += s;
         }
 
-        if offset % align != 0 {
-            offset += align - (offset % align);
+        let bits_align = align * 8;
+        if offset % bits_align != 0 {
+            offset += bits_align - (offset % bits_align);
         }
 
         offset
     }
 
     /// Compute the layout of a struct
-    pub fn new(types: &Types, fields: &[TypeRef]) -> Self {
+    pub fn new(types: &Types, fields: &[TypeRef], is_packed: bool) -> Self {
         let mut offsets = Vec::new();
-        let mut align = 0;
+        let mut align = 1;
 
         let mut offset = 0;
         for field in fields {
-            let a = type_alignment(types, field);
-            let s = type_bits(types, field) * 8;
+            let a = if is_packed { 1 } else { type_alignment(types, field) };
+            let s = type_bits(types, field);
 
             align = usize::max(a, align);
 
-            if offset % a != 0 {
-                offset += a - (offset % a);
+            let bits_align = a * 8;
+            if !is_packed && offset % bits_align != 0 {
+                offset += bits_align - (offset % bits_align);
             }
 
             offsets.push(offset);
             offset += s;
         }
 
-        if offset % align != 0 {
-            offset += align - (offset % align);
+        let bits_align = align * 8;
+        if offset % bits_align != 0 {
+            offset += bits_align - (offset % bits_align);
         }
 
-        Self { align, size: offset, offsets }
+        Self { align, bits: offset, offsets, is_packed }
     }
 }
 
@@ -188,16 +188,20 @@ pub struct CfgBuilder<'a> {
 
     /// Return the name of the current LLVM block, used to compute `Constant::BlockAddress`
     current_block: Option<Name>,
+
+    /// Give a name to each global variables
+    global_vars: &'a HashMap<Name, String>,
 }
 
 
 impl<'a> CfgBuilder<'a> {
-    pub fn new(module: &'a Module) -> Self {
+    pub fn new(module: &'a Module, global_vars: &'a HashMap<Name, String>) -> Self {
         let cfg = Builder::new();
 
         Self {
             cfg,
             module,
+            global_vars,
             types: &module.types,
             labels: HashMap::new(),
             names: HashMap::new(),
@@ -358,7 +362,9 @@ impl<'a> CfgBuilder<'a> {
     }
 
     pub fn mk_undef(&mut self, bits: usize) -> Ref {
-        self.mk_uint(bits, 0)
+        let dest = self.cfg.fresh_ref(unsigned(bits));
+        self.cfg.push(Instr::Undef{dest, ty: unsigned(bits)});
+        dest
     }
 
     pub fn mk_zero(&mut self, bits: usize) -> Ref {
@@ -383,6 +389,90 @@ impl<'a> CfgBuilder<'a> {
         dest
     }
 
+    pub fn compute_path(&self, mut llvm_ty: TypeRef, indices: &[u32]) -> (TypeRef, usize) {
+        let mut start = 0;
+
+        for idx in indices.iter().cloned() {
+            loop {
+                match llvm_ty.as_ref() {
+                    Type::ArrayType { element_type, .. } => {
+                        let size = type_size(self.types, element_type);
+                        let offset: usize = idx as usize * size * 8;
+                        llvm_ty = element_type.clone();
+                        start += offset;
+                        break;
+                    }
+
+                    Type::StructType { element_types, is_packed } => {
+                        let layout =
+                            StructLayout::new(self.types, element_types, *is_packed);
+                        let offset = layout.offsets[idx as usize];
+                        llvm_ty = element_types[idx as usize].clone();
+                        start += offset;
+                        break;
+                    }
+
+                    Type::NamedStructType { name } => {
+                        match self.types.named_struct_def(name).unwrap() {
+                            NamedStructDef::Opaque =>
+                                panic!("Can't infer the layout of an opaque struct"),
+                            NamedStructDef::Defined(def) => llvm_ty = def.clone(),
+                        }
+                    }
+
+                    _ => panic!("not an aggregate type {llvm_ty}"),
+                }
+            }
+        }
+
+        return (llvm_ty, start);
+    }
+
+    pub fn mk_extract(&mut self, op: &llvm_ir::instruction::ExtractValue) {
+        let (llvm_ty, start) =
+            self.compute_path(op.aggregate.get_type(self.types), &op.indices);
+
+        let ty = type_repr(self.types, &llvm_ty);
+        let dest = self.cfg.fresh_ref(ty);
+
+        let value = self.mk_operand(&op.aggregate);
+        self.cfg.push(Instr::GetBits { dest, ty, value, start });
+        self.new_value_with(op.dest.clone(), dest);
+    }
+
+    pub fn mk_aggregate(&mut self, llvm_ty: TypeRef, values: &[ConstantRef]) -> Ref {
+        let mut value = self.mk_undef(type_bits(self.types, &llvm_ty));
+        let ty = type_repr(self.types, &llvm_ty);
+
+        for (i, llvm_item) in values.iter().enumerate() {
+            let (_, start) =
+                self.compute_path(llvm_ty.clone(), &[i as u32]);
+            let dest = self.cfg.fresh_ref(ty);
+            let item = self.mk_constant(llvm_item);
+            self.cfg.push(Instr::SetBits { dest, ty, value, item, start });
+            value = dest;
+        }
+
+        value
+    }
+
+    pub fn mk_insert(&mut self, op: &llvm_ir::instruction::InsertValue) {
+        let (llvm_ty, start) =
+            self.compute_path(op.aggregate.get_type(self.types), &op.indices);
+
+        assert!(
+            type_repr(self.types, &llvm_ty) ==
+            type_repr(self.types, &op.element.get_type(self.types)));
+
+        let ty = type_repr(self.types, &op.aggregate.get_type(self.types));
+
+        let dest = self.cfg.fresh_ref(ty);
+        let item = self.mk_operand(&op.element);
+        let value = self.mk_operand(&op.aggregate);
+        self.cfg.push(Instr::SetBits { dest, ty, value, item, start });
+        self.new_value_with(op.dest.clone(), dest);
+    }
+
     pub fn mk_gep(&mut self, ptr: Ref, ty: &TypeRef, indices: &[Operand]) -> Ref {
         let rest = &indices[1..indices.len()];
         let index: Operand = indices[0].clone();
@@ -405,12 +495,17 @@ impl<'a> CfgBuilder<'a> {
         let rest = &indices[1..indices.len()];
 
         match ty.as_ref() {
-            Type::StructType { element_types, .. } => {
-                let layout = StructLayout::new(self.types, &element_types);
+            Type::StructType { element_types, is_packed } => {
+                let layout =
+                    StructLayout::new(self.types, &element_types, *is_packed);
                 let idx = operand_as_int(index).unwrap();
 
+                if layout.offsets[idx as usize] % 8 != 0 {
+                    panic!("We can't run GEP on {idx} from {ty} because it is not byte aligned");
+                }
+
                 let offset =
-                    self.mk_uint(32, layout.offsets[idx as usize]);
+                    self.mk_uint(32, layout.offsets[idx as usize] / 8);
                 let ret = self.mk_ptr_add(ptr, offset);
 
                 return
@@ -514,28 +609,20 @@ impl<'a> CfgBuilder<'a> {
                 self.mk_undef(type_bits(self.types, ty)),
             Constant::AggregateZero(ty) =>
                 self.mk_zero(type_bits(self.types, ty)),
-            Constant::GlobalReference{name: Name::Name(name), ..} =>
-                self.mk_global_reference(name.to_string()),
-            Constant::GlobalReference{name, ..} => {
-                println!("name: {name}");
-                let alias = self.module.get_global_var_by_name(name);
-                //self.mk_constant(&alias.unwrap().)
-                println!("{:?}", alias);
-                //panic!()
-                self.mk_uint(32, 0)
-            }
+            Constant::GlobalReference{name, ..} =>
+                self.mk_global_reference(self.global_vars[name].clone()),
             Constant::BlockAddress => {
                 let id = self.current_block.clone().unwrap();
                 let val = self.block_address(id) as usize;
                 self.mk_uint(32, val)
             }
-            Constant::Struct {name, values, ..} => {
-                println!("TODO: add struct constants");
-                self.mk_uint(32, 0)
+            Constant::Struct {values, ..} => {
+                let llvm_ty = cst.get_type(self.types);
+                self.mk_aggregate(llvm_ty, values)
             }
-            Constant::Array { element_type, elements } => {
-                println!("TODO: add array constants");
-                self.mk_uint(32, 0)
+            Constant::Array { elements, .. } => {
+                let llvm_ty = cst.get_type(self.types);
+                self.mk_aggregate(llvm_ty, elements)
             }
             Constant::TokenNone =>
                 todo!(),
@@ -778,16 +865,22 @@ impl<'a> CfgBuilder<'a> {
                 | Instruction::ExtractElement(..)
                 => panic!("vector are not implemented yet"),
 
-            Instruction::ExtractValue(_op) => {
-                println!("TODO: add instruction {instr}");
+            Instruction::ExtractValue(op) => {
+                self.mk_extract(op);
             }
 
-            Instruction::InsertValue(_op) => {
-                println!("TODO: add instruction {instr}");
+            Instruction::InsertValue(op) => {
+                self.mk_insert(op);
             }
 
-            Instruction::Alloca(_op) => {
-                println!("TODO: add instruction {instr}");
+            Instruction::Alloca(op) => {
+                let elems = operand_as_int(op.num_elements.clone()).unwrap() as usize;
+                let size = type_size(self.types, &op.allocated_type) * elems;
+
+                let mut align = type_alignment(self.types, &op.allocated_type);
+                align = usize::max(op.alignment as usize, align);
+                let dest = self.cfg.fresh_slot(size, align);
+                self.new_value_with(op.dest.clone(), dest);
             }
 
             Instruction::Load(op) => {
@@ -803,7 +896,7 @@ impl<'a> CfgBuilder<'a> {
             Instruction::Store(op) => {
                 let value: Ref = self.mk_operand(&op.value);
                 let pointer: Ref = self.mk_operand(&op.address);
-                let align = type_alignment(self.types, &op.address.get_type(self.types));
+                let align = type_alignment(self.types, &op.value.get_type(self.types));
                 self.cfg.push(Instr::Store{ val: value, addr: pointer, volatile: false, align });
             }
 
@@ -870,14 +963,13 @@ impl<'a> CfgBuilder<'a> {
             Terminator::Ret(op) => {
                 match &op.return_operand {
                     None => {
-                        let zero = self.mk_uint(32, 0);
-                        self.cfg.push(Instr::Return(zero));
+                        self.cfg.push(Instr::Return(None));
                         self.finish_block();
                     }
 
                     Some(val) => {
                         let value = self.mk_operand(&val);
-                        self.cfg.push(Instr::Return(value));
+                        self.cfg.push(Instr::Return(Some(value)));
                         self.finish_block();
                     }
                 }
@@ -903,8 +995,7 @@ impl<'a> CfgBuilder<'a> {
             }
 
             Terminator::Unreachable(..) => {
-                let zero = self.mk_uint(32, 0);
-                self.cfg.push(Instr::Return(zero));
+                self.cfg.push(Instr::Return(None));
                 self.finish_block();
             }
 
@@ -1019,17 +1110,38 @@ pub fn run() {
 
     println!("Module name: {:?}", module.name);
 
+    let mut globals_vars: HashMap<Name, String> = HashMap::new();
+    let mut anon_counter: usize = 0;
+
     for var in module.global_vars.iter() {
+        match &var.name {
+            Name::Number(..) => {
+                globals_vars.insert(var.name.clone(), format!("__anon_var_{anon_counter}"));
+                anon_counter += 1;
+            }
+            Name::Name(s) =>
+                _ = globals_vars.insert(var.name.clone(), s.to_string()),
+        }
+
         println!("variable: {}", var.name);
         println!("  type: {}", var.ty.as_ref());
         println!("  {:?}", var.initializer);
     }
 
     for fun in module.functions.iter() {
+        _ = globals_vars.insert(Name::Name(Box::new(fun.name.clone())), fun.name.clone());
+    }
+
+    for fun in module.func_declarations.iter() {
+        _ = globals_vars.insert(Name::Name(Box::new(fun.name.clone())), fun.name.clone());
+    }
+
+
+    for fun in module.functions.iter() {
         if fun.basic_blocks.len() == 0 { continue; }
         println!("\n\n\n============== {} ==============", fun.name);
 
-        let mut builder = CfgBuilder::new(&module);
+        let mut builder = CfgBuilder::new(&module, &globals_vars);
         let begin_fun = builder.label(fun.basic_blocks[0].name.clone());
         builder.cfg.push(Instr::Jump(begin_fun));
         builder.finish_block();
