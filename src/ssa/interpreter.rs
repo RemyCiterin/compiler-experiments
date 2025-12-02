@@ -104,6 +104,8 @@ impl<'a> Interpreter<'a> {
                         match word {
                             Word::Int(i) => *i,
                             Word::Addr(s, i) => symbols[s] + i,
+                            Word::Byte(_) =>
+                                panic!("byte object are not allowed in the interpreter now"),
                         }
                     })
                     .collect();

@@ -426,7 +426,12 @@ impl<A: Arch> std::fmt::Display for LtlSection<A> {
             Self::Text(cfg) =>  write!(f, "{cfg}"),
             Self::Data(items) => {
                 for x in items.iter() {
-                    write!(f, "\n  .word {x}")?;
+                    match x {
+                        Word::Byte(_) =>
+                            write!(f, "\n  .word {x}")?,
+                        _ =>
+                            write!(f, "\n  .word {x}")?,
+                    }
                 }
 
                 write!(f, "\n")?;

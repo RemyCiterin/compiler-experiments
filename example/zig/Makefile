@@ -1,11 +1,11 @@
 
-TARGT = -target riscv32-freestanding-none
+TARGET = -target riscv32-freestanding-none
 OPT = -O ReleaseFast
 
 .PHONY: all
 all:
 	zig build-exe test.zig -femit-llvm-bc $(TARGET) $(OPT)
-	zig build-exe test.zig -femit-llvm-ir $(TARGET) $(OPT)
+	llvm-dis test.bc
 
 .PHONY: spirv
 spirv:

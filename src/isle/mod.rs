@@ -1,3 +1,4 @@
+pub mod out_of_ssa;
 pub mod generated;
 pub mod reg;
 
@@ -23,6 +24,7 @@ pub type CCond = crate::ssa::CCond;
 pub type I = crate::ssa::Instr<COp,CCond>;
 pub type Cfg = crate::ssa::Cfg<COp,CCond>;
 
+pub type StackLayout = SparseSecondaryMap<Slot, i32>;
 
 impl std::fmt::Display for Reg {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -64,14 +66,16 @@ pub trait MachineInstr {
     /// Generate a list of labels of an instruction
     fn targets(&self) -> Vec<Label>;
 
-    /// Generate a list of slots of an instruction
-    fn slots(&self) -> Vec<Slot>;
-
     /// Generate a list of (mutable) labels of an instruction
     fn targets_mut(&mut self) -> Vec<&mut Label>;
 
-    /// Generate a list of (mutable) slots of an instruction
-    fn slots_mut(&mut self) -> Vec<&mut Slot>;
+    // /// Generate the stack layout for the architecture and the instructions to push/pop the stack
+    // /// frame at the entry of a function. In case push and pop contains multiple instruction, it's
+    // /// better to use one level of identation. It also take a boolean as argument to known if the
+    // /// procedure contains call instruction, otherwise some architecture may not store the return
+    // /// address and save some space in the stack
+    // fn gen_layout(stack: &slotmap::SlotMap<Slot, SlotKind>, contain_calls: bool) ->
+    //     (String, String, StackLayout);
 }
 
 impl std::fmt::Display for RvOpRR {
@@ -426,31 +430,6 @@ impl MachineInstr for MInstr {
         }
     }
 
-    fn slots(&self) -> Vec<Slot> {
-        match self {
-            MInstr::StoreLocal{addr, ..}
-            | MInstr::LoadLocal{addr, ..}
-            | MInstr::MoveSlot{slot: addr, ..} =>
-                vec![*addr],
-            MInstr::Call{..}
-            | MInstr::BranchR{..}
-            | MInstr::BranchRR{..}
-            | MInstr::Jump{..}
-            | MInstr::Phi{..}
-            | MInstr::OpRR{..}
-            | MInstr::Store{..}
-            | MInstr::OpRI{..}
-            | MInstr::OpR{..}
-            | MInstr::Load{..}
-            | MInstr::Return{..}
-            | MInstr::Move{..}
-            | MInstr::Nop
-            | MInstr::MoveAddr{..}
-            | MInstr::MoveInt{..} =>
-                vec![]
-        }
-    }
-
     fn targets_mut(&mut self) -> Vec<&mut Label> {
         match self {
             MInstr::BranchR{l1, l2, ..}
@@ -472,31 +451,6 @@ impl MachineInstr for MInstr {
             | MInstr::MoveSlot{..}
             | MInstr::MoveAddr{..}
             | MInstr::LoadLocal{..}
-            | MInstr::MoveInt{..} =>
-                vec![]
-        }
-    }
-
-    fn slots_mut(&mut self) -> Vec<&mut Slot> {
-        match self {
-            MInstr::StoreLocal{addr, ..}
-            | MInstr::LoadLocal{addr, ..}
-            | MInstr::MoveSlot{slot: addr, ..} =>
-                vec![addr],
-            MInstr::Call{..}
-            | MInstr::BranchR{..}
-            | MInstr::BranchRR{..}
-            | MInstr::Jump{..}
-            | MInstr::Phi{..}
-            | MInstr::OpRR{..}
-            | MInstr::Store{..}
-            | MInstr::OpRI{..}
-            | MInstr::OpR{..}
-            | MInstr::Load{..}
-            | MInstr::Return{..}
-            | MInstr::Move{..}
-            | MInstr::Nop
-            | MInstr::MoveAddr{..}
             | MInstr::MoveInt{..} =>
                 vec![]
         }
@@ -526,16 +480,17 @@ impl std::ops::Index<Label> for Rtl {
 }
 
 impl Rtl {
-    pub fn new() -> Self {
+    pub fn new(stack: SlotMap<Slot, SlotKind>) -> Self {
     let mut blocks = SlotMap::with_key();
         let mut preds = SecondaryMap::new();
         let entry: Label = blocks.insert(vec![]);
         preds.insert(entry, BTreeSet::new());
+
         Self {
-            stack: SlotMap::with_key(),
             vars: SlotMap::with_key(),
             args: vec![],
             blocks,
+            stack,
             preds,
             entry
         }
@@ -582,6 +537,14 @@ impl Rtl {
         self.args.push(arg);
         arg
     }
+
+    pub fn iter_blocks(&self) -> slotmap::basic::Iter<'_, Label, Vec<MInstr>> {
+        self.blocks.iter()
+    }
+
+    pub fn iter_vars(&self) -> slotmap::basic::Iter<'_, Var, VarKind> {
+        self.vars.iter()
+    }
 }
 
 pub struct Translator{
@@ -608,25 +571,17 @@ pub struct Translator{
     /// Map all the variables from `cfg` into variables from `rtl`
     vars: SecondaryMap<Var, Var>,
 
-    /// Map all the slots from `cfg` into slots from `rtl`
-    slots: SecondaryMap<Slot, Slot>,
-
     /// Map all the labels from `cfg` into labels from `rtl`
     labels: SecondaryMap<Label, Label>,
 }
 
 impl Translator {
     pub fn new(cfg: Cfg) -> Self {
-        let mut rtl = Rtl::new();
+        let mut rtl = Rtl::new(cfg.stack.clone());
 
         let mut used = SecondaryMap::new();
         let mut vars = SecondaryMap::new();
-        let mut slots = SecondaryMap::new();
         let mut labels = SecondaryMap::new();
-
-        for (slot,kind) in cfg.stack.iter() {
-            slots.insert(slot, rtl.fresh_slot(*kind));
-        }
 
         labels.insert(cfg.entry(), rtl.entry());
         for (label,_) in cfg.iter_blocks() {
@@ -660,7 +615,6 @@ impl Translator {
             instr_stmt: vec![],
             block_stmt: vec![],
             labels,
-            slots,
             vars,
             used,
             rtl,
@@ -677,10 +631,6 @@ impl Translator {
         for op in instr.destinations_mut() {
             if !self.vars.contains_key(*op) { println!("{}", *op); }
             *op = self.vars[*op];
-        }
-
-        for slot in instr.slots_mut() {
-            *slot = self.slots[*slot];
         }
 
         for label in instr.targets_mut() {

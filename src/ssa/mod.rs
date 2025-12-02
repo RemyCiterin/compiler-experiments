@@ -729,6 +729,7 @@ impl<Op: Operation, Cond: Condition> Cfg<Op, Cond> {
 pub enum Word {
     Addr(String, i32),
     Int(i32),
+    Byte(u8),
 }
 
 pub enum Section<Op, Cond> {
@@ -785,6 +786,7 @@ impl std::fmt::Display for Word {
         match self {
             Self::Addr(s, offset) =>  write!(f, "{s}+{offset}"),
             Self::Int(i) => write!(f, "{i}"),
+            Self::Byte(x) => write!(f, "{x}"),
         }
     }
 }

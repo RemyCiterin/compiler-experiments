@@ -122,7 +122,7 @@ impl<L: Length, C> Length for ContextIterWrapper<L, C> {
         self.iter.len()
     }
 }
-           
+
 
 /// Internal type RvOpRR: defined at rv32.isle line 3.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]

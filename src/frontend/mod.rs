@@ -1,5 +1,6 @@
 //! This module define a higher level intermediate representation before ssa/mod.rs
 
+pub mod globals;
 pub mod llvm;
 
 use slotmap::*;

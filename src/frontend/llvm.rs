@@ -35,15 +35,20 @@ pub fn type_repr(types: &Types, ty: &TypeRef) -> TYPE {
     };
 }
 
+fn upper_power_two(x: usize) -> usize {
+    if x < 2 { return 1; }
+    return 1usize << (usize::ilog2(x-1)+1);
+}
+
 /// Alignment of an element of a given type in memory
 pub fn type_alignment(types: &Types, ty: &TypeRef) -> usize {
     match ty.as_ref() {
-        Type::VoidType => 0,
+        Type::VoidType => 1,
         Type::LabelType => 4,
         Type::FuncType { .. } => 4,
         Type::PointerType { .. } => 4,
         Type::IntegerType { bits } =>
-            (*bits+7) as usize / 8,
+            upper_power_two((*bits+7) as usize / 8),
         Type::ArrayType { element_type, .. } =>
             type_alignment(types, &element_type),
         Type::StructType { element_types, is_packed } =>
@@ -164,6 +169,7 @@ impl StructLayout {
     }
 }
 
+#[allow(dead_code)]
 pub struct CfgBuilder<'a> {
     // Control flow raph under construction
     cfg: Builder,
@@ -601,8 +607,8 @@ impl<'a> CfgBuilder<'a> {
                     .collect();
                 self.mk_gep(addr, &gep.indexed_type, &indices)
             }
-            Constant::Null(..) =>
-                self.mk_uint(32, 0),
+            Constant::Null(ty) =>
+                self.mk_zero(type_bits(self.types, ty)),
             Constant::Undef(ty) =>
                 self.mk_undef(type_bits(self.types, ty)),
             Constant::Poison(ty) =>
@@ -645,7 +651,7 @@ impl<'a> CfgBuilder<'a> {
         match operand {
             Operand::LocalOperand { name, ty } =>
                 if let Some(op) = self.names.get(name) { op.clone() }
-                else { println!("{}", type_size(self.types, ty)); self.new_value(name.clone(), ty.clone()) },
+                else { self.new_value(name.clone(), ty.clone()) },
             Operand::ConstantOperand(cst) =>
                 self.mk_constant(cst),
             Operand::MetadataOperand =>
@@ -884,7 +890,9 @@ impl<'a> CfgBuilder<'a> {
             }
 
             Instruction::Load(op) => {
-                let align = type_alignment(self.types, &op.loaded_ty.get_type(self.types));
+                let mut align =
+                    type_alignment(self.types, &op.loaded_ty.get_type(self.types));
+                align = usize::max(align, op.alignment as usize);
                 let ty = type_repr(self.types, &op.loaded_ty.get_type(self.types));
                 let pointer: Ref = self.mk_operand(&op.address);
                 let dest = self.cfg.fresh_ref(ty);
@@ -896,7 +904,9 @@ impl<'a> CfgBuilder<'a> {
             Instruction::Store(op) => {
                 let value: Ref = self.mk_operand(&op.value);
                 let pointer: Ref = self.mk_operand(&op.address);
-                let align = type_alignment(self.types, &op.value.get_type(self.types));
+                let mut align =
+                    type_alignment(self.types, &op.value.get_type(self.types));
+                align = usize::max(align, op.alignment as usize);
                 self.cfg.push(Instr::Store{ val: value, addr: pointer, volatile: false, align });
             }
 

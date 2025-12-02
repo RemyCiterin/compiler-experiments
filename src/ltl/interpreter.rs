@@ -107,20 +107,28 @@ impl<'a, A: Arch> Interpreter<'a, A> {
 
         for (symbol, section) in table.symbols.iter() {
             if let LtlSection::Data(vec) = section {
+                let offsets: Vec<i32> =
+                    vec.iter()
+                    .map(|word| {
+                        if matches!(word, Word::Byte(_)) { 1 } else { 4 }
+                    }).collect();
+
                 let vec: Vec<i32> =
                     vec.iter()
                     .map(|word| {
                         match word {
                             Word::Int(i) => *i,
+                            Word::Byte(i) => *i as i32,
                             Word::Addr(s, i) => symbols[s] + i,
                         }
                     })
                     .collect();
                 let mut offset = symbols[symbol];
 
-                for x in vec {
+                for (x, off) in vec.into_iter().zip(offsets) {
+                    assert!(off == 4); // Byte is not supported now
                     memory.insert(offset / 4, x);
-                    offset += 4;
+                    offset += off;
                 }
             }
         }
@@ -419,20 +427,28 @@ impl<'a> BtlInterpreter<'a> {
 
         for (symbol, section) in table.symbols.iter() {
             if let BtlSection::Data(vec) = section {
+                let offsets: Vec<i32> =
+                    vec.iter()
+                    .map(|word| {
+                        if matches!(word, Word::Byte(_)) { 1 } else { 4 }
+                    }).collect();
+
                 let vec: Vec<i32> =
                     vec.iter()
                     .map(|word| {
                         match word {
                             Word::Int(i) => *i,
+                            Word::Byte(i) => *i as i32,
                             Word::Addr(s, i) => symbols[s] + i,
                         }
                     })
                     .collect();
                 let mut offset = symbols[symbol];
 
-                for x in vec {
+                for (x, off) in vec.into_iter().zip(offsets) {
+                    assert!(off == 4); // Byte is not supported now
                     memory.insert(offset / 4, x);
-                    offset += 4;
+                    offset += off;
                 }
             }
         }

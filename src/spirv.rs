@@ -620,6 +620,7 @@ impl CfgBuilder {
                     let id = self.cfg.fresh_var();
                     val.push(id);
                     match s {
+                        SWord::Byte(_ ) => unreachable!(),
                         SWord::Int(i) => _ = self.stmt.push(Instr::Move(id, Lit::Int(*i))),
                         SWord::Addr(name, offset) => if *offset == 0 {
                             self.stmt.push(Instr::Move(id, Lit::Addr(name.clone())));
