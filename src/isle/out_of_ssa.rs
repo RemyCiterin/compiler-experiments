@@ -27,18 +27,18 @@ impl Conventionalize {
             let mut stmt: Vec<MInstr> = cfg[block].iter().cloned().collect();
 
             for instr in stmt.iter_mut() {
-                if let MInstr::Phi{dest, args} = instr {
+                if let Some((_, args)) = instr.is_phi_mut() {
                     let mut new_vars: Vec<(Lit, Label)> = vec![];
-                    for (old_lit, label) in args {
+                    for (old_lit, label) in args.iter().cloned() {
                         // This Phi instruction reference a deleted block
-                        if !self.copies.contains_key(*label) {continue;}
+                        if !self.copies.contains_key(label) {continue;}
 
                         let new_var = cfg.fresh_var();
-                        self.copies[*label].push((new_var, old_lit.clone()));
-                        new_vars.push((Lit::Var(new_var), *label));
+                        self.copies[label].push((new_var, old_lit.clone()));
+                        new_vars.push((Lit::Var(new_var), label));
                     }
 
-                    *instr = MInstr::Phi{dest: *dest, args: new_vars};
+                    *args = new_vars;
                 }
             }
 
@@ -86,8 +86,8 @@ pub fn out_of_ssa(cfg: &mut Rtl) {
     // a union find data structure
     for (_, block) in cfg.iter_blocks() {
         for instr in block.iter() {
-            if let MInstr::Phi{dest, args} = instr {
-                let root = uf.find(dest.as_virt().unwrap());
+            if let Some((dest, args)) = instr.is_phi() {
+                let root = uf.find(*dest);
 
                 for (v, _) in args.iter() {
                     uf.merge(root, uf.find(v.as_var().unwrap()));
@@ -103,7 +103,7 @@ pub fn out_of_ssa(cfg: &mut Rtl) {
         let mut stmt: Vec<MInstr> = vec![];
 
         for mut ins in cfg[block].iter().cloned() {
-            if matches!(ins, MInstr::Phi{..}) { continue; }
+            if ins.is_phi().is_some() { continue; }
 
             for x in ins.destinations_mut() {
                 *x = uf.find(*x);

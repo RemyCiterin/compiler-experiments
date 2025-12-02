@@ -3,8 +3,6 @@ pub mod generated;
 pub mod reg;
 
 use crate::ssa::{Lit, Var, VarKind, SlotKind};
-use std::collections::BTreeSet;
-//use smallvec::*;
 use slotmap::*;
 
 pub type Instr = crate::ssa::InstrId;
@@ -458,15 +456,13 @@ impl MachineInstr for MInstr {
 }
 
 pub struct Rtl {
-    blocks: SlotMap<Label, Vec<MInstr>>,
+    blocks: SecondaryMap<Label, Vec<MInstr>>,
 
     entry: Label,
 
     vars: SlotMap<Var, VarKind>,
 
     pub stack: SlotMap<Slot, SlotKind>,
-
-    preds: SecondaryMap<Label, BTreeSet<Label>>,
 
     pub args: Vec<Var>,
 }
@@ -480,19 +476,18 @@ impl std::ops::Index<Label> for Rtl {
 }
 
 impl Rtl {
-    pub fn new(stack: SlotMap<Slot, SlotKind>) -> Self {
-    let mut blocks = SlotMap::with_key();
-        let mut preds = SecondaryMap::new();
-        let entry: Label = blocks.insert(vec![]);
-        preds.insert(entry, BTreeSet::new());
+    pub fn new(cfg: &Cfg) -> Self {
+        let blocks =
+            cfg.iter_blocks()
+            .map(|(l,_)| (l,vec![]))
+            .collect();
 
         Self {
             vars: SlotMap::with_key(),
+            stack: cfg.stack.clone(),
+            entry: cfg.entry(),
             args: vec![],
             blocks,
-            stack,
-            preds,
-            entry
         }
     }
 
@@ -500,27 +495,12 @@ impl Rtl {
         self.entry
     }
 
-    pub fn fresh_label(&mut self) -> Label {
-        let label = self.blocks.insert(vec![]);
-        self.preds.insert(label, BTreeSet::new());
-        label
-    }
+//    pub fn fresh_label(&mut self) -> Label {
+//        let label = self.blocks.insert(vec![]);
+//        label
+//    }
 
     pub fn set_block_stmt(&mut self, label: Label, stmt: Vec<MInstr>) {
-        let old = std::mem::take(&mut self.blocks[label]);
-
-        for mi in old {
-            for next in mi.targets().iter() {
-                self.preds[*next].remove(&label);
-            }
-        }
-
-        for mi in stmt.iter() {
-            for next in mi.targets().iter() {
-                self.preds[*next].insert(label);
-            }
-        }
-
         self.blocks[label] = stmt;
     }
 
@@ -538,7 +518,7 @@ impl Rtl {
         arg
     }
 
-    pub fn iter_blocks(&self) -> slotmap::basic::Iter<'_, Label, Vec<MInstr>> {
+    pub fn iter_blocks(&self) -> slotmap::secondary::Iter<'_, Label, Vec<MInstr>> {
         self.blocks.iter()
     }
 
@@ -570,24 +550,14 @@ pub struct Translator{
 
     /// Map all the variables from `cfg` into variables from `rtl`
     vars: SecondaryMap<Var, Var>,
-
-    /// Map all the labels from `cfg` into labels from `rtl`
-    labels: SecondaryMap<Label, Label>,
 }
 
 impl Translator {
     pub fn new(cfg: Cfg) -> Self {
-        let mut rtl = Rtl::new(cfg.stack.clone());
+        let mut rtl = Rtl::new(&cfg);
 
         let mut used = SecondaryMap::new();
         let mut vars = SecondaryMap::new();
-        let mut labels = SecondaryMap::new();
-
-        labels.insert(cfg.entry(), rtl.entry());
-        for (label,_) in cfg.iter_blocks() {
-            if label == cfg.entry() { continue; }
-            labels.insert(label, rtl.fresh_label());
-        }
 
         for var in cfg.args.iter().copied() {
             vars.insert(var, rtl.fresh_arg());
@@ -614,7 +584,6 @@ impl Translator {
             current_instr: (cfg.entry(),0),
             instr_stmt: vec![],
             block_stmt: vec![],
-            labels,
             vars,
             used,
             rtl,
@@ -631,16 +600,6 @@ impl Translator {
         for op in instr.destinations_mut() {
             if !self.vars.contains_key(*op) { println!("{}", *op); }
             *op = self.vars[*op];
-        }
-
-        for label in instr.targets_mut() {
-            *label = self.labels[*label];
-        }
-
-        if let Some((_,args)) = instr.is_phi_mut() {
-            for (_,l) in args.iter_mut() {
-                *l = self.labels[*l];
-            }
         }
     }
 
@@ -675,7 +634,7 @@ impl Translator {
             self.remap(mi);
         }
 
-        self.rtl.set_block_stmt(self.labels[block], stmt);
+        self.rtl.set_block_stmt(block, stmt);
     }
 
     pub fn translate(mut self) -> Rtl {
